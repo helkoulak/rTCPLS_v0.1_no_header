@@ -1,0 +1,2 @@
+run --package rustls-examples --bin tlsclient-mio --  --cafile test-ca/rsa/ca.cert -p 8443 localhost --verbose
+run --package rustls-examples --bin tlsserver-mio -- --verbose --certs test-ca/rsa/end.fullchain --key test-ca/rsa/end.rsa -p 8443 echo
