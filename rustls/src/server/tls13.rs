@@ -153,19 +153,15 @@ mod client_hello {
             mut sigschemes_ext: Vec<SignatureScheme>,
         ) -> hs::NextStateOrError {
             if client_hello.compression_methods.len() != 1 {
-                return Err(cx.common.send_fatal_alert(
-                    AlertDescription::IllegalParameter,
-                    PeerMisbehaved::OfferedIncorrectCompressions,
-                ));
+                return Err(cx
+                    .common
+                    .illegal_param(PeerMisbehaved::OfferedIncorrectCompressions));
             }
 
             let groups_ext = client_hello
                 .get_namedgroups_extension()
                 .ok_or_else(|| {
-                    cx.common.send_fatal_alert(
-                        AlertDescription::HandshakeFailure,
-                        PeerIncompatible::NamedGroupsExtensionRequired,
-                    )
+                    hs::incompatible(cx.common, PeerIncompatible::NamedGroupsExtensionRequired)
                 })?;
 
             let tls13_schemes = sign::supported_sign_tls13();
@@ -174,29 +170,22 @@ mod client_hello {
             let shares_ext = client_hello
                 .get_keyshare_extension()
                 .ok_or_else(|| {
-                    cx.common.send_fatal_alert(
-                        AlertDescription::HandshakeFailure,
-                        PeerIncompatible::KeyShareExtensionRequired,
-                    )
+                    hs::incompatible(cx.common, PeerIncompatible::KeyShareExtensionRequired)
                 })?;
 
             if client_hello.has_keyshare_extension_with_duplicates() {
-                return Err(cx.common.send_fatal_alert(
-                    AlertDescription::IllegalParameter,
-                    PeerMisbehaved::OfferedDuplicateKeyShares,
-                ));
+                return Err(cx
+                    .common
+                    .illegal_param(PeerMisbehaved::OfferedDuplicateKeyShares));
             }
 
             let early_data_requested = client_hello.early_data_extension_offered();
 
             // EarlyData extension is illegal in second ClientHello
             if self.done_retry && early_data_requested {
-                return Err({
-                    cx.common.send_fatal_alert(
-                        AlertDescription::IllegalParameter,
-                        PeerMisbehaved::EarlyDataAttemptedInSecondClientHello,
-                    )
-                });
+                return Err(cx
+                    .common
+                    .illegal_param(PeerMisbehaved::EarlyDataAttemptedInSecondClientHello));
             }
 
             // choose a share that we support
@@ -226,10 +215,9 @@ mod client_hello {
 
                     if let Some(group) = retry_group_maybe {
                         if self.done_retry {
-                            return Err(cx.common.send_fatal_alert(
-                                AlertDescription::IllegalParameter,
-                                PeerMisbehaved::RefusedToFollowHelloRetryRequest,
-                            ));
+                            return Err(cx
+                                .common
+                                .illegal_param(PeerMisbehaved::RefusedToFollowHelloRetryRequest));
                         }
 
                         emit_hello_retry_request(
@@ -264,8 +252,8 @@ mod client_hello {
                         };
                     }
 
-                    return Err(cx.common.send_fatal_alert(
-                        AlertDescription::HandshakeFailure,
+                    return Err(hs::incompatible(
+                        cx.common,
                         PeerIncompatible::NoKxGroupsInCommon,
                     ));
                 }
@@ -277,24 +265,22 @@ mod client_hello {
 
             if let Some(psk_offer) = client_hello.get_psk() {
                 if !client_hello.check_psk_ext_is_last() {
-                    return Err(cx.common.send_fatal_alert(
-                        AlertDescription::IllegalParameter,
-                        PeerMisbehaved::PskExtensionMustBeLast,
-                    ));
+                    return Err(cx
+                        .common
+                        .illegal_param(PeerMisbehaved::PskExtensionMustBeLast));
                 }
 
                 if psk_offer.binders.is_empty() {
-                    return Err(cx.common.send_fatal_alert(
-                        AlertDescription::DecodeError,
+                    return Err(hs::decode_error(
+                        cx.common,
                         PeerMisbehaved::MissingBinderInPskExtension,
                     ));
                 }
 
                 if psk_offer.binders.len() != psk_offer.identities.len() {
-                    return Err(cx.common.send_fatal_alert(
-                        AlertDescription::IllegalParameter,
-                        PeerMisbehaved::PskExtensionWithMismatchedIdsAndBinders,
-                    ));
+                    return Err(cx
+                        .common
+                        .illegal_param(PeerMisbehaved::PskExtensionWithMismatchedIdsAndBinders));
                 }
 
                 for (i, psk_id) in psk_offer.identities.iter().enumerate() {
@@ -316,10 +302,9 @@ mod client_hello {
                         &resume.master_secret.0,
                         psk_offer.binders[i].as_ref(),
                     ) {
-                        return Err(cx.common.send_fatal_alert(
-                            AlertDescription::DecryptError,
-                            PeerMisbehaved::IncorrectBinder,
-                        ));
+                        cx.common
+                            .send_fatal_alert(AlertDescription::DecryptError);
+                        return Err(PeerMisbehaved::IncorrectBinder.into());
                     }
 
                     chosen_psk_index = Some(i);
@@ -659,7 +644,7 @@ mod client_hello {
         hello: &ClientHelloPayload,
         resumedata: Option<&persist::ServerSessionValue>,
         extra_exts: Vec<ServerExtension>,
-        config: &ServerConfig,
+        config: & ServerConfig,
     ) -> Result<EarlyDataDecision, Error> {
         let mut ep = hs::ExtensionProcessing::new();
         ep.process_common(
@@ -675,6 +660,13 @@ mod client_hello {
         let early_data = decide_if_early_data_allowed(cx, hello, resumedata, suite, config);
         if early_data == EarlyDataDecision::Accepted {
             ep.exts.push(ServerExtension::EarlyData);
+        }
+
+        // Send TCPLS extension in EE if found in CH
+
+        if hello.tcpls_extension_offered() {
+            ep.exts.push(ServerExtension::TCPLS);
+
         }
 
         let ee = Message {
@@ -795,10 +787,7 @@ mod client_hello {
         let signer = signing_key
             .choose_scheme(schemes)
             .ok_or_else(|| {
-                common.send_fatal_alert(
-                    AlertDescription::HandshakeFailure,
-                    PeerIncompatible::NoSignatureSchemesInCommon,
-                )
+                hs::incompatible(common, PeerIncompatible::NoSignatureSchemesInCommon)
             })?;
 
         let scheme = signer.scheme();
@@ -921,10 +910,9 @@ impl State<ServerConnectionData> for ExpectCertificate {
                     }));
                 }
 
-                return Err(cx.common.send_fatal_alert(
-                    AlertDescription::CertificateRequired,
-                    Error::NoCertificatesPresented,
-                ));
+                cx.common
+                    .send_fatal_alert(AlertDescription::CertificateRequired);
+                return Err(Error::NoCertificatesPresented);
             }
             Some(chain) => chain,
         };
@@ -1017,10 +1005,11 @@ impl State<ServerConnectionData> for ExpectEarlyData {
                     .take_received_plaintext(payload)
                 {
                     true => Ok(self),
-                    false => Err(cx.common.send_fatal_alert(
-                        AlertDescription::UnexpectedMessage,
-                        PeerMisbehaved::TooMuchEarlyDataReceived,
-                    )),
+                    false => {
+                        cx.common
+                            .send_fatal_alert(AlertDescription::UnexpectedMessage);
+                        Err(PeerMisbehaved::TooMuchEarlyDataReceived.into())
+                    }
                 }
             }
             MessagePayload::Handshake {
@@ -1165,9 +1154,10 @@ impl State<ServerConnectionData> for ExpectFinished {
 
         let fin = constant_time::verify_slices_are_equal(expect_verify_data.as_ref(), &finished.0)
             .map_err(|_| {
-                warn!("Finished wrong");
                 cx.common
-                    .send_fatal_alert(AlertDescription::DecryptError, Error::DecryptError)
+                    .send_fatal_alert(AlertDescription::DecryptError);
+                warn!("Finished wrong");
+                Error::DecryptError
             })
             .map(|_| verify::FinishedMessageVerified::assertion())?;
 
@@ -1222,10 +1212,9 @@ impl ExpectTraffic {
         #[cfg(feature = "quic")]
         {
             if let Protocol::Quic = common.protocol {
-                return Err(common.send_fatal_alert(
-                    AlertDescription::UnexpectedMessage,
-                    PeerMisbehaved::KeyUpdateReceivedInQuicConnection,
-                ));
+                common.send_fatal_alert(AlertDescription::UnexpectedMessage);
+                warn!("KeyUpdate received in QUIC connection");
+                return Err(PeerMisbehaved::KeyUpdateReceivedInQuicConnection.into());
             }
         }
 

@@ -180,6 +180,11 @@ pub struct ClientConfig {
     ///
     /// The default is false.
     pub enable_early_data: bool,
+
+    /// Whether to initiate a TCPLS session or a normal TLS session
+    ///
+    /// The default is false
+    pub enable_tcpls: bool,
 }
 
 /// What mechanisms to support for resuming a TLS 1.2 session.

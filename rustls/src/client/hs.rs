@@ -241,6 +241,10 @@ fn emit_client_hello_for_retry(
         exts.push(ClientExtension::SignedCertificateTimestampRequest);
     }
 
+    if config.enable_tcpls {
+        exts.push(ClientExtension::TCPLS);
+    }
+
     if let Some(key_share) = &key_share {
         debug_assert!(support_tls13);
         let key_share = KeyShareEntry::new(key_share.group(), key_share.pubkey.as_ref());
@@ -445,10 +449,7 @@ pub(super) fn process_alpn_protocol(
             .alpn_protocols
             .contains(alpn_protocol)
         {
-            return Err(common.send_fatal_alert(
-                AlertDescription::IllegalParameter,
-                PeerMisbehaved::SelectedUnofferedApplicationProtocol,
-            ));
+            return Err(common.illegal_param(PeerMisbehaved::SelectedUnofferedApplicationProtocol));
         }
     }
 
@@ -461,10 +462,8 @@ pub(super) fn process_alpn_protocol(
         // servers which accept a connection that requires an application-layer protocol they do not
         // understand.
         if common.is_quic() && common.alpn_protocol.is_none() && !config.alpn_protocols.is_empty() {
-            return Err(common.send_fatal_alert(
-                AlertDescription::NoApplicationProtocol,
-                Error::NoApplicationProtocol,
-            ));
+            common.send_fatal_alert(AlertDescription::NoApplicationProtocol);
+            return Err(Error::NoApplicationProtocol);
         }
     }
 
@@ -516,41 +515,34 @@ impl State<ClientConnectionData> for ExpectServerHello {
                     .get_supported_versions()
                     .is_some()
                 {
-                    return Err({
-                        cx.common.send_fatal_alert(
-                            AlertDescription::IllegalParameter,
-                            PeerMisbehaved::SelectedTls12UsingTls13VersionExtension,
-                        )
-                    });
+                    return Err(cx
+                        .common
+                        .illegal_param(PeerMisbehaved::SelectedTls12UsingTls13VersionExtension));
                 }
 
                 TLSv1_2
             }
             _ => {
+                cx.common
+                    .send_fatal_alert(AlertDescription::ProtocolVersion);
                 let reason = match server_version {
                     TLSv1_2 | TLSv1_3 => PeerIncompatible::ServerTlsVersionIsDisabledByOurConfig,
                     _ => PeerIncompatible::ServerDoesNotSupportTls12Or13,
                 };
-                return Err(cx
-                    .common
-                    .send_fatal_alert(AlertDescription::ProtocolVersion, reason));
+                return Err(reason.into());
             }
         };
 
         if server_hello.compression_method != Compression::Null {
-            return Err({
-                cx.common.send_fatal_alert(
-                    AlertDescription::IllegalParameter,
-                    PeerMisbehaved::SelectedUnofferedCompression,
-                )
-            });
+            return Err(cx
+                .common
+                .illegal_param(PeerMisbehaved::SelectedUnofferedCompression));
         }
 
         if server_hello.has_duplicate_extension() {
-            return Err(cx.common.send_fatal_alert(
-                AlertDescription::DecodeError,
-                PeerMisbehaved::DuplicateServerHelloExtensions,
-            ));
+            cx.common
+                .send_fatal_alert(AlertDescription::DecodeError);
+            return Err(PeerMisbehaved::DuplicateServerHelloExtensions.into());
         }
 
         let allowed_unsolicited = [ExtensionType::RenegotiationInfo];
@@ -559,10 +551,9 @@ impl State<ClientConnectionData> for ExpectServerHello {
             .hello
             .server_sent_unsolicited_extensions(&server_hello.extensions, &allowed_unsolicited)
         {
-            return Err(cx.common.send_fatal_alert(
-                AlertDescription::UnsupportedExtension,
-                PeerMisbehaved::UnsolicitedServerHelloExtension,
-            ));
+            cx.common
+                .send_fatal_alert(AlertDescription::UnsupportedExtension);
+            return Err(PeerMisbehaved::UnsolicitedServerHelloExtension.into());
         }
 
         cx.common.negotiated_version = Some(version);
@@ -576,39 +567,31 @@ impl State<ClientConnectionData> for ExpectServerHello {
         // Uncompressed.  But it's allowed to be omitted.
         if let Some(point_fmts) = server_hello.get_ecpoints_extension() {
             if !point_fmts.contains(&ECPointFormat::Uncompressed) {
-                return Err(cx.common.send_fatal_alert(
-                    AlertDescription::HandshakeFailure,
-                    PeerMisbehaved::ServerHelloMustOfferUncompressedEcPoints,
-                ));
+                cx.common
+                    .send_fatal_alert(AlertDescription::HandshakeFailure);
+                return Err(PeerMisbehaved::ServerHelloMustOfferUncompressedEcPoints.into());
             }
         }
 
         let suite = config
             .find_cipher_suite(server_hello.cipher_suite)
             .ok_or_else(|| {
-                cx.common.send_fatal_alert(
-                    AlertDescription::HandshakeFailure,
-                    PeerMisbehaved::SelectedUnofferedCipherSuite,
-                )
+                cx.common
+                    .send_fatal_alert(AlertDescription::HandshakeFailure);
+                Error::PeerMisbehaved(PeerMisbehaved::SelectedUnofferedCipherSuite)
             })?;
 
         if version != suite.version().version {
-            return Err({
-                cx.common.send_fatal_alert(
-                    AlertDescription::IllegalParameter,
-                    PeerMisbehaved::SelectedUnusableCipherSuiteForVersion,
-                )
-            });
+            return Err(cx
+                .common
+                .illegal_param(PeerMisbehaved::SelectedUnusableCipherSuiteForVersion));
         }
 
         match self.suite {
             Some(prev_suite) if prev_suite != suite => {
-                return Err({
-                    cx.common.send_fatal_alert(
-                        AlertDescription::IllegalParameter,
-                        PeerMisbehaved::SelectedDifferentCipherSuiteAfterRetry,
-                    )
-                });
+                return Err(cx
+                    .common
+                    .illegal_param(PeerMisbehaved::SelectedDifferentCipherSuiteAfterRetry));
             }
             _ => {
                 debug!("Using ciphersuite {:?}", suite);
@@ -706,52 +689,39 @@ impl ExpectServerHelloOrHelloRetryRequest {
         // A retry request is illegal if it contains no cookie and asks for
         // retry of a group we already sent.
         if cookie.is_none() && req_group == Some(offered_key_share.group()) {
-            return Err({
-                cx.common.send_fatal_alert(
-                    AlertDescription::IllegalParameter,
-                    PeerMisbehaved::IllegalHelloRetryRequestWithOfferedGroup,
-                )
-            });
+            return Err(cx
+                .common
+                .illegal_param(PeerMisbehaved::IllegalHelloRetryRequestWithOfferedGroup));
         }
 
         // Or has an empty cookie.
         if let Some(cookie) = cookie {
             if cookie.0.is_empty() {
-                return Err({
-                    cx.common.send_fatal_alert(
-                        AlertDescription::IllegalParameter,
-                        PeerMisbehaved::IllegalHelloRetryRequestWithEmptyCookie,
-                    )
-                });
+                return Err(cx
+                    .common
+                    .illegal_param(PeerMisbehaved::IllegalHelloRetryRequestWithEmptyCookie));
             }
         }
 
         // Or has something unrecognised
         if hrr.has_unknown_extension() {
-            return Err(cx.common.send_fatal_alert(
-                AlertDescription::UnsupportedExtension,
-                PeerIncompatible::ServerSentHelloRetryRequestWithUnknownExtension,
-            ));
+            cx.common
+                .send_fatal_alert(AlertDescription::UnsupportedExtension);
+            return Err(PeerIncompatible::ServerSentHelloRetryRequestWithUnknownExtension.into());
         }
 
         // Or has the same extensions more than once
         if hrr.has_duplicate_extension() {
-            return Err({
-                cx.common.send_fatal_alert(
-                    AlertDescription::IllegalParameter,
-                    PeerMisbehaved::DuplicateHelloRetryRequestExtensions,
-                )
-            });
+            return Err(cx
+                .common
+                .illegal_param(PeerMisbehaved::DuplicateHelloRetryRequestExtensions));
         }
 
         // Or asks us to change nothing.
         if cookie.is_none() && req_group.is_none() {
-            return Err({
-                cx.common.send_fatal_alert(
-                    AlertDescription::IllegalParameter,
-                    PeerMisbehaved::IllegalHelloRetryRequestWithNoChanges,
-                )
-            });
+            return Err(cx
+                .common
+                .illegal_param(PeerMisbehaved::IllegalHelloRetryRequestWithNoChanges));
         }
 
         // Or asks us to talk a protocol we didn't offer, or doesn't support HRR at all.
@@ -760,12 +730,9 @@ impl ExpectServerHelloOrHelloRetryRequest {
                 cx.common.negotiated_version = Some(ProtocolVersion::TLSv1_3);
             }
             _ => {
-                return Err({
-                    cx.common.send_fatal_alert(
-                        AlertDescription::IllegalParameter,
-                        PeerMisbehaved::IllegalHelloRetryRequestWithUnsupportedVersion,
-                    )
-                });
+                return Err(cx.common.illegal_param(
+                    PeerMisbehaved::IllegalHelloRetryRequestWithUnsupportedVersion,
+                ));
             }
         }
 
@@ -774,12 +741,9 @@ impl ExpectServerHelloOrHelloRetryRequest {
         let cs = match config.find_cipher_suite(hrr.cipher_suite) {
             Some(cs) => cs,
             None => {
-                return Err({
-                    cx.common.send_fatal_alert(
-                        AlertDescription::IllegalParameter,
-                        PeerMisbehaved::IllegalHelloRetryRequestWithUnofferedCipherSuite,
-                    )
-                });
+                return Err(cx.common.illegal_param(
+                    PeerMisbehaved::IllegalHelloRetryRequestWithUnofferedCipherSuite,
+                ));
             }
         };
 
@@ -808,8 +772,7 @@ impl ExpectServerHelloOrHelloRetryRequest {
         let key_share = match req_group {
             Some(group) if group != offered_key_share.group() => {
                 let group = kx::KeyExchange::choose(group, &config.kx_groups).ok_or_else(|| {
-                    cx.common.send_fatal_alert(
-                        AlertDescription::IllegalParameter,
+                    cx.common.illegal_param(
                         PeerMisbehaved::IllegalHelloRetryRequestWithUnofferedNamedGroup,
                     )
                 })?;
