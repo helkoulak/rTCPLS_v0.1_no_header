@@ -551,7 +551,7 @@ fn load_ocsp(filename: &Option<String>) -> Vec<u8> {
     ret
 }
 
-fn make_config(args: &Args) -> Arc<rustls::ServerConfig> {
+fn make_config(args: &Args, enable_tcpls: bool) -> Arc<rustls::ServerConfig> {
     let client_auth = if args.flag_auth.is_some() {
         let roots = load_certs(args.flag_auth.as_ref().unwrap());
         let mut client_auth_roots = RootCertStore::empty();
@@ -616,6 +616,7 @@ fn make_config(args: &Args) -> Arc<rustls::ServerConfig> {
         .map(|proto| proto.as_bytes().to_vec())
         .collect::<Vec<_>>();
 
+    config.enable_tcpls = enable_tcpls;
     Arc::new(config)
 }
 
@@ -637,7 +638,7 @@ fn main() {
     let mut addr: net::SocketAddr = "0.0.0.0:443".parse().unwrap();
     addr.set_port(args.flag_port.unwrap_or(443));
 
-    let config = make_config(&args);
+    let config = make_config(&args, true);
 
     let mut listener = TcpListener::bind(addr).expect("cannot listen on port");
     let mut poll = mio::Poll::new().unwrap();

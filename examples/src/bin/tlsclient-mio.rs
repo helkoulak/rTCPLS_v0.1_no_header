@@ -369,7 +369,7 @@ fn apply_dangerous_options(args: &Args, _: &mut rustls::ClientConfig) {
 }
 
 /// Build a `ClientConfig` from our arguments
-fn make_config(args: &Args) -> Arc<rustls::ClientConfig> {
+fn make_config(args: &Args, enable_tcpls: bool) -> Arc<rustls::ClientConfig> {
     let mut root_store = RootCertStore::empty();
 
     if args.flag_cafile.is_some() {
@@ -391,6 +391,8 @@ fn make_config(args: &Args) -> Arc<rustls::ClientConfig> {
                     )
                 }),
         );
+
+
     }
 
     let suites = if !args.flag_suite.is_empty() {
@@ -445,6 +447,7 @@ fn make_config(args: &Args) -> Arc<rustls::ClientConfig> {
         .collect();
     config.max_fragment_size = args.flag_max_frag_size;
 
+    config.enable_tcpls = enable_tcpls;
     apply_dangerous_options(args, &mut config);
 
     Arc::new(config)
@@ -470,7 +473,7 @@ fn main() {
     let port = args.flag_port.unwrap_or(443);
     let addr = lookup_ipv4(args.arg_hostname.as_str(), port);
 
-    let config = make_config(&args);
+    let config = make_config(&args, true);
 
     let sock = TcpStream::connect(addr).unwrap();
     let server_name = args
@@ -490,10 +493,10 @@ fn main() {
             .write_all(httpreq.as_bytes())
             .unwrap();
     } else {
-        let mut stdin = io::stdin();
-        tlsclient
-            .read_source_to_end(&mut stdin)
-            .unwrap();
+       // let mut stdin = io::stdin();
+       // tlsclient
+         //   .read_source_to_end(&mut stdin)
+          //  .unwrap();
     }
 
     let mut poll = mio::Poll::new().unwrap();
