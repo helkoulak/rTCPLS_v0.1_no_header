@@ -1,4 +1,4 @@
-use crate::common_state::State;
+use crate::common_state::{CommonState, State};
 use crate::conn::ConnectionRandoms;
 #[cfg(feature = "tls12")]
 use crate::enums::CipherSuite;
@@ -29,6 +29,21 @@ use std::sync::Arc;
 pub(super) type NextState = Box<dyn State<ServerConnectionData>>;
 pub(super) type NextStateOrError = Result<NextState, Error>;
 pub(super) type ServerContext<'a> = crate::common_state::Context<'a, ServerConnectionData>;
+
+pub(super) fn incompatible(common: &mut CommonState, why: PeerIncompatible) -> Error {
+    common.send_fatal_alert(AlertDescription::HandshakeFailure);
+    Error::PeerIncompatible(why)
+}
+
+fn bad_version(common: &mut CommonState, why: PeerIncompatible) -> Error {
+    common.send_fatal_alert(AlertDescription::ProtocolVersion);
+    Error::PeerIncompatible(why)
+}
+
+pub(super) fn decode_error(common: &mut CommonState, why: PeerMisbehaved) -> Error {
+    common.send_fatal_alert(AlertDescription::DecodeError);
+    Error::PeerMisbehaved(why)
+}
 
 pub(super) fn can_resume(
     suite: SupportedCipherSuite,
@@ -93,10 +108,9 @@ impl ExtensionProcessing {
                 self.exts
                     .push(ServerExtension::make_alpn(&[selected_protocol]));
             } else if !our_protocols.is_empty() {
-                return Err(cx.common.send_fatal_alert(
-                    AlertDescription::NoApplicationProtocol,
-                    Error::NoApplicationProtocol,
-                ));
+                cx.common
+                    .send_fatal_alert(AlertDescription::NoApplicationProtocol);
+                return Err(Error::NoApplicationProtocol);
             }
         }
 
@@ -113,10 +127,9 @@ impl ExtensionProcessing {
                 if cx.common.alpn_protocol.is_none()
                     && (!our_protocols.is_empty() || maybe_their_protocols.is_some())
                 {
-                    return Err(cx.common.send_fatal_alert(
-                        AlertDescription::NoApplicationProtocol,
-                        Error::NoApplicationProtocol,
-                    ));
+                    cx.common
+                        .send_fatal_alert(AlertDescription::NoApplicationProtocol);
+                    return Err(Error::NoApplicationProtocol);
                 }
 
                 match hello.get_quic_params_extension() {
@@ -274,31 +287,28 @@ impl ExpectClientHello {
             if versions.contains(&ProtocolVersion::TLSv1_3) && tls13_enabled {
                 ProtocolVersion::TLSv1_3
             } else if !versions.contains(&ProtocolVersion::TLSv1_2) || !tls12_enabled {
-                return Err(cx.common.send_fatal_alert(
-                    AlertDescription::ProtocolVersion,
+                return Err(bad_version(
+                    cx.common,
                     PeerIncompatible::Tls12NotOfferedOrEnabled,
                 ));
             } else if cx.common.is_quic() {
-                return Err(cx.common.send_fatal_alert(
-                    AlertDescription::ProtocolVersion,
+                return Err(bad_version(
+                    cx.common,
                     PeerIncompatible::Tls13RequiredForQuic,
                 ));
             } else {
                 ProtocolVersion::TLSv1_2
             }
         } else if client_hello.client_version.get_u16() < ProtocolVersion::TLSv1_2.get_u16() {
-            return Err(cx.common.send_fatal_alert(
-                AlertDescription::ProtocolVersion,
-                PeerIncompatible::Tls12NotOffered,
-            ));
+            return Err(bad_version(cx.common, PeerIncompatible::Tls12NotOffered));
         } else if !tls12_enabled && tls13_enabled {
-            return Err(cx.common.send_fatal_alert(
-                AlertDescription::ProtocolVersion,
+            return Err(bad_version(
+                cx.common,
                 PeerIncompatible::SupportedVersionsExtensionRequired,
             ));
         } else if cx.common.is_quic() {
-            return Err(cx.common.send_fatal_alert(
-                AlertDescription::ProtocolVersion,
+            return Err(bad_version(
+                cx.common,
                 PeerIncompatible::Tls13RequiredForQuic,
             ));
         } else {
@@ -342,10 +352,9 @@ impl ExpectClientHello {
                 .resolve(client_hello);
 
             certkey.ok_or_else(|| {
-                cx.common.send_fatal_alert(
-                    AlertDescription::AccessDenied,
-                    Error::General("no server certificate chain resolved".to_owned()),
-                )
+                cx.common
+                    .send_fatal_alert(AlertDescription::AccessDenied);
+                Error::General("no server certificate chain resolved".to_string())
             })?
         };
         let certkey = ActiveCertifiedKey::from_certified_key(&certkey);
@@ -369,12 +378,7 @@ impl ExpectClientHello {
                 &suitable_suites,
             )
         }
-        .ok_or_else(|| {
-            cx.common.send_fatal_alert(
-                AlertDescription::HandshakeFailure,
-                PeerIncompatible::NoCipherSuitesInCommon,
-            )
-        })?;
+        .ok_or_else(|| incompatible(cx.common, PeerIncompatible::NoCipherSuitesInCommon))?;
 
         debug!("decided upon suite {:?}", suite);
         cx.common.suite = Some(suite);
@@ -385,10 +389,9 @@ impl ExpectClientHello {
             HandshakeHashOrBuffer::Buffer(inner) => inner.start_hash(starting_hash),
             HandshakeHashOrBuffer::Hash(inner) if inner.algorithm() == starting_hash => inner,
             _ => {
-                return Err(cx.common.send_fatal_alert(
-                    AlertDescription::IllegalParameter,
-                    PeerMisbehaved::HandshakeHashVariedAfterRetry,
-                ));
+                return Err(cx
+                    .common
+                    .illegal_param(PeerMisbehaved::HandshakeHashVariedAfterRetry));
             }
         };
 
@@ -455,15 +458,14 @@ pub(super) fn process_client_hello<'a>(
         .compression_methods
         .contains(&Compression::Null)
     {
-        return Err(cx.common.send_fatal_alert(
-            AlertDescription::IllegalParameter,
-            PeerIncompatible::NullCompressionRequired,
-        ));
+        cx.common
+            .send_fatal_alert(AlertDescription::IllegalParameter);
+        return Err(PeerIncompatible::NullCompressionRequired.into());
     }
 
     if client_hello.has_duplicate_extension() {
-        return Err(cx.common.send_fatal_alert(
-            AlertDescription::DecodeError,
+        return Err(decode_error(
+            cx.common,
             PeerMisbehaved::DuplicateClientHelloExtensions,
         ));
     }
@@ -479,8 +481,8 @@ pub(super) fn process_client_hello<'a>(
     let sni: Option<webpki::DnsName> = match client_hello.get_sni_extension() {
         Some(sni) => {
             if sni.has_duplicate_names_for_type() {
-                return Err(cx.common.send_fatal_alert(
-                    AlertDescription::DecodeError,
+                return Err(decode_error(
+                    cx.common,
                     PeerMisbehaved::DuplicateServerNameTypes,
                 ));
             }
@@ -488,10 +490,9 @@ pub(super) fn process_client_hello<'a>(
             if let Some(hostname) = sni.get_single_hostname() {
                 Some(hostname.into())
             } else {
-                return Err(cx.common.send_fatal_alert(
-                    AlertDescription::IllegalParameter,
-                    PeerMisbehaved::ServerNameMustContainOneHostName,
-                ));
+                return Err(cx
+                    .common
+                    .illegal_param(PeerMisbehaved::ServerNameMustContainOneHostName));
             }
         }
         None => None,
@@ -510,8 +511,8 @@ pub(super) fn process_client_hello<'a>(
     let sig_schemes = client_hello
         .get_sigalgs_extension()
         .ok_or_else(|| {
-            cx.common.send_fatal_alert(
-                AlertDescription::HandshakeFailure,
+            incompatible(
+                cx.common,
                 PeerIncompatible::SignatureAlgorithmsExtensionRequired,
             )
         })?;

@@ -310,6 +310,7 @@ mod log {
     macro_rules! trace    ( ($($tt:tt)*) => {{}} );
     macro_rules! debug    ( ($($tt:tt)*) => {{}} );
     macro_rules! warn     ( ($($tt:tt)*) => {{}} );
+    macro_rules! error    ( ($($tt:tt)*) => {{}} );
 }
 
 #[macro_use]

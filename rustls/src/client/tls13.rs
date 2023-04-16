@@ -81,19 +81,15 @@ pub(super) fn handle_server_hello(
     let their_key_share = server_hello
         .get_key_share()
         .ok_or_else(|| {
-            cx.common.send_fatal_alert(
-                AlertDescription::MissingExtension,
-                PeerMisbehaved::MissingKeyShare,
-            )
+            cx.common
+                .send_fatal_alert(AlertDescription::MissingExtension);
+            Error::PeerMisbehaved(PeerMisbehaved::MissingKeyShare)
         })?;
 
     if our_key_share.group() != their_key_share.group {
-        return Err({
-            cx.common.send_fatal_alert(
-                AlertDescription::IllegalParameter,
-                PeerMisbehaved::WrongGroupForKeyShare,
-            )
-        });
+        return Err(cx
+            .common
+            .illegal_param(PeerMisbehaved::WrongGroupForKeyShare));
     }
 
     let key_schedule_pre_handshake = if let (Some(selected_psk), Some(early_key_schedule)) =
@@ -103,33 +99,24 @@ pub(super) fn handle_server_hello(
             let resuming_suite = match suite.can_resume_from(resuming.suite()) {
                 Some(resuming) => resuming,
                 None => {
-                    return Err({
-                        cx.common.send_fatal_alert(
-                            AlertDescription::IllegalParameter,
-                            PeerMisbehaved::ResumptionOfferedWithIncompatibleCipherSuite,
-                        )
-                    });
+                    return Err(cx.common.illegal_param(
+                        PeerMisbehaved::ResumptionOfferedWithIncompatibleCipherSuite,
+                    ));
                 }
             };
 
             // If the server varies the suite here, we will have encrypted early data with
             // the wrong suite.
             if cx.data.early_data.is_enabled() && resuming_suite != suite {
-                return Err({
-                    cx.common.send_fatal_alert(
-                        AlertDescription::IllegalParameter,
-                        PeerMisbehaved::EarlyDataOfferedWithVariedCipherSuite,
-                    )
-                });
+                return Err(cx
+                    .common
+                    .illegal_param(PeerMisbehaved::EarlyDataOfferedWithVariedCipherSuite));
             }
 
             if selected_psk != 0 {
-                return Err({
-                    cx.common.send_fatal_alert(
-                        AlertDescription::IllegalParameter,
-                        PeerMisbehaved::SelectedInvalidPsk,
-                    )
-                });
+                return Err(cx
+                    .common
+                    .illegal_param(PeerMisbehaved::SelectedInvalidPsk));
             }
 
             debug!("Resuming using PSK");
@@ -191,10 +178,8 @@ fn validate_server_hello(
 ) -> Result<(), Error> {
     for ext in &server_hello.extensions {
         if !ALLOWED_PLAINTEXT_EXTS.contains(&ext.get_type()) {
-            return Err(common.send_fatal_alert(
-                AlertDescription::UnsupportedExtension,
-                PeerMisbehaved::UnexpectedCleartextExtension,
-            ));
+            common.send_fatal_alert(AlertDescription::UnsupportedExtension);
+            return Err(PeerMisbehaved::UnexpectedCleartextExtension.into());
         }
     }
 
@@ -333,27 +318,21 @@ fn validate_encrypted_extensions(
     exts: &Vec<ServerExtension>,
 ) -> Result<(), Error> {
     if exts.has_duplicate_extension() {
-        return Err(common.send_fatal_alert(
-            AlertDescription::DecodeError,
-            PeerMisbehaved::DuplicateEncryptedExtensions,
-        ));
+        common.send_fatal_alert(AlertDescription::DecodeError);
+        return Err(PeerMisbehaved::DuplicateEncryptedExtensions.into());
     }
 
     if hello.server_sent_unsolicited_extensions(exts, &[]) {
-        return Err(common.send_fatal_alert(
-            AlertDescription::UnsupportedExtension,
-            PeerMisbehaved::UnsolicitedEncryptedExtension,
-        ));
+        common.send_fatal_alert(AlertDescription::UnsupportedExtension);
+        return Err(PeerMisbehaved::UnsolicitedEncryptedExtension.into());
     }
 
     for ext in exts {
         if ALLOWED_PLAINTEXT_EXTS.contains(&ext.get_type())
             || DISALLOWED_TLS13_EXTS.contains(&ext.get_type())
         {
-            return Err(common.send_fatal_alert(
-                AlertDescription::UnsupportedExtension,
-                PeerMisbehaved::DisallowedEncryptedExtension,
-            ));
+            common.send_fatal_alert(AlertDescription::UnsupportedExtension);
+            return Err(PeerMisbehaved::DisallowedEncryptedExtension.into());
         }
     }
 
@@ -543,10 +522,9 @@ impl State<ClientConnectionData> for ExpectCertificateRequest {
         // Must be empty during handshake.
         if !certreq.context.0.is_empty() {
             warn!("Server sent non-empty certreq context");
-            return Err(cx.common.send_fatal_alert(
-                AlertDescription::DecodeError,
-                InvalidMessage::InvalidCertRequest,
-            ));
+            cx.common
+                .send_fatal_alert(AlertDescription::DecodeError);
+            return Err(InvalidMessage::InvalidCertRequest.into());
         }
 
         let tls13_sign_schemes = sign::supported_sign_tls13();
@@ -560,10 +538,9 @@ impl State<ClientConnectionData> for ExpectCertificateRequest {
             .collect::<Vec<SignatureScheme>>();
 
         if compat_sigschemes.is_empty() {
-            return Err(cx.common.send_fatal_alert(
-                AlertDescription::HandshakeFailure,
-                PeerIncompatible::NoCertificateRequestSignatureSchemesInCommon,
-            ));
+            cx.common
+                .send_fatal_alert(AlertDescription::HandshakeFailure);
+            return Err(PeerIncompatible::NoCertificateRequestSignatureSchemesInCommon.into());
         }
 
         let client_auth = ClientAuthDetails::resolve(
@@ -610,19 +587,19 @@ impl State<ClientConnectionData> for ExpectCertificate {
 
         // This is only non-empty for client auth.
         if !cert_chain.context.0.is_empty() {
-            return Err(cx.common.send_fatal_alert(
-                AlertDescription::DecodeError,
-                InvalidMessage::InvalidCertRequest,
-            ));
+            warn!("certificate with non-empty context during handshake");
+            cx.common
+                .send_fatal_alert(AlertDescription::DecodeError);
+            return Err(InvalidMessage::InvalidCertRequest.into());
         }
 
         if cert_chain.any_entry_has_duplicate_extension()
             || cert_chain.any_entry_has_unknown_extension()
         {
-            return Err(cx.common.send_fatal_alert(
-                AlertDescription::UnsupportedExtension,
-                PeerMisbehaved::BadCertChainExtensions,
-            ));
+            warn!("certificate chain contains unsolicited/unknown extension");
+            cx.common
+                .send_fatal_alert(AlertDescription::UnsupportedExtension);
+            return Err(PeerMisbehaved::BadCertChainExtensions.into());
         }
 
         let server_cert = ServerCertDetails::new(
@@ -851,7 +828,8 @@ impl State<ClientConnectionData> for ExpectFinished {
         let fin = constant_time::verify_slices_are_equal(expect_verify_data.as_ref(), &finished.0)
             .map_err(|_| {
                 cx.common
-                    .send_fatal_alert(AlertDescription::DecryptError, Error::DecryptError)
+                    .send_fatal_alert(AlertDescription::DecryptError);
+                Error::DecryptError
             })
             .map(|_| verify::FinishedMessageVerified::assertion())?;
 
@@ -958,10 +936,9 @@ impl ExpectTraffic {
         nst: &NewSessionTicketPayloadTLS13,
     ) -> Result<(), Error> {
         if nst.has_duplicate_extension() {
-            return Err(cx.common.send_fatal_alert(
-                AlertDescription::IllegalParameter,
-                PeerMisbehaved::DuplicateNewSessionTicketExtensions,
-            ));
+            cx.common
+                .send_fatal_alert(AlertDescription::IllegalParameter);
+            return Err(PeerMisbehaved::DuplicateNewSessionTicketExtensions.into());
         }
 
         let handshake_hash = self.transcript.get_current_hash();
@@ -1020,10 +997,9 @@ impl ExpectTraffic {
         #[cfg(feature = "quic")]
         {
             if let Protocol::Quic = common.protocol {
-                return Err(common.send_fatal_alert(
-                    AlertDescription::UnexpectedMessage,
-                    PeerMisbehaved::KeyUpdateReceivedInQuicConnection,
-                ));
+                common.send_fatal_alert(AlertDescription::UnexpectedMessage);
+                warn!("KeyUpdate received in QUIC connection");
+                return Err(PeerMisbehaved::KeyUpdateReceivedInQuicConnection.into());
             }
         }
 

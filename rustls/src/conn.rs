@@ -435,7 +435,10 @@ impl<Data> ConnectionCommon<Data> {
             .map(Message::try_from)
         {
             Some(Ok(msg)) => Ok(Some(msg)),
-            Some(Err(err)) => Err(self.send_fatal_alert(AlertDescription::DecodeError, err)),
+            Some(Err(err)) => {
+                self.send_fatal_alert(AlertDescription::DecodeError);
+                Err(err)
+            }
             None => Ok(None),
         }
     }
@@ -658,19 +661,23 @@ impl<Data> ConnectionCore<Data> {
                     self.common_state.quic.alert = Some(AlertDescription::DecodeError);
                 }
 
-                Err(if !self.common_state.is_quic() {
+                if !self.common_state.is_quic() {
                     self.common_state
-                        .send_fatal_alert(AlertDescription::DecodeError, err)
-                } else {
-                    err
-                })
+                        .send_fatal_alert(AlertDescription::DecodeError);
+                }
+
+                Err(err)
             }
-            Err(err @ Error::PeerSentOversizedRecord) => Err(self
-                .common_state
-                .send_fatal_alert(AlertDescription::RecordOverflow, err)),
-            Err(err @ Error::DecryptError) => Err(self
-                .common_state
-                .send_fatal_alert(AlertDescription::BadRecordMac, err)),
+            Err(Error::PeerSentOversizedRecord) => {
+                self.common_state
+                    .send_fatal_alert(AlertDescription::RecordOverflow);
+                Err(Error::PeerSentOversizedRecord)
+            }
+            Err(Error::DecryptError) => {
+                self.common_state
+                    .send_fatal_alert(AlertDescription::BadRecordMac);
+                Err(Error::DecryptError)
+            }
             Err(e) => Err(e),
         }
     }
@@ -693,8 +700,9 @@ impl<Data> ConnectionCore<Data> {
                 // "An implementation which receives any other change_cipher_spec value or
                 //  which receives a protected change_cipher_spec record MUST abort the
                 //  handshake with an "unexpected_message" alert."
-                return Err(self.common_state.send_fatal_alert(
-                    AlertDescription::UnexpectedMessage,
+                self.common_state
+                    .send_fatal_alert(AlertDescription::UnexpectedMessage);
+                return Err(Error::PeerMisbehaved(
                     PeerMisbehaved::IllegalMiddleboxChangeCipherSpec,
                 ));
             } else {
@@ -708,9 +716,9 @@ impl<Data> ConnectionCore<Data> {
         let msg = match Message::try_from(msg) {
             Ok(msg) => msg,
             Err(err) => {
-                return Err(self
-                    .common_state
-                    .send_fatal_alert(AlertDescription::DecodeError, err));
+                self.common_state
+                    .send_fatal_alert(AlertDescription::DecodeError);
+                return Err(err);
             }
         };
 

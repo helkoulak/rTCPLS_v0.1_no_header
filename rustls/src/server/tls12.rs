@@ -76,28 +76,21 @@ mod client_hello {
             let groups_ext = client_hello
                 .get_namedgroups_extension()
                 .ok_or_else(|| {
-                    cx.common.send_fatal_alert(
-                        AlertDescription::HandshakeFailure,
-                        PeerIncompatible::NamedGroupsExtensionRequired,
-                    )
+                    hs::incompatible(cx.common, PeerIncompatible::NamedGroupsExtensionRequired)
                 })?;
             let ecpoints_ext = client_hello
                 .get_ecpoints_extension()
                 .ok_or_else(|| {
-                    cx.common.send_fatal_alert(
-                        AlertDescription::HandshakeFailure,
-                        PeerIncompatible::EcPointsExtensionRequired,
-                    )
+                    hs::incompatible(cx.common, PeerIncompatible::EcPointsExtensionRequired)
                 })?;
 
             trace!("namedgroups {:?}", groups_ext);
             trace!("ecpoints {:?}", ecpoints_ext);
 
             if !ecpoints_ext.contains(&ECPointFormat::Uncompressed) {
-                return Err(cx.common.send_fatal_alert(
-                    AlertDescription::IllegalParameter,
-                    PeerIncompatible::UncompressedEcPointsRequired,
-                ));
+                cx.common
+                    .send_fatal_alert(AlertDescription::IllegalParameter);
+                return Err(PeerIncompatible::UncompressedEcPointsRequired.into());
             }
 
             // -- If TLS1.3 is enabled, signal the downgrade in the server random
@@ -161,8 +154,8 @@ mod client_hello {
                 .resolve_sig_schemes(&sigschemes_ext);
 
             if sigschemes.is_empty() {
-                return Err(cx.common.send_fatal_alert(
-                    AlertDescription::HandshakeFailure,
+                return Err(hs::incompatible(
+                    cx.common,
                     PeerIncompatible::NoSignatureSchemesInCommon,
                 ));
             }
@@ -173,22 +166,14 @@ mod client_hello {
                 .iter()
                 .find(|skxg| groups_ext.contains(&skxg.name))
                 .cloned()
-                .ok_or_else(|| {
-                    cx.common.send_fatal_alert(
-                        AlertDescription::HandshakeFailure,
-                        PeerIncompatible::NoKxGroupsInCommon,
-                    )
-                })?;
+                .ok_or_else(|| hs::incompatible(cx.common, PeerIncompatible::NoKxGroupsInCommon))?;
 
             let ecpoint = ECPointFormat::SUPPORTED
                 .iter()
                 .find(|format| ecpoints_ext.contains(format))
                 .cloned()
                 .ok_or_else(|| {
-                    cx.common.send_fatal_alert(
-                        AlertDescription::HandshakeFailure,
-                        PeerIncompatible::NoEcPointFormatsInCommon,
-                    )
+                    hs::incompatible(cx.common, PeerIncompatible::NoEcPointFormatsInCommon)
                 })?;
 
             debug_assert_eq!(ecpoint, ECPointFormat::Uncompressed);
@@ -268,10 +253,9 @@ mod client_hello {
             debug!("Resuming connection");
 
             if resumedata.extended_ms && !self.using_ems {
-                return Err(cx.common.send_fatal_alert(
-                    AlertDescription::IllegalParameter,
-                    PeerMisbehaved::ResumptionAttemptedWithVariedEms,
-                ));
+                return Err(cx
+                    .common
+                    .illegal_param(PeerMisbehaved::ResumptionAttemptedWithVariedEms));
             }
 
             self.session_id = *id;
@@ -536,10 +520,9 @@ impl State<ServerConnectionData> for ExpectCertificate {
 
         let client_cert = match cert_chain.split_first() {
             None if mandatory => {
-                return Err(cx.common.send_fatal_alert(
-                    AlertDescription::CertificateRequired,
-                    Error::NoCertificatesPresented,
-                ));
+                cx.common
+                    .send_fatal_alert(AlertDescription::CertificateRequired);
+                return Err(Error::NoCertificatesPresented);
             }
             None => {
                 debug!("client auth requested but no certificate supplied");
@@ -676,10 +659,9 @@ impl State<ServerConnectionData> for ExpectCertificateVerify {
                     // `transcript.abandon_client_auth()` can extract it, but its only caller in
                     // this flow will also set `ExpectClientKx::client_cert` to `None`, making it
                     // impossible to reach this state.
-                    return Err(cx.common.send_fatal_alert(
-                        AlertDescription::AccessDenied,
-                        Error::General("client authentication not set up".into()),
-                    ));
+                    cx.common
+                        .send_fatal_alert(AlertDescription::AccessDenied);
+                    return Err(Error::General("client authentication not set up".into()));
                 }
             }
         };
@@ -864,7 +846,8 @@ impl State<ServerConnectionData> for ExpectFinished {
             constant_time::verify_slices_are_equal(&expect_verify_data, &finished.0)
                 .map_err(|_| {
                     cx.common
-                        .send_fatal_alert(AlertDescription::DecryptError, Error::DecryptError)
+                        .send_fatal_alert(AlertDescription::DecryptError);
+                    Error::DecryptError
                 })
                 .map(|_| verify::FinishedMessageVerified::assertion())?;
 

@@ -71,12 +71,9 @@ mod server_hello {
             // public values and don't require constant time comparison
             let has_downgrade_marker = self.randoms.server[24..] == tls12::DOWNGRADE_SENTINEL;
             if tls13_supported && has_downgrade_marker {
-                return Err({
-                    cx.common.send_fatal_alert(
-                        AlertDescription::IllegalParameter,
-                        PeerMisbehaved::AttemptedDowngradeToTls12WhenTls13IsSupported,
-                    )
-                });
+                return Err(cx
+                    .common
+                    .illegal_param(PeerMisbehaved::AttemptedDowngradeToTls12WhenTls13IsSupported));
             }
 
             // Doing EMS?
@@ -407,10 +404,9 @@ impl State<ClientConnectionData> for ExpectServerKx {
         let ecdhe = opaque_kx
             .unwrap_given_kxa(self.suite.kx)
             .ok_or_else(|| {
-                cx.common.send_fatal_alert(
-                    AlertDescription::DecodeError,
-                    InvalidMessage::MissingKeyExchange,
-                )
+                cx.common
+                    .send_fatal_alert(AlertDescription::DecodeError);
+                InvalidMessage::MissingKeyExchange
             })?;
 
         // Save the signature and signed parameters for later verification.
@@ -1047,7 +1043,8 @@ impl State<ClientConnectionData> for ExpectFinished {
             constant_time::verify_slices_are_equal(&expect_verify_data, &finished.0)
                 .map_err(|_| {
                     cx.common
-                        .send_fatal_alert(AlertDescription::DecryptError, Error::DecryptError)
+                        .send_fatal_alert(AlertDescription::DecryptError);
+                    Error::DecryptError
                 })
                 .map(|_| verify::FinishedMessageVerified::assertion())?;
 

@@ -449,13 +449,15 @@ impl Codec for PresharedKeyOffer {
     }
 }
 
-#[derive(Clone, Copy)]
+/*
+//#[derive(Clone, Copy)]
 pub struct TcplsToken {
     len: usize,
     data: [u8; 32],
     consumed: bool,
 }
-
+*/
+/*
 impl fmt::Debug for TcplsToken {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         super::base::hex(f, &self.data[..self.len])
@@ -525,6 +527,8 @@ impl SessionId {
         self.len == 0
     }
 }
+
+*/
 
 // --- RFC6066 certificate status request ---
 wrapped_payload!(ResponderId, PayloadU16,);
@@ -640,7 +644,7 @@ pub enum ClientExtension {
     TransportParametersDraft(Vec<u8>),
     EarlyData,
     TCPLS,
-    TcplsJoin(TcplsToken),
+   // TcplsJoin(TcplsToken),
     Unknown(UnknownExtension),
 }
 
@@ -665,7 +669,7 @@ impl ClientExtension {
             Self::TransportParametersDraft(_) => ExtensionType::TransportParametersDraft,
             Self::EarlyData => ExtensionType::EarlyData,
             Self::TCPLS => ExtensionType::TCPLS,
-            Self::TcplsJoin(_) => ExtensionType::TcplsJoin,
+            //Self::TcplsJoin(_) => ExtensionType::TcplsJoin,
             Self::Unknown(ref r) => r.typ,
         }
     }
@@ -692,7 +696,7 @@ impl Codec for ClientExtension {
             Self::KeyShare(ref r) => r.encode(&mut sub),
             Self::PresharedKeyModes(ref r) => r.encode(&mut sub),
             Self::PresharedKey(ref r) => r.encode(&mut sub),
-            Self::TcplsJoin(ref r) => r.encode(&mut sub),
+           // Self::TcplsJoin(ref r) => r.encode(&mut sub),
             Self::Cookie(ref r) => r.encode(&mut sub),
             Self::CertificateStatusRequest(ref r) => r.encode(&mut sub),
             Self::TransportParameters(ref r) | Self::TransportParametersDraft(ref r) => {
@@ -801,7 +805,7 @@ pub enum ServerExtension {
     TransportParametersDraft(Vec<u8>),
     EarlyData,
     TCPLS,
-    TcplsToken(TcplsToken),
+  //  TcplsToken(TcplsToken),
     Unknown(UnknownExtension),
 }
 
@@ -823,7 +827,7 @@ impl ServerExtension {
             Self::TransportParametersDraft(_) => ExtensionType::TransportParametersDraft,
             Self::EarlyData => ExtensionType::EarlyData,
             Self::TCPLS => ExtensionType::TCPLS,
-            Self::TcplsToken(_) => ExtensionType::TcplsToken,
+           // Self::TcplsToken(_) => ExtensionType::TcplsToken,
             Self::Unknown(ref r) => r.typ,
         }
     }
