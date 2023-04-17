@@ -241,7 +241,7 @@ fn emit_client_hello_for_retry(
         exts.push(ClientExtension::SignedCertificateTimestampRequest);
     }
 
-    if config.enable_tcpls {
+    if cx.common.enable_tcpls {
         exts.push(ClientExtension::TCPLS);
     }
 

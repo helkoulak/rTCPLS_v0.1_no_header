@@ -666,6 +666,8 @@ mod client_hello {
 
         if hello.tcpls_extension_offered() {
             ep.exts.push(ServerExtension::TCPLS);
+            cx.common.enable_tcpls = true;
+
 
         }
 

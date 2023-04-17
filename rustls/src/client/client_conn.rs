@@ -655,6 +655,7 @@ impl ConnectionCore<ClientConnectionData> {
         let mut common_state = CommonState::new(Side::Client);
         common_state.set_max_fragment_size(config.max_fragment_size)?;
         common_state.protocol = proto;
+        common_state.enable_tcpls = config.enable_tcpls;
         #[cfg(feature = "secret_extraction")]
         {
             common_state.enable_secret_extraction = config.enable_secret_extraction;

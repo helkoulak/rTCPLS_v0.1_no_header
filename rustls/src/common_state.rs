@@ -50,6 +50,7 @@ pub struct CommonState {
     pub(crate) quic: quic::Quic,
     #[cfg(feature = "secret_extraction")]
     pub(crate) enable_secret_extraction: bool,
+    pub(crate) enable_tcpls: bool,
 }
 
 impl CommonState {
@@ -64,6 +65,7 @@ impl CommonState {
             may_send_application_data: false,
             may_receive_application_data: false,
             early_traffic: false,
+            enable_tcpls: false,
             sent_fatal_alert: false,
             has_received_close_notify: false,
             has_seen_eof: false,
