@@ -592,6 +592,13 @@ impl ClientConnection {
         self.inner.core.is_early_data_accepted()
     }
 
+    /// Returns True if server signals its support for
+    /// TCPLS in EncryptedExtensions
+    pub fn server_is_tcpls_ready(&self) -> bool {
+        self.inner.core.common_state.enable_tcpls
+    }
+
+
     fn write_early_data(&mut self, data: &[u8]) -> io::Result<usize> {
         self.inner
             .core

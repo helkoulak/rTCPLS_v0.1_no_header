@@ -389,6 +389,13 @@ impl State<ClientConnectionData> for ExpectEncryptedExtensions {
                 }
             }
 
+            let tcpls_supported = cx.common.enable_tcpls;
+            if tcpls_supported {
+                if !exts.enable_tcpls_extension_offered() {
+                    cx.common.enable_tcpls = false;
+                }
+            }
+
             if was_early_traffic && !cx.common.early_traffic {
                 // If no early traffic, set the encryption key for handshakes
                 self.key_schedule

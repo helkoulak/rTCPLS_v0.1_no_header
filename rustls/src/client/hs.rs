@@ -241,9 +241,7 @@ fn emit_client_hello_for_retry(
         exts.push(ClientExtension::SignedCertificateTimestampRequest);
     }
 
-    if cx.common.enable_tcpls {
-        exts.push(ClientExtension::TCPLS);
-    }
+
 
     if let Some(key_share) = &key_share {
         debug_assert!(support_tls13);
@@ -260,6 +258,10 @@ fn emit_client_hello_for_retry(
         // have forward secrecy, and are similar to TLS1.2 resumption.
         let psk_modes = vec![PSKKeyExchangeMode::PSK_DHE_KE];
         exts.push(ClientExtension::PresharedKeyModes(psk_modes));
+
+        if cx.common.enable_tcpls {
+            exts.push(ClientExtension::TCPLS);
+        }
     }
 
     if !config.alpn_protocols.is_empty() {
