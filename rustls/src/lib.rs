@@ -507,3 +507,6 @@ pub mod quic;
 
 /// This is the rustls manual.
 pub mod manual;
+
+/// APIs for implementing TCPLS TLS
+pub mod tcpls;
