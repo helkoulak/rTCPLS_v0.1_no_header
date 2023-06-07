@@ -668,6 +668,7 @@ impl Side {
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub(crate) enum Protocol {
+    Tcpls,
     Tcp,
     #[cfg(feature = "quic")]
     Quic,
