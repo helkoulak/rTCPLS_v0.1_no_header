@@ -662,13 +662,6 @@ mod client_hello {
             ep.exts.push(ServerExtension::EarlyData);
         }
 
-        // Send TCPLS extension in EE if found in CH and supported by server
-
-        if hello.tcpls_extension_offered() && config.enable_tcpls {
-            ep.exts.push(ServerExtension::TCPLS);
-            cx.common.enable_tcpls = true;
-
-        }
 
         let ee = Message {
             version: ProtocolVersion::TLSv1_3,
