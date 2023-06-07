@@ -9,14 +9,18 @@ use std::io::{BufReader, Read, Write};
 use std::net::SocketAddr;
 use std::str;
 
+use rTcpls::{*, client, server, common};
+
 #[macro_use]
 extern crate serde_derive;
 
 use docopt::Docopt;
+use env_logger::builder;
 
-use rustls::{OwnedTrustAnchor, RootCertStore};
+use rustls::{OwnedTrustAnchor, RootCertStore, tcpls};
 
 const CLIENT: mio::Token = mio::Token(0);
+
 
 /// This encapsulates the TCP-level connection, some connection
 /// state, and the underlying TLS-level session.
@@ -24,7 +28,7 @@ struct TlsClient {
     socket: TcpStream,
     closing: bool,
     clean_closure: bool,
-    tls_conn: rustls::ClientConnection,
+    tls_conn: rustls::tcpls::ClientConnection,
 }
 
 impl TlsClient {
@@ -37,7 +41,7 @@ impl TlsClient {
             socket: sock,
             closing: false,
             clean_closure: false,
-            tls_conn: rustls::ClientConnection::new(cfg, server_name).unwrap(),
+            tls_conn: rTcpls::client::new_tls_session(cfg, server_name),
         }
     }
 
@@ -45,12 +49,22 @@ impl TlsClient {
     fn ready(&mut self, ev: &mio::event::Event) {
         assert_eq!(ev.token(), CLIENT);
 
-        if ev.is_readable() {
+        if ev.is_readable() && self.tls_conn.is_handshaking(){
             self.do_read();
         }
 
-        if ev.is_writable() {
+        if ev.is_writable() && self.tls_conn.is_handshaking(){
             self.do_write();
+        }
+
+        if ev.is_writable() && ! self.tls_conn.is_handshaking() {
+            self.tls_conn.writer().write("hello world !!".as_bytes().as_ref());
+            self.do_write();
+        }
+
+
+        if ev.is_readable() && ! self.tls_conn.is_handshaking() {
+            self.do_read();
         }
 
         if self.is_closed() {
@@ -62,10 +76,7 @@ impl TlsClient {
     fn read_source_to_end(&mut self, rd: &mut dyn io::Read) -> io::Result<usize> {
         let mut buf = Vec::new();
         let len = rd.read_to_end(&mut buf)?;
-        self.tls_conn
-            .writer()
-            .write_all(&buf)
-            .unwrap();
+        self.tls_conn.writer().write_all(&buf).unwrap();
         Ok(len)
     }
 
@@ -113,13 +124,8 @@ impl TlsClient {
         if io_state.plaintext_bytes_to_read() > 0 {
             let mut plaintext = Vec::new();
             plaintext.resize(io_state.plaintext_bytes_to_read(), 0u8);
-            self.tls_conn
-                .reader()
-                .read_exact(&mut plaintext)
-                .unwrap();
-            io::stdout()
-                .write_all(&plaintext)
-                .unwrap();
+            self.tls_conn.reader().read_exact(&mut plaintext).unwrap();
+            io::stdout().write_all(&plaintext).unwrap();
         }
 
         // If wethat fails, the peer might have started a clean TLS-level
@@ -241,98 +247,15 @@ struct Args {
     arg_hostname: String,
 }
 
-// TODO: um, well, it turns out that openssl s_client/s_server
-// that we use for testing doesn't do ipv6.  So we can't actually
-// test ipv6 and hence kill this.
-fn lookup_ipv4(host: &str, port: u16) -> SocketAddr {
-    use std::net::ToSocketAddrs;
 
-    let addrs = (host, port).to_socket_addrs().unwrap();
-    for addr in addrs {
-        if let SocketAddr::V4(_) = addr {
-            return addr;
-        }
-    }
 
-    unreachable!("Cannot lookup address");
-}
 
-/// Find a ciphersuite with the given name
-fn find_suite(name: &str) -> Option<rustls::SupportedCipherSuite> {
-    for suite in rustls::ALL_CIPHER_SUITES {
-        let sname = format!("{:?}", suite.suite()).to_lowercase();
 
-        if sname == name.to_string().to_lowercase() {
-            return Some(*suite);
-        }
-    }
 
-    None
-}
 
-/// Make a vector of ciphersuites named in `suites`
-fn lookup_suites(suites: &[String]) -> Vec<rustls::SupportedCipherSuite> {
-    let mut out = Vec::new();
 
-    for csname in suites {
-        let scs = find_suite(csname);
-        match scs {
-            Some(s) => out.push(s),
-            None => panic!("cannot look up ciphersuite '{}'", csname),
-        }
-    }
 
-    out
-}
 
-/// Make a vector of protocol versions named in `versions`
-fn lookup_versions(versions: &[String]) -> Vec<&'static rustls::SupportedProtocolVersion> {
-    let mut out = Vec::new();
-
-    for vname in versions {
-        let version = match vname.as_ref() {
-            "1.2" => &rustls::version::TLS12,
-            "1.3" => &rustls::version::TLS13,
-            _ => panic!(
-                "cannot look up version '{}', valid are '1.2' and '1.3'",
-                vname
-            ),
-        };
-        out.push(version);
-    }
-
-    out
-}
-
-fn load_certs(filename: &str) -> Vec<rustls::Certificate> {
-    let certfile = fs::File::open(filename).expect("cannot open certificate file");
-    let mut reader = BufReader::new(certfile);
-    rustls_pemfile::certs(&mut reader)
-        .unwrap()
-        .iter()
-        .map(|v| rustls::Certificate(v.clone()))
-        .collect()
-}
-
-fn load_private_key(filename: &str) -> rustls::PrivateKey {
-    let keyfile = fs::File::open(filename).expect("cannot open private key file");
-    let mut reader = BufReader::new(keyfile);
-
-    loop {
-        match rustls_pemfile::read_one(&mut reader).expect("cannot parse private key .pem file") {
-            Some(rustls_pemfile::Item::RSAKey(key)) => return rustls::PrivateKey(key),
-            Some(rustls_pemfile::Item::PKCS8Key(key)) => return rustls::PrivateKey(key),
-            Some(rustls_pemfile::Item::ECKey(key)) => return rustls::PrivateKey(key),
-            None => break,
-            _ => {}
-        }
-    }
-
-    panic!(
-        "no keys found in {:?} (encrypted keys not supported)",
-        filename
-    );
-}
 
 #[cfg(feature = "dangerous_configuration")]
 mod danger {
@@ -370,92 +293,20 @@ fn apply_dangerous_options(args: &Args, _: &mut rustls::ClientConfig) {
 
 /// Build a `ClientConfig` from our arguments
 fn make_config(args: &Args, enable_tcpls: bool) -> Arc<rustls::ClientConfig> {
-    let mut root_store = RootCertStore::empty();
-
-    if args.flag_cafile.is_some() {
-        let cafile = args.flag_cafile.as_ref().unwrap();
-
-        let certfile = fs::File::open(cafile).expect("Cannot open CA file");
-        let mut reader = BufReader::new(certfile);
-        root_store.add_parsable_certificates(&rustls_pemfile::certs(&mut reader).unwrap());
-    } else {
-        root_store.add_server_trust_anchors(
-            webpki_roots::TLS_SERVER_ROOTS
-                .0
-                .iter()
-                .map(|ta| {
-                    OwnedTrustAnchor::from_subject_spki_name_constraints(
-                        ta.subject,
-                        ta.spki,
-                        ta.name_constraints,
-                    )
-                }),
-        );
 
 
-    }
+    rTcpls::client::make_tls_client_config(args.flag_cafile.as_ref(), None,
+                                           true, args.flag_suite.clone(), args.flag_protover.clone(), args.flag_auth_key.clone(),
+                                           args.flag_auth_certs.clone(), args.flag_no_tickets, args.flag_no_sni, args.flag_proto.clone(),
+                                           args.flag_insecure, args.flag_max_frag_size)
 
-    let suites = if !args.flag_suite.is_empty() {
-        lookup_suites(&args.flag_suite)
-    } else {
-        rustls::DEFAULT_CIPHER_SUITES.to_vec()
-    };
-
-    let versions = if !args.flag_protover.is_empty() {
-        lookup_versions(&args.flag_protover)
-    } else {
-        rustls::DEFAULT_VERSIONS.to_vec()
-    };
-
-    let config = rustls::ClientConfig::builder()
-        .with_cipher_suites(&suites)
-        .with_safe_default_kx_groups()
-        .with_protocol_versions(&versions)
-        .expect("inconsistent cipher-suite/versions selected")
-        .with_root_certificates(root_store);
-
-    let mut config = match (&args.flag_auth_key, &args.flag_auth_certs) {
-        (Some(key_file), Some(certs_file)) => {
-            let certs = load_certs(certs_file);
-            let key = load_private_key(key_file);
-            config
-                .with_single_cert(certs, key)
-                .expect("invalid client auth certs/key")
-        }
-        (None, None) => config.with_no_client_auth(),
-        (_, _) => {
-            panic!("must provide --auth-certs and --auth-key together");
-        }
-    };
-
-    config.key_log = Arc::new(rustls::KeyLogFile::new());
-
-    if args.flag_no_tickets {
-        config.resumption = config
-            .resumption
-            .tls12_resumption(rustls::client::Tls12Resumption::SessionIdOnly);
-    }
-
-    if args.flag_no_sni {
-        config.enable_sni = false;
-    }
-
-    config.alpn_protocols = args
-        .flag_proto
-        .iter()
-        .map(|proto| proto.as_bytes().to_vec())
-        .collect();
-    config.max_fragment_size = args.flag_max_frag_size;
-
-    config.enable_tcpls = enable_tcpls;
-    apply_dangerous_options(args, &mut config);
-
-    Arc::new(config)
 }
 
 /// Parse some arguments, then make a TLS client connection
 /// somewhere.
 fn main() {
+
+
     let version = env!("CARGO_PKG_NAME").to_string() + ", version: " + env!("CARGO_PKG_VERSION");
 
     let args: Args = Docopt::new(USAGE)
@@ -465,13 +316,11 @@ fn main() {
         .unwrap_or_else(|e| e.exit());
 
     if args.flag_verbose {
-        env_logger::Builder::new()
-            .parse_filters("trace")
-            .init();
+        env_logger::Builder::new().parse_filters("trace").init();
     }
 
     let port = args.flag_port.unwrap_or(443);
-    let addr = lookup_ipv4(args.arg_hostname.as_str(), port);
+    let addr = rTcpls::common::lookup_ipv4(args.arg_hostname.as_str(), port);
 
     let config = make_config(&args, true);
 
@@ -482,6 +331,7 @@ fn main() {
         .try_into()
         .expect("invalid DNS name");
     let mut tlsclient = TlsClient::new(sock, server_name, config);
+
 
     if args.flag_http {
         let httpreq = format!(

@@ -10,6 +10,7 @@ use std::fs;
 use std::io;
 use std::io::{BufReader, Read, Write};
 use std::net;
+use std::str::from_utf8;
 
 #[macro_use]
 extern crate serde_derive;
@@ -66,7 +67,7 @@ impl TlsServer {
                     debug!("Accepting new connection from {:?}", addr);
 
                     let tls_conn =
-                        rustls::ServerConnection::new(Arc::clone(&self.tls_config)).unwrap();
+                        rTcpls::server::new_tls_session(Arc::clone(&self.tls_config));
                     let mode = self.mode.clone();
 
                     let token = mio::Token(self.next_id);
@@ -116,7 +117,7 @@ struct OpenConnection {
     closing: bool,
     closed: bool,
     mode: ServerMode,
-    tls_conn: rustls::ServerConnection,
+    tls_conn: rustls::tcpls::ServerConnection,
     back: Option<TcpStream>,
     sent_http_response: bool,
 }
@@ -153,7 +154,7 @@ impl OpenConnection {
         socket: TcpStream,
         token: mio::Token,
         mode: ServerMode,
-        tls_conn: rustls::ServerConnection,
+        tls_conn: rustls::tcpls::ServerConnection,
     ) -> Self {
         let back = open_back(&mode);
         Self {
@@ -249,6 +250,7 @@ impl OpenConnection {
                     .unwrap();
 
                 debug!("plaintext read {:?}", buf.len());
+                debug!("plaintext read {:?}", from_utf8(buf.as_slice()).unwrap());
                 self.incoming_plaintext(&buf);
             }
         }
@@ -643,7 +645,7 @@ fn main() {
     let mut listener = TcpListener::bind(addr).expect("cannot listen on port");
     let mut poll = mio::Poll::new().unwrap();
     poll.registry()
-        .register(&mut listener, LISTENER, mio::Interest::READABLE)
+        .register(&mut listener, LISTENER, mio::Interest::READABLE | mio::Interest::WRITABLE)
         .unwrap();
 
     let mode = if args.cmd_echo {
