@@ -1824,7 +1824,7 @@ pub trait HasServerExtensions {
             .is_some()
     }
 
-    fn enable_tcpls_extension_offered(&self) -> bool {
+    fn tcpls_extension_offered(&self) -> bool {
         self.find_extension(ExtensionType::TCPLS)
             .is_some()
     }
