@@ -259,9 +259,7 @@ fn emit_client_hello_for_retry(
         let psk_modes = vec![PSKKeyExchangeMode::PSK_DHE_KE];
         exts.push(ClientExtension::PresharedKeyModes(psk_modes));
 
-        if cx.common.enable_tcpls {
-            exts.push(ClientExtension::TCPLS);
-        }
+
     }
 
     if !config.alpn_protocols.is_empty() {
