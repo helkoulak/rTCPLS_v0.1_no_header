@@ -2,19 +2,25 @@
 
     use std::fs;
     use std::io::BufReader;
-    use std::net::{IpAddr, SocketAddr};
+    use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
     use std::sync::Arc;
+    use std::str::FromStr;
+    use std::cell::Ref;
+    use std::ptr::addr_of_mut;
+
+
 
     use mio::net::TcpStream;
     use rustls::internal::record_layer::RecordLayer;
     use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore, ServerConfig, ServerName, Error};
     use rustls::tcpls::{ClientConnection};
-    use std::cell::Ref;
-    use std::ptr::addr_of_mut;
+
+    use crate::common::TcplsSession;
 
 
     pub mod common {
-        use rustls::tcpls::ServerConnection;
+        use std::net::{Ipv4Addr, Ipv6Addr};
+        use rustls::tcpls::{Connection, ServerConnection};
         use super::*;
 
 
@@ -85,55 +91,103 @@
 
 
         pub struct TcplsSession {
-            tls_ctx: TlsConnection,
-            tcpls_connections: Vec<TcplsConnection>,
-            next_connection_id: i32,
-            local_addresses: Vec<SocketAddr>,
-            next_local_address_id: i8,
-            addresses_advertised: Vec<SocketAddr>,
-            remote_addresses: Vec<SocketAddr>,
-            next_remote_address_id: i8,
-            next_stream_id: i32,
-            is_server: bool,
-            is_closed: bool,
+            // pub tls_ctx: Option<>
+            pub tcpls_connections: Option<Vec<u32, &'static mut TcpConnection>>,
+            pub next_connection_id: u32,
+            pub local_addresses_ip4: Option<Vec<Ipv4Addr>>,
+            pub local_addresses_ip6: Option<Vec<Ipv6Addr>>,
+            pub next_local_address_id: u8,
+            pub addresses_advertised: Option<Vec<SocketAddr>>,
+            pub remote_addresses_ip4: Option<Vec<Ipv4Addr>>,
+            pub remote_addresses_ip6: Option<Vec<Ipv6Addr>>,
+            pub next_remote_address_id: u8,
+            pub next_stream_id: u32,
+            pub is_server: bool,
+            pub is_closed: bool,
+            pub tls_hs_completed: bool,
         }
 
         impl TcplsSession {
+            pub fn new() -> Self{
+                Self{
+                    // tls_ctx: None,
+                    tcpls_connections: None,
+                    next_connection_id: 0,
+                    local_addresses_ip4: None,
+                    local_addresses_ip6: None,
+                    next_local_address_id: 0,
+                    addresses_advertised: None,
+                    remote_addresses_ip4: None,
+                    remote_addresses_ip6: None,
+                    next_remote_address_id: 0,
+                    next_stream_id: 0,
+                    is_server: false,
+                    is_closed: false,
+                    tls_hs_completed: false,
+                }
+            }
 
 
+
+        }
+
+
+        pub struct TcpConnection {
+            pub connection_id: u32,
+            pub socket: Option<TcpStream>,
+            pub local_address_id: u8,
+            pub remote_address_id: u8,
+            pub local_address: Option<SocketAddr>,
+            pub peer_address: Option<SocketAddr>,
+            pub is_closed: bool,
+            pub attached_streams: Option<Vec<Stream>>,
+            // pub encryption_ctx: Option<Tls13MessageEncrypter>,
+            // pub decryption_ctx: Option<Tls13MessageDecrypter>,
+            pub nbr_bytes_received: u32,
+            // nbr records received on this con since the last ack sent
+            pub nbr_records_received: u32,
+            // nbr records received on this con since the last ack sent
+            pub is_primary: bool,
+            // Is this connection the default one?
+            pub state: TcplsConnectionState,
+
+        }
+
+        impl TcpConnection {
+            pub fn new() -> Self{
+                Self{
+                    connection_id: 0,
+                    socket: None,
+                    local_address_id: 0,
+                    remote_address_id: 0,
+                    local_address: None,
+                    peer_address: None,
+                    is_closed: false,
+                    attached_streams: None,
+                    // encryption_ctx: None,
+                    // decryption_ctx: None,
+                    nbr_bytes_received: 0,
+                    nbr_records_received: 0,
+                    is_primary: false,
+                    state: TcplsConnectionState::CLOSED,
+                }
+
+            }
         }
 
         pub enum TcplsConnectionState {
             CLOSED,
+            INITIALIZED,
+            STARTED,         // Handshake started.
             FAILED,
             CONNECTING,
-            CONNECTED,
+            CONNECTED,       // Handshake completed.
             JOINED,
         }
 
-        pub struct TcplsConnection {
-            connection_id: u32,
-            connection_fd: u32,
-            local_address_id: u8,
-            remote_address_id: u8,
-            peer_address: SocketAddr,
-            peer_address_len: u32,
-            is_closed: bool,
-            attached_streams: Vec<TcplsStream>,
-            tcpls_conn_state: TcplsConnectionState,
-            encryption_ctx: RecordLayer,
-            decryption_ctx: RecordLayer,
-            nbr_bytes_received: u32,
-            // nbr records received on this con since the last ack sent
-            nbr_records_received: u32,
-            // nbr records received on this con since the last ack sent
-            is_primary: bool,
-            // Is this connection the default one?
-            state: TcplsConnectionState,
-        }
 
+        pub struct Stream {
 
-        pub struct TcplsStream {
             stream_id: u32,
             /** when this stream should first send an attach event before
                      * sending any packet */
@@ -158,16 +212,6 @@
         }
 
 
-        pub enum TlsConnection {
-            /// A client connection
-            Client(ClientConnection),
-            /// A server connection
-            Server(ServerConnection),
-        }
-        impl TlsConnection {
-
-
-        }
 
 
 
@@ -176,25 +220,20 @@
         }
 
 
-        pub fn tcpls_new_session(client_config: Arc<ClientConfig>, server_config: Arc<ServerConfig>, name: ServerName, isServer: bool){
-
-
-
+        pub fn tcpls_new_session(client_config: Arc<ClientConfig>, server_config: Arc<ServerConfig>, name: ServerName, is_server: bool) -> TcplsSession {
+            let mut tcpls_session = TcplsSession::new();
+            tcpls_session.is_server = is_server;
+            tcpls_session
         }
 
 
 
-        pub fn lookup_ipv4(host: &str, port: u16) -> SocketAddr {
-            use std::net::ToSocketAddrs;
 
-            let addrs = (host, port).to_socket_addrs().unwrap();
-            for addr in addrs {
-                if let SocketAddr::V4(_) = addr {
-                    return addr;
-                }
-            }
 
-            unreachable!("Cannot lookup address");
+        pub fn lookup_address(host: &str, port: u16) -> SocketAddr {
+
+            let mut  addrs = (host, port).to_socket_addrs().unwrap(); // resolves hostname and return an itr
+            addrs.next().expect("Cannot lookup address")
         }
 
 
@@ -306,9 +345,47 @@
 
 
     pub mod client {
-
         use super::*;
         use super::common::*;
+
+        pub fn init_tcp_connection(tcpls_session: &mut TcplsSession) {
+            let tcp_conn = TcpConnection::new();
+
+
+        }
+
+        pub fn tcp_connect(dest_hostname: &str, local_address: SocketAddr,
+                           port: u16, tcpls_session: &mut TcplsSession, tcp_conn: &mut TcpConnection) {
+            let dest_address = lookup_address(dest_hostname, port);
+
+            let socket = TcpStream::connect(dest_address).unwrap();
+            tcp_conn.socket.insert(socket);
+            if tcpls_session.tcpls_connections.is_none() {
+
+            }
+
+
+            tcp_conn.connection_id = tcpls_session.next_connection_id;
+            tcpls_session.next_connection_id += 1;
+
+            tcp_conn.local_address.insert(local_address);
+            tcp_conn.local_address_id = tcpls_session.next_local_address_id;
+            tcpls_session.next_local_address_id+= 1;
+
+            tcp_conn.peer_address.insert(dest_address);
+            tcp_conn.remote_address_id = tcpls_session.next_remote_address_id;
+            tcpls_session.next_remote_address_id+= 1;
+
+
+
+            tcpls_session
+
+
+
+
+        }
+
+
 
         pub fn new_tls_session(config: Arc<ClientConfig>, name: ServerName) -> ClientConnection{
 
