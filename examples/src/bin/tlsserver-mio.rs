@@ -67,7 +67,7 @@ impl TlsServer {
                     debug!("Accepting new connection from {:?}", addr);
 
                     let tls_conn =
-                        rTcpls::server::new_tls_session(Arc::clone(&self.tls_config));
+                        rustls::tcpls::server_new_tls_session(Arc::clone(&self.tls_config));
                     let mode = self.mode.clone();
 
                     let token = mio::Token(self.next_id);

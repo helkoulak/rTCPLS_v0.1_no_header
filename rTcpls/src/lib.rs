@@ -23,6 +23,19 @@
         use rustls::tcpls::{Connection, ServerConnection};
         use super::*;
 
+        pub enum TcplsFrameTypes {
+            Padding = 0x00,
+            Ping = 0x01,
+            Stream = 0x02,
+            StreamWithFin = 0x03,
+            ACK = 0x04,
+            NewToken = 0x05,
+            ConnectionReset = 0x06,
+            NewAddress = 0x07,
+            RemoveAddress = 0x08,
+            StreamChange = 0x09,
+        }
+
 
         pub enum TcplsFrame<'a> {
             Padding(PaddingFrame),
@@ -38,11 +51,11 @@
 
 
         pub struct PaddingFrame {
-            frame_type: u8,
+            frame_type: TcplsFrameTypes,
         }
 
         pub struct PingFrame {
-            frame_type: u8,
+            frame_type: TcplsFrameTypes,
         }
 
         pub struct StreamFrame<'a> {
@@ -56,18 +69,18 @@
         pub struct AckFrame {
             highest_record_sn_received: u64,
             connection_id: u32,
-            frame_type: u8,
+            frame_type: TcplsFrameTypes,
         }
 
         pub struct NewTokenFrame<'a> {
             token: &'a mut [u8; 32],
             sequence: u8,
-            frame_type: u8,
+            frame_type: TcplsFrameTypes,
         }
 
         pub struct ConnectionResetFrame {
             connection_id: u32,
-            frame_type: u8,
+            frame_type: TcplsFrameTypes,
         }
 
         pub struct NewAddressFrame {
@@ -75,31 +88,33 @@
             address: IpAddr,
             address_version: u8,
             address_id: u8,
-            frame_type: u8,
+            frame_type: TcplsFrameTypes,
         }
 
         pub struct RemoveAddressFrame {
             address_id: u8,
-            frame_type: u8,
+            frame_type: TcplsFrameTypes,
         }
 
         pub struct StreamChangeFrame {
             next_record_stream_id: u32,
             next_offset: u64,
-            frame_type: u8,
+            frame_type: TcplsFrameTypes,
         }
 
 
-        pub struct TcplsSession {
+        pub struct TcplsSession<'a> {
             // pub tls_ctx: Option<>
-            pub tcpls_connections: Option<Vec<u32, &'static mut TcpConnection>>,
+            pub tcpls_connections: Vec<&'a mut TcpConnection>,
+            pub open_connections_ids: Vec<u32>,
+            pub closed_connections_ids: Vec<u32>,
             pub next_connection_id: u32,
-            pub local_addresses_ip4: Option<Vec<Ipv4Addr>>,
-            pub local_addresses_ip6: Option<Vec<Ipv6Addr>>,
+            pub local_addresses_ip4: Vec<Ipv4Addr>,
+            pub local_addresses_ip6: Vec<Ipv6Addr>,
             pub next_local_address_id: u8,
-            pub addresses_advertised: Option<Vec<SocketAddr>>,
-            pub remote_addresses_ip4: Option<Vec<Ipv4Addr>>,
-            pub remote_addresses_ip6: Option<Vec<Ipv6Addr>>,
+            pub addresses_advertised: Vec<SocketAddr>,
+            pub remote_addresses_ip4: Vec<Ipv4Addr>,
+            pub remote_addresses_ip6: Vec<Ipv6Addr>,
             pub next_remote_address_id: u8,
             pub next_stream_id: u32,
             pub is_server: bool,
@@ -111,14 +126,16 @@
             pub fn new() -> Self{
                 Self{
                     // tls_ctx: None,
-                    tcpls_connections: None,
+                    tcpls_connections: Vec::new(),
+                    open_connections_ids: Vec::new(),
+                    closed_connections_ids: Vec::new(),
                     next_connection_id: 0,
-                    local_addresses_ip4: None,
-                    local_addresses_ip6: None,
+                    local_addresses_ip4: Vec::new(),
+                    local_addresses_ip6: Vec::new(),
                     next_local_address_id: 0,
-                    addresses_advertised: None,
-                    remote_addresses_ip4: None,
-                    remote_addresses_ip6: None,
+                    addresses_advertised: Vec::new(),
+                    remote_addresses_ip4: Vec::new(),
+                    remote_addresses_ip6: Vec::new(),
                     next_remote_address_id: 0,
                     next_stream_id: 0,
                     is_server: false,
@@ -173,6 +190,11 @@
                 }
 
             }
+
+           // < pub fn create_tcp_connection() -> TcpConnection {
+           //      let tcp_conn = TcpConnection::new();
+           //      tcp_conn
+           //  }
         }
 
         pub enum TcplsConnectionState {
@@ -220,11 +242,9 @@
         }
 
 
-        pub fn tcpls_new_session(client_config: Arc<ClientConfig>, server_config: Arc<ServerConfig>, name: ServerName, is_server: bool) -> TcplsSession {
-            let mut tcpls_session = TcplsSession::new();
-            tcpls_session.is_server = is_server;
-            tcpls_session
-        }
+        // pub fn create_tcpls_session(client_config: Arc<ClientConfig>, server_config: Arc<ServerConfig>, name: ServerName, is_server: bool) -> TcplsSession {
+        //     let mut tcpls_session = TcplsSession::new();
+        // }
 
 
 
@@ -348,24 +368,18 @@
         use super::*;
         use super::common::*;
 
-        pub fn init_tcp_connection(tcpls_session: &mut TcplsSession) {
-            let tcp_conn = TcpConnection::new();
 
 
-        }
+        pub fn client_tcp_connect(dest_hostname: &str, local_address: SocketAddr, port: u16, tcpls_session: &mut TcplsSession, tcp_conn: &mut TcpConnection) {
 
-        pub fn tcp_connect(dest_hostname: &str, local_address: SocketAddr,
-                           port: u16, tcpls_session: &mut TcplsSession, tcp_conn: &mut TcpConnection) {
             let dest_address = lookup_address(dest_hostname, port);
 
             let socket = TcpStream::connect(dest_address).unwrap();
-            tcp_conn.socket.insert(socket);
-            if tcpls_session.tcpls_connections.is_none() {
-
-            }
-
+            let _ = tcp_conn.socket.insert(socket);
 
             tcp_conn.connection_id = tcpls_session.next_connection_id;
+            tcpls_session.open_connections_ids.push(tcp_conn.connection_id);
+
             tcpls_session.next_connection_id += 1;
 
             tcp_conn.local_address.insert(local_address);
@@ -377,17 +391,11 @@
             tcpls_session.next_remote_address_id+= 1;
 
 
-
-            tcpls_session
-
-
-
-
         }
 
 
 
-        pub fn new_tls_session(config: Arc<ClientConfig>, name: ServerName) -> ClientConnection{
+        pub fn client_new_tls_session(config: Arc<ClientConfig>, name: ServerName) -> ClientConnection{
 
             rustls::tcpls::ClientConnection::new(config, name).expect("Establishing a TLS session has failed")
         }
@@ -476,9 +484,9 @@
 mod tests {
     use super::*;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
+    // #[test]
+    // fn it_works() {
+    //     let result = add(2, 2);
+    //     assert_eq!(result, 4);
+    // }
 }

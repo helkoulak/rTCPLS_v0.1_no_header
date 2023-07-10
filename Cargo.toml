@@ -1,8 +1,8 @@
 [workspace]
 members = [
 
-  # the rust implementation of the protocol TCPLS
-    "rTcpls",
+#  # the rust implementation of the protocol TCPLS
+#    "rTcpls",
   # tests and example code
     "examples",
   # the main library and tests

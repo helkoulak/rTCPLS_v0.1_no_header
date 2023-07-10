@@ -9,7 +9,7 @@ use std::io::{BufReader, Read, Write};
 use std::net::SocketAddr;
 use std::str;
 
-use rTcpls::{*, client, server, common};
+use crate::tcpls::*;
 
 #[macro_use]
 extern crate serde_derive;
@@ -41,7 +41,7 @@ impl TlsClient {
             socket: sock,
             closing: false,
             clean_closure: false,
-            tls_conn: rTcpls::client::new_tls_session(cfg, server_name),
+            tls_conn: rustls::tcpls::client_new_tls_session(cfg, server_name),
         }
     }
 
@@ -292,10 +292,10 @@ fn apply_dangerous_options(args: &Args, _: &mut rustls::ClientConfig) {
 }
 
 /// Build a `ClientConfig` from our arguments
-fn make_config(args: &Args, enable_tcpls: bool) -> Arc<rustls::ClientConfig> {
+fn make_config(args: &Args) -> Arc<rustls::ClientConfig> {
 
 
-    rTcpls::client::make_tls_client_config(args.flag_cafile.as_ref(), None,
+    rustls::tcpls::make_tls_client_config(args.flag_cafile.as_ref(), None,
                                            true, args.flag_suite.clone(), args.flag_protover.clone(), args.flag_auth_key.clone(),
                                            args.flag_auth_certs.clone(), args.flag_no_tickets, args.flag_no_sni, args.flag_proto.clone(),
                                            args.flag_insecure, args.flag_max_frag_size)
@@ -320,9 +320,9 @@ fn main() {
     }
 
     let port = args.flag_port.unwrap_or(443);
-    let addr = rTcpls::common::lookup_ipv4(args.arg_hostname.as_str(), port);
+    let addr = rustls::tcpls::lookup_address(args.arg_hostname.as_str(), port);
 
-    let config = make_config(&args, true);
+    let config = make_config(&args);
 
     let sock = TcpStream::connect(addr).unwrap();
     let server_name = args
