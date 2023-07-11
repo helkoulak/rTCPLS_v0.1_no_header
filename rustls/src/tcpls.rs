@@ -14,17 +14,16 @@ use crate::tls13::key_schedule::hkdf_expand;
 use crate::tls13::{Tls13CipherSuite, TLS13_AES_128_GCM_SHA256_INTERNAL};
 
 use ring::{aead, hkdf};
+use mio::net::TcpStream;
 
 use std::collections::VecDeque;
 use std::fmt::{self, Debug};
 use std::io;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
-
-
 use std::fs;
 use std::io::BufReader;
-use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs, Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 use std::cell::Ref;
 use std::ptr::addr_of_mut;
@@ -33,10 +32,13 @@ use std::ptr::addr_of_mut;
 
 // use mio::net::TcpStream;
 use crate::internal::record_layer::RecordLayer;
-use crate::{ClientConfig, OwnedTrustAnchor, RootCertStore, ServerConfig, ServerName, Error, ConnectionCommon, SupportedCipherSuite, ALL_CIPHER_SUITES, SupportedProtocolVersion, version, Certificate, PrivateKey, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, tcpls, KeyLogFile};
-use std::net::{Ipv4Addr, Ipv6Addr};
+use crate::{ClientConfig, OwnedTrustAnchor, RootCertStore,
+            ServerConfig, ServerName, Error, ConnectionCommon, SupportedCipherSuite,
+            ALL_CIPHER_SUITES, SupportedProtocolVersion, version, Certificate, PrivateKey,
+            DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, tcpls, KeyLogFile};
 
 
+pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize = crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
 
     pub enum TcplsFrameTypes {
         Padding = 0x00,
@@ -166,8 +168,8 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
     pub struct TcpConnection {
         pub connection_id: u32,
-        pub socket: Option<TcpStream>,
-        // token: mio::Token,
+        pub socket: Option<>,
+        pub token: mio::Token,
         pub local_address_id: u8,
         pub remote_address_id: u8,
         pub local_address: Option<SocketAddr>,
@@ -191,7 +193,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
             Self{
                 connection_id: 0,
                 socket: None,
-                // token: (),
+                token: mio::Token(0),
                 local_address_id: 0,
                 remote_address_id: 0,
                 local_address: None,
@@ -259,14 +261,6 @@ use std::net::{Ipv4Addr, Ipv6Addr};
     }
 
 
-    // pub fn create_tcpls_session(client_config: Arc<ClientConfig>, server_config: Arc<ServerConfig>, name: ServerName, is_server: bool) -> TcplsSession {
-    //     let mut tcpls_session = TcplsSession::new();
-    // }
-
-
-
-
-
     pub fn lookup_address(host: &str, port: u16) -> SocketAddr {
 
         let mut  addrs = (host, port).to_socket_addrs().unwrap(); // resolves hostname and return an itr
@@ -284,16 +278,10 @@ use std::net::{Ipv4Addr, Ipv6Addr};
             let mut reader = BufReader::new(cert_file);
             root_store.add_parsable_certificates(&rustls_pemfile::certs(&mut reader).unwrap());
 
-        } else if cert_store.is_some(){
-            root_store = cert_store.unwrap();
+        } else if cert_store.is_none(){
+            panic!("either a file path for a cert store or an RootCertStore should be provided")
         } else {
-            root_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
-                OwnedTrustAnchor::from_subject_spki_name_constraints(
-                    ta.subject,
-                    ta.spki,
-                    ta.name_constraints,
-                )
-            }));
+            root_store = cert_store.unwrap();
         }
 
         root_store
@@ -381,16 +369,16 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 
 
-    pub fn tcp_connect(dest_hostname: &str, local_address: SocketAddr, port: u16, tcpls_session: &mut TcplsSession, tcp_conn: &mut TcpConnection) {
+    pub fn tcp_connect(dest_hostname: &str, port: u16, tcpls_session: &mut TcplsSession, tcp_conn: &mut TcpConnection) {
 
         let dest_address = lookup_address(dest_hostname, port);
-
         let socket = TcpStream::connect(dest_address).unwrap();
+
         let _ = tcp_conn.socket.insert(socket);
-
         tcp_conn.connection_id = tcpls_session.next_connection_id;
-        tcpls_session.open_connections_ids.push(tcp_conn.connection_id);
+        tcp_conn.token(tcp_conn.connection_id);
 
+        tcpls_session.open_connections_ids.push(tcp_conn.connection_id);
         tcpls_session.next_connection_id += 1;
 
         let _ = tcp_conn.local_address.insert(local_address);
@@ -402,6 +390,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
         tcpls_session.next_remote_address_id+= 1;
 
 
+        
     }
 
 

@@ -8,6 +8,7 @@ use std::io;
 use std::io::{BufReader, Read, Write};
 use std::net::SocketAddr;
 use std::str;
+use local_ip_address::local_ip;
 
 use crate::tcpls::*;
 
@@ -319,18 +320,23 @@ fn main() {
         env_logger::Builder::new().parse_filters("trace").init();
     }
 
+    let tcpls_session = tcpls::TcplsSession::new();
+    let tcp_conn = tcpls::TcpConnection::new();
+
     let port = args.flag_port.unwrap_or(443);
-    let addr = rustls::tcpls::lookup_address(args.arg_hostname.as_str(), port);
-
     let config = make_config(&args);
+    let local_address = local_ip();
 
-    let sock = TcpStream::connect(addr).unwrap();
+    // let addr = rustls::tcpls::lookup_address(args.arg_hostname.as_str(), port);
+    // let sock = TcpStream::connect(addr).unwrap();
+    let sock= tcpls::tcp_connect(args.arg_hostname.as_str(), std::net::)
+
     let server_name = args
         .arg_hostname
         .as_str()
         .try_into()
         .expect("invalid DNS name");
-    let mut tlsclient = TlsClient::new(sock, server_name, config);
+    let mut tlsclient = TlsClient::new(tcp_conn.socket.unwrap(), server_name, config);
 
 
     if args.flag_http {

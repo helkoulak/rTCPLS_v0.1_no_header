@@ -17,10 +17,9 @@ rustversion = { version = "1.0.6", optional = true }
 
 [dependencies]
 log = { version = "0.4.4", optional = true }
-mio = { version = "0.8", features = ["net", "os-poll"] }
-webpki-roots = "0.23"
 ring = "0.16.20"
 sct = "0.7.0"
+mio = { version = "0.8", features = ["net", "os-poll"] }
 webpki = { package = "rustls-webpki", version = "0.100.0", features = ["alloc", "std"] }
 rustls-pemfile = "1.0.0"
 
@@ -38,8 +37,9 @@ bencher = "0.1.5"
 env_logger = "0.9.0" # 0.10 requires an MSRV bump to 1.60
 log = "0.4.4"
 webpki-roots = "0.23.0"
-
+rustls-pemfile = "1.0.0"
 base64 = "0.21"
+
 
 [[example]]
 name = "bogo_shim"
