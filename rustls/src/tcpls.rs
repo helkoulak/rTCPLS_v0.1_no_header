@@ -14,7 +14,9 @@ use crate::tls13::key_schedule::hkdf_expand;
 use crate::tls13::{Tls13CipherSuite, TLS13_AES_128_GCM_SHA256_INTERNAL};
 
 use ring::{aead, hkdf};
+
 use mio::net::TcpStream;
+use mio::Token;
 
 use std::collections::VecDeque;
 use std::fmt::{self, Debug};
@@ -28,9 +30,10 @@ use std::str::FromStr;
 use std::cell::Ref;
 use std::ptr::addr_of_mut;
 
+use local_ip_address::local_ip;
 
 
-// use mio::net::TcpStream;
+
 use crate::internal::record_layer::RecordLayer;
 use crate::{ClientConfig, OwnedTrustAnchor, RootCertStore,
             ServerConfig, ServerName, Error, ConnectionCommon, SupportedCipherSuite,
@@ -122,16 +125,16 @@ pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize = crate::msgs::fragmenter
 
     pub struct TcplsSession<'a> {
         // pub tls_ctx: Option<>
-        pub tcpls_connections: Vec<&'a mut TcpConnection>,
+        pub tcp_connections: Vec<&'a mut TcpConnection<'a>>,
         pub open_connections_ids: Vec<u32>,
         pub closed_connections_ids: Vec<u32>,
         pub next_connection_id: u32,
-        pub local_addresses_ip4: Vec<Ipv4Addr>,
-        pub local_addresses_ip6: Vec<Ipv6Addr>,
+        pub local_addresses_ip4: Vec<SocketAddr>,
+        pub local_addresses_ip6: Vec<SocketAddr>,
         pub next_local_address_id: u8,
         pub addresses_advertised: Vec<SocketAddr>,
-        pub remote_addresses_ip4: Vec<Ipv4Addr>,
-        pub remote_addresses_ip6: Vec<Ipv6Addr>,
+        pub remote_addresses_ip4: Vec<SocketAddr>,
+        pub remote_addresses_ip6: Vec<SocketAddr>,
         pub next_remote_address_id: u8,
         pub next_stream_id: u32,
         pub is_server: bool,
@@ -143,7 +146,7 @@ pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize = crate::msgs::fragmenter
         pub fn new() -> Self{
             Self{
                 // tls_ctx: None,
-                tcpls_connections: Vec::new(),
+                tcp_connections: Vec::new(),
                 open_connections_ids: Vec::new(),
                 closed_connections_ids: Vec::new(),
                 next_connection_id: 0,
@@ -166,18 +169,18 @@ pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize = crate::msgs::fragmenter
     }
 
 
-    pub struct TcpConnection {
+    pub struct TcpConnection <'a>{
         pub connection_id: u32,
-        pub socket: Option<>,
-        pub token: mio::Token,
+        pub socket: Option<TcpStream>,
+        pub token: Token,
+        pub server_name: String,
         pub local_address_id: u8,
-        pub remote_address_id: u8,
         pub local_address: Option<SocketAddr>,
-        pub peer_address: Option<SocketAddr>,
-        pub is_closed: bool,
-        pub attached_streams: Option<Vec<Stream>>,
+        pub remote_address_id: u8,
+        pub remote_address: Option<SocketAddr>,
+        pub attached_streams: Vec<Stream>,
         // pub encryption_ctx: Option<Tls13MessageEncrypter>,
-        // pub decryption_ctx: Option<Tls13MessageDecrypter>,
+        // pub decryption_ctx: Option<crate::tls13::Tls13MessageDecrypter>,
         pub nbr_bytes_received: u32,
         // nbr records received on this con since the last ack sent
         pub nbr_records_received: u32,
@@ -193,13 +196,13 @@ pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize = crate::msgs::fragmenter
             Self{
                 connection_id: 0,
                 socket: None,
-                token: mio::Token(0),
+                token: Token(0),
+                server_name: String::new(),
                 local_address_id: 0,
-                remote_address_id: 0,
                 local_address: None,
-                peer_address: None,
-                is_closed: false,
-                attached_streams: None,
+                remote_address_id: 0,
+                remote_address: None,
+                attached_streams: Vec::new(),
                 // encryption_ctx: None,
                 // decryption_ctx: None,
                 nbr_bytes_received: 0,
@@ -369,28 +372,41 @@ pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize = crate::msgs::fragmenter
 
 
 
-    pub fn tcp_connect(dest_hostname: &str, port: u16, tcpls_session: &mut TcplsSession, tcp_conn: &mut TcpConnection) {
+    pub fn tcp_connect<'a>(dest_address: SocketAddr, port: u16, tcpls_session: &'a mut TcplsSession<'a>, tcp_conn: &'a mut TcpConnection) {
+               //TODO: find a way to calculate local address
+        // let my_local_ip = local_ip().unwrap();
 
-        let dest_address = lookup_address(dest_hostname, port);
-        let socket = TcpStream::connect(dest_address).unwrap();
+        let socket = TcpStream::connect(dest_address).expect("TCP connection establishment failed").unwrap();
 
         let _ = tcp_conn.socket.insert(socket);
         tcp_conn.connection_id = tcpls_session.next_connection_id;
-        tcp_conn.token(tcp_conn.connection_id);
+        tcp_conn.local_address_id = tcpls_session.next_local_address_id;
+        tcp_conn.remote_address_id = tcpls_session.next_remote_address_id;
+
+        if tcp_conn.connection_id == 0 {
+            tcp_conn.is_primary = true;
+        }
+
+        // tcp_conn.local_address
+        let _ = tcp_conn.remote_address.insert(dest_address);
+
 
         tcpls_session.open_connections_ids.push(tcp_conn.connection_id);
+        tcpls_session.tcp_connections.push(tcp_conn);
         tcpls_session.next_connection_id += 1;
+        tcpls_session.next_local_address_id += 1;
+        tcpls_session.next_remote_address_id += 1;
 
-        let _ = tcp_conn.local_address.insert(local_address);
-        tcp_conn.local_address_id = tcpls_session.next_local_address_id;
-        tcpls_session.next_local_address_id+= 1;
+        match dest_address.is_ipv4(){
+            true =>  {tcpls_session.remote_addresses_ip4.push(dest_address);
+                // tcpls_session.local_addresses_ip4.push();
+            },
+            false => {
+                tcpls_session.remote_addresses_ip6.push(dest_address);
+                // tcpls_session.local_addresses_ip6.push();
+            },
+        }
 
-        let _ = tcp_conn.peer_address.insert(dest_address);
-        tcp_conn.remote_address_id = tcpls_session.next_remote_address_id;
-        tcpls_session.next_remote_address_id+= 1;
-
-
-        
     }
 
 

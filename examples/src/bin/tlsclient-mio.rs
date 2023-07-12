@@ -8,7 +8,7 @@ use std::io;
 use std::io::{BufReader, Read, Write};
 use std::net::SocketAddr;
 use std::str;
-use local_ip_address::local_ip;
+// use local_ip_address::local_ip;
 
 use crate::tcpls::*;
 
@@ -23,8 +23,7 @@ use rustls::{OwnedTrustAnchor, RootCertStore, tcpls};
 const CLIENT: mio::Token = mio::Token(0);
 
 
-/// This encapsulates the TCP-level connection, some connection
-/// state, and the underlying TLS-level session.
+
 struct TlsClient {
     socket: TcpStream,
     closing: bool,
@@ -296,7 +295,7 @@ fn apply_dangerous_options(args: &Args, _: &mut rustls::ClientConfig) {
 fn make_config(args: &Args) -> Arc<rustls::ClientConfig> {
 
 
-    rustls::tcpls::make_tls_client_config(args.flag_cafile.as_ref(), None,
+    make_tls_client_config(args.flag_cafile.as_ref(), None,
                                            true, args.flag_suite.clone(), args.flag_protover.clone(), args.flag_auth_key.clone(),
                                            args.flag_auth_certs.clone(), args.flag_no_tickets, args.flag_no_sni, args.flag_proto.clone(),
                                            args.flag_insecure, args.flag_max_frag_size)
@@ -319,17 +318,18 @@ fn main() {
     if args.flag_verbose {
         env_logger::Builder::new().parse_filters("trace").init();
     }
+    let dest_address = lookup_address(args.arg_hostname.as_str(), port);
 
-    let tcpls_session = tcpls::TcplsSession::new();
-    let tcp_conn = tcpls::TcpConnection::new();
+    let mut tcpls_session = tcpls::TcplsSession::new();
+    let mut tcp_conn = tcpls::TcpConnection::new();
+
+    tcp_conn.server_name = args.arg_hostname.as_str().parse().unwrap();
 
     let port = args.flag_port.unwrap_or(443);
     let config = make_config(&args);
-    let local_address = local_ip();
+    // let local_address = local_ip();
 
-    // let addr = rustls::tcpls::lookup_address(args.arg_hostname.as_str(), port);
-    // let sock = TcpStream::connect(addr).unwrap();
-    let sock= tcpls::tcp_connect(args.arg_hostname.as_str(), std::net::)
+    tcp_connect(dest_address, port, &mut tcpls_session, &mut tcp_conn);
 
     let server_name = args
         .arg_hostname
@@ -356,7 +356,7 @@ fn main() {
     }
 
     let mut poll = mio::Poll::new().unwrap();
-    let mut events = mio::Events::with_capacity(32);
+    let mut events = mio::Events::with_capacity(50);
     tlsclient.register(poll.registry());
 
     loop {
