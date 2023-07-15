@@ -22,7 +22,7 @@ sct = "0.7.0"
 mio = { version = "0.8", features = ["net", "os-poll"] }
 webpki = { package = "rustls-webpki", version = "0.100.0", features = ["alloc", "std"] }
 rustls-pemfile = "1.0.0"
-local-ip-address = "0.5.3"
+
 
 [features]
 default = ["logging", "tls12"]
