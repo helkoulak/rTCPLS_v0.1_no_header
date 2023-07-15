@@ -29,16 +29,14 @@ use std::net::{IpAddr, SocketAddr, ToSocketAddrs, Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 use std::cell::Ref;
 use std::env::Args;
+use std::process::Termination;
 use std::ptr::addr_of_mut;
 
 
 use crate::msgs::codec;
 
 use crate::internal::record_layer::RecordLayer;
-use crate::{ClientConfig, OwnedTrustAnchor, RootCertStore,
-            ServerConfig, ServerName, Error, ConnectionCommon, SupportedCipherSuite,
-            ALL_CIPHER_SUITES, SupportedProtocolVersion, version, Certificate, PrivateKey,
-            DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, tcpls, KeyLogFile};
+use crate::{ClientConfig, OwnedTrustAnchor, RootCertStore, ServerConfig, ServerName, Error, ConnectionCommon, SupportedCipherSuite, ALL_CIPHER_SUITES, SupportedProtocolVersion, version, Certificate, PrivateKey, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, tcpls, KeyLogFile, cipher};
 
 
 
@@ -369,7 +367,7 @@ pub enum TcplsFrame {
     /// Build a `rustls::ClientConfig`
     pub fn make_tls_client_config(cert_path: Option<&String>, cert_store: Option<RootCertStore>, enable_tcpls: bool, cipher_suites: Vec<String>,
                                   protocol_ver: Vec<String>, auth_key: Option<String>, auth_certs: Option<String>,
-                                  no_tickets: bool, no_sni: bool, proto: Vec<String>, insecure: bool, max_frag_size: Option<usize>) -> Arc<ClientConfig> {
+                                  no_tickets: bool, no_sni: bool, proto: Vec<String>, max_frag_size: Option<usize>) -> Arc<ClientConfig> {
 
         let mut root_store = build_cert_store(cert_path, cert_store);
 
@@ -432,15 +430,15 @@ pub enum TcplsFrame {
     }
 
 
-pub(crate) fn prepare_connection_crypto_context(iv: &Iv, connection_id: u32) {
+pub(crate) fn prepare_connection_crypto_context(iv: &mut Iv, connection_id: u32) {
     let mut conn_id = [0u8; aead::NONCE_LEN];
     put_u32(connection_id, &mut conn_id[..4]);
 
     conn_id
         .iter_mut()
-        .zip(iv.0.iter())
+        .zip(iv.0.iter_mut())
         .for_each(|(conn_id, iv)| {
-            *conn_id ^= *iv;
+            *iv ^= *conn_id;
         });
 
 }
@@ -571,3 +569,13 @@ impl From<ServerConnection> for Connection {
         Self::Server(c)
     }
 }
+
+#[test]
+fn test_prep_crypto_context(){
+    let mut iv= Iv::copy(&[0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]) ;
+    let mut iv_result= Iv::copy(&[0x0C, 0x0B, 0x0A, 0x05, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]) ;
+    let connection_id:u32 = 0x0C;
+    prepare_connection_crypto_context(&mut iv, connection_id);
+   assert_eq!(iv.value(), iv_result.value())
+
+   }
