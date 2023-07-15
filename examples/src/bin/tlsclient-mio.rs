@@ -58,7 +58,8 @@ impl TlsClient {
         }
 
         if ev.is_writable() && ! self.tls_conn.is_handshaking() {
-            self.tls_conn.writer().write("hello world !!".as_bytes().as_ref());
+            let buf = [0; TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH];
+            self.tls_conn.writer().write(& buf);
             self.do_write();
         }
 
@@ -290,17 +291,17 @@ fn apply_dangerous_options(args: &Args, _: &mut rustls::ClientConfig) {
         panic!("This build does not support --insecure.");
     }
 }
-
 /// Build a `ClientConfig` from our arguments
-fn make_config(args: &Args) -> Arc<rustls::ClientConfig> {
+fn make_tls_client_config_args(args: &Args) -> Arc<rustls::ClientConfig> {
 
 
     make_tls_client_config(args.flag_cafile.as_ref(), None,
-                                           true, args.flag_suite.clone(), args.flag_protover.clone(), args.flag_auth_key.clone(),
-                                           args.flag_auth_certs.clone(), args.flag_no_tickets, args.flag_no_sni, args.flag_proto.clone(),
-                                           args.flag_insecure, args.flag_max_frag_size)
+                           true, args.flag_suite.clone(), args.flag_protover.clone(), args.flag_auth_key.clone(),
+                           args.flag_auth_certs.clone(), args.flag_no_tickets, args.flag_no_sni, args.flag_proto.clone(),
+                           args.flag_insecure, args.flag_max_frag_size)
 
 }
+
 
 /// Parse some arguments, then make a TLS client connection
 /// somewhere.
@@ -318,42 +319,26 @@ fn main() {
     if args.flag_verbose {
         env_logger::Builder::new().parse_filters("trace").init();
     }
-    let dest_address = lookup_address(args.arg_hostname.as_str(), port);
+    let dest_address = tcpls::lookup_address(args.arg_hostname.as_str(), args.flag_port.unwrap());
 
     let mut tcpls_session = tcpls::TcplsSession::new();
     let mut tcp_conn = tcpls::TcpConnection::new();
 
-    tcp_conn.server_name = args.arg_hostname.as_str().parse().unwrap();
+    let config = make_tls_client_config_args(&args);
 
-    let port = args.flag_port.unwrap_or(443);
-    let config = make_config(&args);
-    // let local_address = local_ip();
+    let server_name = args.arg_hostname.as_str().try_into().expect("invalid DNS name");
 
-    tcp_connect(dest_address, port, &mut tcpls_session, &mut tcp_conn);
+    tcp_conn.server_name = args.arg_hostname.clone();
 
-    let server_name = args
-        .arg_hostname
-        .as_str()
-        .try_into()
-        .expect("invalid DNS name");
+
+    tcp_connect(dest_address, &mut tcpls_session, &mut tcp_conn);
+
+
+
     let mut tlsclient = TlsClient::new(tcp_conn.socket.unwrap(), server_name, config);
 
 
-    if args.flag_http {
-        let httpreq = format!(
-            "GET / HTTP/1.0\r\nHost: {}\r\nConnection: \
-                               close\r\nAccept-Encoding: identity\r\n\r\n",
-            args.arg_hostname
-        );
-        tlsclient
-            .write_all(httpreq.as_bytes())
-            .unwrap();
-    } else {
-       // let mut stdin = io::stdin();
-       // tlsclient
-         //   .read_source_to_end(&mut stdin)
-          //  .unwrap();
-    }
+
 
     let mut poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(50);
