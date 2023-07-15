@@ -20,7 +20,7 @@ use mio::Token;
 
 use std::collections::VecDeque;
 use std::fmt::{self, Debug};
-use std::io;
+use std::{io, u32};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::fs;
@@ -28,11 +28,11 @@ use std::io::BufReader;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs, Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 use std::cell::Ref;
+use std::env::Args;
 use std::ptr::addr_of_mut;
 
-use local_ip_address::local_ip;
 
-
+use crate::msgs::codec;
 
 use crate::internal::record_layer::RecordLayer;
 use crate::{ClientConfig, OwnedTrustAnchor, RootCertStore,
@@ -41,101 +41,72 @@ use crate::{ClientConfig, OwnedTrustAnchor, RootCertStore,
             DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, tcpls, KeyLogFile};
 
 
-pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize = crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
 
-    pub enum TcplsFrameTypes {
-        Padding = 0x00,
-        Ping = 0x01,
-        Stream = 0x02,
-        StreamWithFin = 0x03,
-        ACK = 0x04,
-        NewToken = 0x05,
-        ConnectionReset = 0x06,
-        NewAddress = 0x07,
-        RemoveAddress = 0x08,
-        StreamChange = 0x09,
-    }
+pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize = crate::msgs::fragmenter::MAX_FRAGMENT_LEN - STREAM_FRAME_OVERHEAD;
+
+pub const STREAM_FRAME_OVERHEAD: usize = 15; // Type = 1 Byte + Stream Id = 4 Bytes + Offset = 8 Bytes + Length = 2 Bytes
 
 
-    pub enum TcplsFrame<'a> {
-        Padding(PaddingFrame),
-        Ping(PingFrame),
-        Stream(StreamFrame<'a>),
-        ACK(AckFrame),
-        NewToken(NewTokenFrame<'a>),
-        ConnectionReset(ConnectionResetFrame),
-        NewAddress(NewAddressFrame),
-        RemoveAddress(RemoveAddressFrame),
-        StreamChange(StreamChangeFrame),
-    }
+#[derive(Clone, PartialEq, Eq)]
+pub enum TcplsFrame {
+    Padding,
 
+    Ping,
 
-    pub struct PaddingFrame {
-        frame_type: TcplsFrameTypes,
-    }
-
-    pub struct PingFrame {
-        frame_type: TcplsFrameTypes,
-    }
-
-    pub struct StreamFrame<'a> {
-        stream_data: &'a mut [u8],
+    Stream {
+        stream_data: Vec<u8>,
         length: u16,
         offset: u64,
         stream_id: u32,
-        type_with_lsb_fin: u8,
-    }
 
-    pub struct AckFrame {
+    },
+
+    ACK {
         highest_record_sn_received: u64,
         connection_id: u32,
-        frame_type: TcplsFrameTypes,
-    }
 
-    pub struct NewTokenFrame<'a> {
-        token: &'a mut [u8; 32],
+    },
+
+    NewToken {
+        token: [u8; 32],
         sequence: u8,
-        frame_type: TcplsFrameTypes,
-    }
 
-    pub struct ConnectionResetFrame {
+    },
+
+    ConnectionReset {
         connection_id: u32,
-        frame_type: TcplsFrameTypes,
-    }
 
-    pub struct NewAddressFrame {
+    },
+
+    NewAddress {
         port: u16,
         address: IpAddr,
         address_version: u8,
         address_id: u8,
-        frame_type: TcplsFrameTypes,
-    }
 
-    pub struct RemoveAddressFrame {
+    },
+
+    RemoveAddress {
         address_id: u8,
-        frame_type: TcplsFrameTypes,
-    }
 
-    pub struct StreamChangeFrame {
+    },
+
+    StreamChange {
         next_record_stream_id: u32,
         next_offset: u64,
-        frame_type: TcplsFrameTypes,
-    }
 
+    }
+}
 
     pub struct TcplsSession<'a> {
         // pub tls_ctx: Option<>
-        pub tcp_connections: Vec<&'a mut TcpConnection<'a>>,
+        pub tcp_connections: Vec<&'a mut TcpConnection>,
         pub open_connections_ids: Vec<u32>,
         pub closed_connections_ids: Vec<u32>,
         pub next_connection_id: u32,
-        pub local_addresses_ip4: Vec<SocketAddr>,
-        pub local_addresses_ip6: Vec<SocketAddr>,
         pub next_local_address_id: u8,
-        pub addresses_advertised: Vec<SocketAddr>,
-        pub remote_addresses_ip4: Vec<SocketAddr>,
-        pub remote_addresses_ip6: Vec<SocketAddr>,
         pub next_remote_address_id: u8,
+        pub addresses_advertised: Vec<SocketAddr>,
         pub next_stream_id: u32,
         pub is_server: bool,
         pub is_closed: bool,
@@ -150,12 +121,8 @@ pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize = crate::msgs::fragmenter
                 open_connections_ids: Vec::new(),
                 closed_connections_ids: Vec::new(),
                 next_connection_id: 0,
-                local_addresses_ip4: Vec::new(),
-                local_addresses_ip6: Vec::new(),
                 next_local_address_id: 0,
                 addresses_advertised: Vec::new(),
-                remote_addresses_ip4: Vec::new(),
-                remote_addresses_ip6: Vec::new(),
                 next_remote_address_id: 0,
                 next_stream_id: 0,
                 is_server: false,
@@ -169,15 +136,13 @@ pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize = crate::msgs::fragmenter
     }
 
 
-    pub struct TcpConnection <'a>{
+    pub struct TcpConnection {
         pub connection_id: u32,
         pub socket: Option<TcpStream>,
         pub token: Token,
         pub server_name: String,
         pub local_address_id: u8,
-        pub local_address: Option<SocketAddr>,
         pub remote_address_id: u8,
-        pub remote_address: Option<SocketAddr>,
         pub attached_streams: Vec<Stream>,
         // pub encryption_ctx: Option<Tls13MessageEncrypter>,
         // pub decryption_ctx: Option<crate::tls13::Tls13MessageDecrypter>,
@@ -199,9 +164,7 @@ pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize = crate::msgs::fragmenter
                 token: Token(0),
                 server_name: String::new(),
                 local_address_id: 0,
-                local_address: None,
                 remote_address_id: 0,
-                remote_address: None,
                 attached_streams: Vec::new(),
                 // encryption_ctx: None,
                 // decryption_ctx: None,
@@ -372,11 +335,9 @@ pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize = crate::msgs::fragmenter
 
 
 
-    pub fn tcp_connect<'a>(dest_address: SocketAddr, port: u16, tcpls_session: &'a mut TcplsSession<'a>, tcp_conn: &'a mut TcpConnection) {
-               //TODO: find a way to calculate local address
-        // let my_local_ip = local_ip().unwrap();
+    pub fn tcp_connect<'a>(dest_address: SocketAddr, tcpls_session: &'a mut TcplsSession<'a>, tcp_conn: &'a mut TcpConnection) {
 
-        let socket = TcpStream::connect(dest_address).expect("TCP connection establishment failed").unwrap();
+        let socket = TcpStream::connect(dest_address).expect("TCP connection establishment failed");
 
         let _ = tcp_conn.socket.insert(socket);
         tcp_conn.connection_id = tcpls_session.next_connection_id;
@@ -387,25 +348,13 @@ pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize = crate::msgs::fragmenter
             tcp_conn.is_primary = true;
         }
 
-        // tcp_conn.local_address
-        let _ = tcp_conn.remote_address.insert(dest_address);
-
-
         tcpls_session.open_connections_ids.push(tcp_conn.connection_id);
         tcpls_session.tcp_connections.push(tcp_conn);
         tcpls_session.next_connection_id += 1;
         tcpls_session.next_local_address_id += 1;
         tcpls_session.next_remote_address_id += 1;
 
-        match dest_address.is_ipv4(){
-            true =>  {tcpls_session.remote_addresses_ip4.push(dest_address);
-                // tcpls_session.local_addresses_ip4.push();
-            },
-            false => {
-                tcpls_session.remote_addresses_ip6.push(dest_address);
-                // tcpls_session.local_addresses_ip6.push();
-            },
-        }
+
 
     }
 
@@ -483,6 +432,23 @@ pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize = crate::msgs::fragmenter
     }
 
 
+pub(crate) fn prepare_connection_crypto_context(iv: &Iv, connection_id: u32) {
+    let mut conn_id = [0u8; aead::NONCE_LEN];
+    put_u32(connection_id, &mut conn_id[..4]);
+
+    conn_id
+        .iter_mut()
+        .zip(iv.0.iter())
+        .for_each(|(conn_id, iv)| {
+            *conn_id ^= *iv;
+        });
+
+}
+
+pub fn put_u32(v: u32, bytes: &mut [u8]) {
+    let bytes: &mut [u8; 4] = (&mut bytes[..4]).try_into().unwrap();
+    *bytes = u32::to_be_bytes(v);
+}
 
 
  pub fn server_new_tls_session(config: Arc<ServerConfig>) -> ServerConnection {
