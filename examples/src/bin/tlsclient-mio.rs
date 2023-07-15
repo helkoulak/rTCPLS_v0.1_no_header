@@ -297,8 +297,7 @@ fn make_tls_client_config_args(args: &Args) -> Arc<rustls::ClientConfig> {
 
     make_tls_client_config(args.flag_cafile.as_ref(), None,
                            true, args.flag_suite.clone(), args.flag_protover.clone(), args.flag_auth_key.clone(),
-                           args.flag_auth_certs.clone(), args.flag_no_tickets, args.flag_no_sni, args.flag_proto.clone(),
-                           args.flag_insecure, args.flag_max_frag_size)
+                           args.flag_auth_certs.clone(), args.flag_no_tickets, args.flag_no_sni, args.flag_proto.clone(), args.flag_max_frag_size)
 
 }
 
