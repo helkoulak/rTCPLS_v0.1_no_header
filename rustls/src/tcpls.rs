@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
 /// This module contains optional APIs for implementing TCPLS.
-use crate::cipher::{Iv, IvLen};
+use crate::cipher::Iv;
 use crate::client::ClientConnectionData;
 use crate::common_state::{CommonState, Protocol, Side};
 use crate::conn::{ConnectionCore, SideData};
@@ -18,13 +18,13 @@ use ring::{aead, hkdf};
 use mio::net::TcpStream;
 use mio::Token;
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::fmt::{self, Debug};
 use std::{io, u32};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::fs;
-use std::io::BufReader;
+use std::io::{BufReader, Read};
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs, Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 use std::cell::Ref;
@@ -36,8 +36,8 @@ use std::ptr::addr_of_mut;
 use crate::msgs::codec;
 
 use crate::internal::record_layer::RecordLayer;
-use crate::{ClientConfig, OwnedTrustAnchor, RootCertStore, ServerConfig, ServerName, Error, ConnectionCommon, SupportedCipherSuite, ALL_CIPHER_SUITES, SupportedProtocolVersion, version, Certificate, PrivateKey, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, tcpls, KeyLogFile, cipher};
-
+use crate::{ClientConfig, RootCertStore, ServerConfig, ServerName, Error, ConnectionCommon, SupportedCipherSuite, ALL_CIPHER_SUITES, SupportedProtocolVersion, version, Certificate, PrivateKey, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, tcpls, KeyLogFile, cipher, ALL_VERSIONS, Ticketer, server};
+use crate::verify::{AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth};
 
 
 pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize = crate::msgs::fragmenter::MAX_FRAGMENT_LEN - STREAM_FRAME_OVERHEAD;
@@ -96,9 +96,10 @@ pub enum TcplsFrame {
     }
 }
 
-    pub struct TcplsSession<'a> {
-        // pub tls_ctx: Option<>
-        pub tcp_connections: Vec<&'a mut TcpConnection>,
+    pub struct TcplsSession {
+        pub tls_ctx: Option<TlsContext>,
+        pub tcp_connections: Vec<TcpConnection>,
+        pub pending_tcp_connections: Vec<TcpConnection>,
         pub open_connections_ids: Vec<u32>,
         pub closed_connections_ids: Vec<u32>,
         pub next_connection_id: u32,
@@ -111,11 +112,12 @@ pub enum TcplsFrame {
         pub tls_hs_completed: bool,
     }
 
-    impl <'a> TcplsSession<'a> {
+    impl TcplsSession {
         pub fn new() -> Self{
             Self{
-                // tls_ctx: None,
+                tls_ctx: None,
                 tcp_connections: Vec::new(),
+                pending_tcp_connections: Vec::new(),
                 open_connections_ids: Vec::new(),
                 closed_connections_ids: Vec::new(),
                 next_connection_id: 0,
@@ -133,17 +135,21 @@ pub enum TcplsFrame {
 
     }
 
+    pub enum  TlsContext{
+        Client(Arc<ClientConfig>),
+        Server(Arc<ServerConfig>),
+    }
+
+
+
+
 
     pub struct TcpConnection {
         pub connection_id: u32,
         pub socket: Option<TcpStream>,
-        pub token: Token,
-        pub server_name: String,
         pub local_address_id: u8,
         pub remote_address_id: u8,
-        pub attached_streams: Vec<Stream>,
-        // pub encryption_ctx: Option<Tls13MessageEncrypter>,
-        // pub decryption_ctx: Option<crate::tls13::Tls13MessageDecrypter>,
+        pub attached_stream: Option<Stream>,
         pub nbr_bytes_received: u32,
         // nbr records received on this con since the last ack sent
         pub nbr_records_received: u32,
@@ -159,13 +165,9 @@ pub enum TcplsFrame {
             Self{
                 connection_id: 0,
                 socket: None,
-                token: Token(0),
-                server_name: String::new(),
                 local_address_id: 0,
                 remote_address_id: 0,
-                attached_streams: Vec::new(),
-                // encryption_ctx: None,
-                // decryption_ctx: None,
+                attached_stream: None,
                 nbr_bytes_received: 0,
                 nbr_records_received: 0,
                 is_primary: false,
@@ -174,10 +176,7 @@ pub enum TcplsFrame {
 
         }
 
-        // < pub fn create_tcp_connection() -> TcpConnection {
-        //      let tcp_conn = TcpConnection::new();
-        //      tcp_conn
-        //  }
+
     }
 
     pub enum TcplsConnectionState {
@@ -217,14 +216,6 @@ pub enum TcplsFrame {
     }
 
 
-
-
-
-    pub struct TlsClientConfig{
-
-    }
-
-
     pub fn lookup_address(host: &str, port: u16) -> SocketAddr {
 
         let mut  addrs = (host, port).to_socket_addrs().unwrap(); // resolves hostname and return an itr
@@ -249,6 +240,17 @@ pub enum TcplsFrame {
         }
 
         root_store
+    }
+
+    fn load_ocsp(filename: &Option<String>) -> Vec<u8> {
+        let mut ret = Vec::new();
+        if let Some(name) = filename {
+            fs::File::open(name)
+                .expect("cannot open ocsp file")
+                .read_to_end(&mut ret)
+                .unwrap();
+        }
+        ret
     }
 
 
@@ -286,7 +288,6 @@ pub enum TcplsFrame {
 
         for vname in versions {
             let version = match vname.as_ref() {
-                //"1.2" => &rustls::version::TLS12,
                 "1.3" => &version::TLS13,
                 _ => panic!(
                     "cannot look up version '{}', TCPLS supports only TLS '1.3'",
@@ -333,11 +334,15 @@ pub enum TcplsFrame {
 
 
 
-    pub fn tcp_connect<'a>(dest_address: SocketAddr, tcpls_session: &'a mut TcplsSession<'a>, tcp_conn: &'a mut TcpConnection) {
+    pub fn tcp_connect(dest_address: SocketAddr, tcpls_session: &mut TcplsSession) {
+
+        let mut tcp_conn = TcpConnection::new();
 
         let socket = TcpStream::connect(dest_address).expect("TCP connection establishment failed");
 
+
         let _ = tcp_conn.socket.insert(socket);
+
         tcp_conn.connection_id = tcpls_session.next_connection_id;
         tcp_conn.local_address_id = tcpls_session.next_local_address_id;
         tcp_conn.remote_address_id = tcpls_session.next_remote_address_id;
@@ -352,8 +357,6 @@ pub enum TcplsFrame {
         tcpls_session.next_local_address_id += 1;
         tcpls_session.next_remote_address_id += 1;
 
-
-
     }
 
 
@@ -365,9 +368,9 @@ pub enum TcplsFrame {
 
 
     /// Build a `rustls::ClientConfig`
-    pub fn make_tls_client_config(cert_path: Option<&String>, cert_store: Option<RootCertStore>, enable_tcpls: bool, cipher_suites: Vec<String>,
-                                  protocol_ver: Vec<String>, auth_key: Option<String>, auth_certs: Option<String>,
-                                  no_tickets: bool, no_sni: bool, proto: Vec<String>, max_frag_size: Option<usize>) -> Arc<ClientConfig> {
+    pub fn build_tls_client_config(cert_path: Option<&String>, cert_store: Option<RootCertStore>, cipher_suites: Vec<String>,
+                                   protocol_ver: Vec<String>, auth_key: Option<String>, auth_certs: Option<String>,
+                                   no_tickets: bool, no_sni: bool, proto: Vec<String>, max_frag_size: Option<usize>) -> Arc<ClientConfig> {
 
         let mut root_store = build_cert_store(cert_path, cert_store);
 
@@ -424,7 +427,75 @@ pub enum TcplsFrame {
         }
 
 
-        config.enable_tcpls = enable_tcpls;
+        Arc::new(config)
+    }
+
+    pub fn build_tls_server_config(client_verify: Option<String>, require_auth: bool, suite: Vec<String>,
+                               protover: Vec<String>,  certs: Option<String>, key: Option<String>,
+                               ocsp: Option<String>, resumption: bool, tickets: bool, proto: Vec<String>) -> Arc<ServerConfig> {
+        let client_auth = if client_verify.is_some() {
+            let roots = load_certs(client_verify.as_ref().unwrap());
+            let mut client_auth_roots = RootCertStore::empty();
+            for root in roots {
+                client_auth_roots.add(&root).unwrap();
+            }
+            if require_auth {
+                AllowAnyAuthenticatedClient::new(client_auth_roots).boxed()
+            } else {
+                AllowAnyAnonymousOrAuthenticatedClient::new(client_auth_roots).boxed()
+            }
+        } else {
+            NoClientAuth::boxed()
+        };
+
+        let suites = if !suite.is_empty() {
+            lookup_suites(&suite)
+        } else {
+            ALL_CIPHER_SUITES.to_vec()
+        };
+
+        let versions = if !protover.is_empty() {
+            lookup_versions(&protover)
+        } else {
+            ALL_VERSIONS.to_vec()
+        };
+
+        let certs = load_certs(
+            certs
+                .as_ref()
+                .expect("--certs option missing"),
+        );
+        let privkey = load_private_key(
+            key
+                .as_ref()
+                .expect("--key option missing"),
+        );
+        let ocsp = load_ocsp(&ocsp);
+
+        let mut config = ServerConfig::builder()
+            .with_cipher_suites(&suites)
+            .with_safe_default_kx_groups()
+            .with_protocol_versions(&versions)
+            .expect("inconsistent cipher-suites/versions specified")
+            .with_client_cert_verifier(client_auth)
+            .with_single_cert_with_ocsp_and_sct(certs, privkey, ocsp, vec![])
+            .expect("bad certificates/private key");
+
+        config.key_log = Arc::new(KeyLogFile::new());
+
+        if resumption {
+            config.session_storage = server::ServerSessionMemoryCache::new(256);
+        }
+
+        if tickets {
+            config.ticketer = Ticketer::new().unwrap();
+        }
+
+        config.alpn_protocols = proto
+            .iter()
+            .map(|proto| proto.as_bytes().to_vec())
+            .collect::<Vec<_>>();
+
 
         Arc::new(config)
     }

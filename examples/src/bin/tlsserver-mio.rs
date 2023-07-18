@@ -20,7 +20,8 @@ use docopt::Docopt;
 use rustls::server::{
     AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
 };
-use rustls::{self, RootCertStore};
+use rustls::{self, RootCertStore, tcpls};
+use rustls::tcpls::{load_certs, load_private_key, lookup_suites, lookup_versions};
 
 // Token for our listening socket.
 const LISTENER: mio::Token = mio::Token(0);
@@ -447,7 +448,7 @@ Options:
 ";
 
 #[derive(Debug, Deserialize)]
-struct Args {
+pub struct Args {
     cmd_echo: bool,
     cmd_http: bool,
     flag_port: Option<u16>,
@@ -465,161 +466,167 @@ struct Args {
     arg_fport: Option<u16>,
 }
 
-fn find_suite(name: &str) -> Option<rustls::SupportedCipherSuite> {
-    for suite in rustls::ALL_CIPHER_SUITES {
-        let sname = format!("{:?}", suite.suite()).to_lowercase();
+// fn find_suite(name: &str) -> Option<rustls::SupportedCipherSuite> {
+//     for suite in rustls::ALL_CIPHER_SUITES {
+//         let sname = format!("{:?}", suite.suite()).to_lowercase();
+//
+//         if sname == name.to_string().to_lowercase() {
+//             return Some(*suite);
+//         }
+//     }
+//
+//     None
+// }
 
-        if sname == name.to_string().to_lowercase() {
-            return Some(*suite);
-        }
-    }
-
-    None
-}
-
-fn lookup_suites(suites: &[String]) -> Vec<rustls::SupportedCipherSuite> {
-    let mut out = Vec::new();
-
-    for csname in suites {
-        let scs = find_suite(csname);
-        match scs {
-            Some(s) => out.push(s),
-            None => panic!("cannot look up ciphersuite '{}'", csname),
-        }
-    }
-
-    out
-}
+// fn lookup_suites(suites: &[String]) -> Vec<rustls::SupportedCipherSuite> {
+//     let mut out = Vec::new();
+//
+//     for csname in suites {
+//         let scs = find_suite(csname);
+//         match scs {
+//             Some(s) => out.push(s),
+//             None => panic!("cannot look up ciphersuite '{}'", csname),
+//         }
+//     }
+//
+//     out
+// }
 
 /// Make a vector of protocol versions named in `versions`
-fn lookup_versions(versions: &[String]) -> Vec<&'static rustls::SupportedProtocolVersion> {
-    let mut out = Vec::new();
+// fn lookup_versions(versions: &[String]) -> Vec<&'static rustls::SupportedProtocolVersion> {
+//     let mut out = Vec::new();
+//
+//     for vname in versions {
+//         let version = match vname.as_ref() {
+//             "1.2" => &rustls::version::TLS12,
+//             "1.3" => &rustls::version::TLS13,
+//             _ => panic!(
+//                 "cannot look up version '{}', valid are '1.2' and '1.3'",
+//                 vname
+//             ),
+//         };
+//         out.push(version);
+//     }
+//
+//     out
+// }
 
-    for vname in versions {
-        let version = match vname.as_ref() {
-            "1.2" => &rustls::version::TLS12,
-            "1.3" => &rustls::version::TLS13,
-            _ => panic!(
-                "cannot look up version '{}', valid are '1.2' and '1.3'",
-                vname
-            ),
-        };
-        out.push(version);
-    }
+// fn load_certs(filename: &str) -> Vec<rustls::Certificate> {
+//     let certfile = fs::File::open(filename).expect("cannot open certificate file");
+//     let mut reader = BufReader::new(certfile);
+//     rustls_pemfile::certs(&mut reader)
+//         .unwrap()
+//         .iter()
+//         .map(|v| rustls::Certificate(v.clone()))
+//         .collect()
+// }
 
-    out
-}
+// fn load_private_key(filename: &str) -> rustls::PrivateKey {
+//     let keyfile = fs::File::open(filename).expect("cannot open private key file");
+//     let mut reader = BufReader::new(keyfile);
+//
+//     loop {
+//         match rustls_pemfile::read_one(&mut reader).expect("cannot parse private key .pem file") {
+//             Some(rustls_pemfile::Item::RSAKey(key)) => return rustls::PrivateKey(key),
+//             Some(rustls_pemfile::Item::PKCS8Key(key)) => return rustls::PrivateKey(key),
+//             Some(rustls_pemfile::Item::ECKey(key)) => return rustls::PrivateKey(key),
+//             None => break,
+//             _ => {}
+//         }
+//     }
+//
+//     panic!(
+//         "no keys found in {:?} (encrypted keys not supported)",
+//         filename
+//     );
+// }
 
-fn load_certs(filename: &str) -> Vec<rustls::Certificate> {
-    let certfile = fs::File::open(filename).expect("cannot open certificate file");
-    let mut reader = BufReader::new(certfile);
-    rustls_pemfile::certs(&mut reader)
-        .unwrap()
-        .iter()
-        .map(|v| rustls::Certificate(v.clone()))
-        .collect()
-}
+// fn load_ocsp(filename: &Option<String>) -> Vec<u8> {
+//     let mut ret = Vec::new();
+//
+//     if let Some(name) = filename {
+//         fs::File::open(name)
+//             .expect("cannot open ocsp file")
+//             .read_to_end(&mut ret)
+//             .unwrap();
+//     }
+//
+//     ret
+// }
 
-fn load_private_key(filename: &str) -> rustls::PrivateKey {
-    let keyfile = fs::File::open(filename).expect("cannot open private key file");
-    let mut reader = BufReader::new(keyfile);
+// fn make_config(args: &Args) -> Arc<rustls::ServerConfig> {
+//     let client_auth = if args.flag_auth.is_some() {
+//         let roots = load_certs(args.flag_auth.as_ref().unwrap());
+//         let mut client_auth_roots = RootCertStore::empty();
+//         for root in roots {
+//             client_auth_roots.add(&root).unwrap();
+//         }
+//         if args.flag_require_auth {
+//             AllowAnyAuthenticatedClient::new(client_auth_roots).boxed()
+//         } else {
+//             AllowAnyAnonymousOrAuthenticatedClient::new(client_auth_roots).boxed()
+//         }
+//     } else {
+//         NoClientAuth::boxed()
+//     };
+//
+//     let suites = if !args.flag_suite.is_empty() {
+//         lookup_suites(&args.flag_suite)
+//     } else {
+//         rustls::ALL_CIPHER_SUITES.to_vec()
+//     };
+//
+//     let versions = if !args.flag_protover.is_empty() {
+//         lookup_versions(&args.flag_protover)
+//     } else {
+//         rustls::ALL_VERSIONS.to_vec()
+//     };
+//
+//     let certs = load_certs(
+//         args.flag_certs
+//             .as_ref()
+//             .expect("--certs option missing"),
+//     );
+//     let privkey = load_private_key(
+//         args.flag_key
+//             .as_ref()
+//             .expect("--key option missing"),
+//     );
+//     let ocsp = load_ocsp(&args.flag_ocsp);
+//
+//     let mut config = rustls::ServerConfig::builder()
+//         .with_cipher_suites(&suites)
+//         .with_safe_default_kx_groups()
+//         .with_protocol_versions(&versions)
+//         .expect("inconsistent cipher-suites/versions specified")
+//         .with_client_cert_verifier(client_auth)
+//         .with_single_cert_with_ocsp_and_sct(certs, privkey, ocsp, vec![])
+//         .expect("bad certificates/private key");
+//
+//     config.key_log = Arc::new(rustls::KeyLogFile::new());
+//
+//     if args.flag_resumption {
+//         config.session_storage = rustls::server::ServerSessionMemoryCache::new(256);
+//     }
+//
+//     if args.flag_tickets {
+//         config.ticketer = rustls::Ticketer::new().unwrap();
+//     }
+//
+//     config.alpn_protocols = args
+//         .flag_proto
+//         .iter()
+//         .map(|proto| proto.as_bytes().to_vec())
+//         .collect::<Vec<_>>();
+//
+//
+//     Arc::new(config)
+// }
 
-    loop {
-        match rustls_pemfile::read_one(&mut reader).expect("cannot parse private key .pem file") {
-            Some(rustls_pemfile::Item::RSAKey(key)) => return rustls::PrivateKey(key),
-            Some(rustls_pemfile::Item::PKCS8Key(key)) => return rustls::PrivateKey(key),
-            Some(rustls_pemfile::Item::ECKey(key)) => return rustls::PrivateKey(key),
-            None => break,
-            _ => {}
-        }
-    }
-
-    panic!(
-        "no keys found in {:?} (encrypted keys not supported)",
-        filename
-    );
-}
-
-fn load_ocsp(filename: &Option<String>) -> Vec<u8> {
-    let mut ret = Vec::new();
-
-    if let Some(name) = filename {
-        fs::File::open(name)
-            .expect("cannot open ocsp file")
-            .read_to_end(&mut ret)
-            .unwrap();
-    }
-
-    ret
-}
-
-fn make_config(args: &Args, enable_tcpls: bool) -> Arc<rustls::ServerConfig> {
-    let client_auth = if args.flag_auth.is_some() {
-        let roots = load_certs(args.flag_auth.as_ref().unwrap());
-        let mut client_auth_roots = RootCertStore::empty();
-        for root in roots {
-            client_auth_roots.add(&root).unwrap();
-        }
-        if args.flag_require_auth {
-            AllowAnyAuthenticatedClient::new(client_auth_roots).boxed()
-        } else {
-            AllowAnyAnonymousOrAuthenticatedClient::new(client_auth_roots).boxed()
-        }
-    } else {
-        NoClientAuth::boxed()
-    };
-
-    let suites = if !args.flag_suite.is_empty() {
-        lookup_suites(&args.flag_suite)
-    } else {
-        rustls::ALL_CIPHER_SUITES.to_vec()
-    };
-
-    let versions = if !args.flag_protover.is_empty() {
-        lookup_versions(&args.flag_protover)
-    } else {
-        rustls::ALL_VERSIONS.to_vec()
-    };
-
-    let certs = load_certs(
-        args.flag_certs
-            .as_ref()
-            .expect("--certs option missing"),
-    );
-    let privkey = load_private_key(
-        args.flag_key
-            .as_ref()
-            .expect("--key option missing"),
-    );
-    let ocsp = load_ocsp(&args.flag_ocsp);
-
-    let mut config = rustls::ServerConfig::builder()
-        .with_cipher_suites(&suites)
-        .with_safe_default_kx_groups()
-        .with_protocol_versions(&versions)
-        .expect("inconsistent cipher-suites/versions specified")
-        .with_client_cert_verifier(client_auth)
-        .with_single_cert_with_ocsp_and_sct(certs, privkey, ocsp, vec![])
-        .expect("bad certificates/private key");
-
-    config.key_log = Arc::new(rustls::KeyLogFile::new());
-
-    if args.flag_resumption {
-        config.session_storage = rustls::server::ServerSessionMemoryCache::new(256);
-    }
-
-    if args.flag_tickets {
-        config.ticketer = rustls::Ticketer::new().unwrap();
-    }
-
-    config.alpn_protocols = args
-        .flag_proto
-        .iter()
-        .map(|proto| proto.as_bytes().to_vec())
-        .collect::<Vec<_>>();
-
-    config.enable_tcpls = enable_tcpls;
-    Arc::new(config)
+    pub fn build_tls_server_config_args(args: &Args) -> Arc<rustls::ServerConfig> {
+        tcpls::build_tls_server_config(args.flag_auth.clone(), args.flag_require_auth, args.flag_suite.clone(),
+                            args.flag_protover.clone(),  args.flag_certs.clone(), args.flag_key.clone(),
+                            args.flag_ocsp.clone(), args.flag_resumption, args.flag_tickets, args.flag_proto.clone())
 }
 
 fn main() {
@@ -640,7 +647,7 @@ fn main() {
     let mut addr: net::SocketAddr = "0.0.0.0:443".parse().unwrap();
     addr.set_port(args.flag_port.unwrap_or(443));
 
-    let config = make_config(&args, true);
+    let config = build_tls_server_config_args(&args);
 
     let mut listener = TcpListener::bind(addr).expect("cannot listen on port");
     let mut poll = mio::Poll::new().unwrap();

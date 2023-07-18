@@ -19,26 +19,26 @@ use docopt::Docopt;
 use env_logger::builder;
 
 use rustls::{OwnedTrustAnchor, RootCertStore, tcpls};
+use rustls::tcpls::TlsContext::Client;
 
 const CLIENT: mio::Token = mio::Token(0);
 
 
 
 struct TlsClient {
-    socket: TcpStream,
     closing: bool,
     clean_closure: bool,
     tls_conn: rustls::tcpls::ClientConnection,
 }
 
-impl TlsClient {
+impl  TlsClient {
     fn new(
-        sock: TcpStream,
+
         server_name: rustls::ServerName,
         cfg: Arc<rustls::ClientConfig>,
     ) -> Self {
         Self {
-            socket: sock,
+
             closing: false,
             clean_closure: false,
             tls_conn: rustls::tcpls::client_new_tls_session(cfg, server_name),
@@ -46,26 +46,26 @@ impl TlsClient {
     }
 
     /// Handles events sent to the TlsClient by mio::Poll
-    fn ready(&mut self, ev: &mio::event::Event) {
+    fn ready(&mut self, ev: &mio::event::Event, socket: &mut TcpStream) {
         assert_eq!(ev.token(), CLIENT);
 
         if ev.is_readable() && self.tls_conn.is_handshaking(){
-            self.do_read();
+            self.do_read(socket);
         }
 
         if ev.is_writable() && self.tls_conn.is_handshaking(){
-            self.do_write();
+            self.do_write(socket);
         }
 
         if ev.is_writable() && ! self.tls_conn.is_handshaking() {
             let buf = [0; TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH];
             self.tls_conn.writer().write(& buf);
-            self.do_write();
+            self.do_write(socket);
         }
 
 
         if ev.is_readable() && ! self.tls_conn.is_handshaking() {
-            self.do_read();
+            self.do_read(socket);
         }
 
         if self.is_closed() {
@@ -82,10 +82,10 @@ impl TlsClient {
     }
 
     /// We're ready to do a read.
-    fn do_read(&mut self) {
+    fn do_read(&mut self, socket: &mut TcpStream) {
         // Read TLS data.  This fails if the underlying TCP connection
         // is broken.
-        match self.tls_conn.read_tls(&mut self.socket) {
+        match self.tls_conn.read_tls(socket) {
             Err(error) => {
                 if error.kind() == io::ErrorKind::WouldBlock {
                     return;
@@ -137,25 +137,25 @@ impl TlsClient {
         }
     }
 
-    fn do_write(&mut self) {
+    fn do_write(&mut self, socket: &mut TcpStream) {
         self.tls_conn
-            .write_tls(&mut self.socket)
+            .write_tls(socket)
             .unwrap();
     }
 
     /// Registers self as a 'listener' in mio::Registry
-    fn register(&mut self, registry: &mio::Registry) {
+    fn register(&mut self, registry: &mio::Registry, socket: &mut TcpStream) {
         let interest = self.event_set();
         registry
-            .register(&mut self.socket, CLIENT, interest)
+            .register(socket, CLIENT, interest)
             .unwrap();
     }
 
     /// Reregisters self as a 'listener' in mio::Registry.
-    fn reregister(&mut self, registry: &mio::Registry) {
+    fn reregister(&mut self, registry: &mio::Registry, socket: &mut TcpStream) {
         let interest = self.event_set();
         registry
-            .reregister(&mut self.socket, CLIENT, interest)
+            .reregister(socket, CLIENT, interest)
             .unwrap();
     }
 
@@ -292,12 +292,11 @@ fn apply_dangerous_options(args: &Args, _: &mut rustls::ClientConfig) {
     }
 }
 /// Build a `ClientConfig` from our arguments
-fn make_tls_client_config_args(args: &Args) -> Arc<rustls::ClientConfig> {
+fn build_tls_client_config_args(args: &Args) -> Arc<rustls::ClientConfig> {
 
 
-    make_tls_client_config(args.flag_cafile.as_ref(), None,
-                           true, args.flag_suite.clone(), args.flag_protover.clone(), args.flag_auth_key.clone(),
-                           args.flag_auth_certs.clone(), args.flag_no_tickets, args.flag_no_sni, args.flag_proto.clone(), args.flag_max_frag_size)
+    build_tls_client_config(args.flag_cafile.as_ref(), None, args.flag_suite.clone(), args.flag_protover.clone(), args.flag_auth_key.clone(),
+                            args.flag_auth_certs.clone(), args.flag_no_tickets, args.flag_no_sni, args.flag_proto.clone(), args.flag_max_frag_size)
 
 }
 
@@ -321,34 +320,35 @@ fn main() {
     let dest_address = tcpls::lookup_address(args.arg_hostname.as_str(), args.flag_port.unwrap());
 
     let mut tcpls_session = tcpls::TcplsSession::new();
-    let mut tcp_conn = tcpls::TcpConnection::new();
 
-    let config = make_tls_client_config_args(&args);
+    let config = build_tls_client_config_args(&args);
 
     let server_name = args.arg_hostname.as_str().try_into().expect("invalid DNS name");
 
-    tcp_conn.server_name = args.arg_hostname.clone();
+    tcp_connect(dest_address, &mut tcpls_session);
+
+    let connection_id = tcpls_session.next_connection_id - 1;
+
+    let tcp_conn = tcpls_session.tcp_connections.get(connection_id as usize).unwrap();
+
+    let socket = tcp_conn.socket.unwrap().by_ref();
 
 
-    tcp_connect(dest_address, &mut tcpls_session, &mut tcp_conn);
+    let mut tlsclient = TlsClient::new(server_name, config.clone());
 
-
-
-    let mut tlsclient = TlsClient::new(tcp_conn.socket.unwrap(), server_name, config);
-
-
+    tcpls_session.tls_ctx.insert(Client(config));
 
 
     let mut poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(50);
-    tlsclient.register(poll.registry());
+    tlsclient.register(poll.registry(), socket);
 
     loop {
         poll.poll(&mut events, None).unwrap();
 
         for ev in events.iter() {
-            tlsclient.ready(ev);
-            tlsclient.reregister(poll.registry());
+            tlsclient.ready(ev, socket);
+            tlsclient.reregister(poll.registry(), socket);
         }
     }
 }
