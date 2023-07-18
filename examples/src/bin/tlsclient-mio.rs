@@ -8,7 +8,7 @@ use std::io;
 use std::io::{BufReader, Read, Write};
 use std::net::SocketAddr;
 use std::str;
-// use local_ip_address::local_ip;
+
 
 use crate::tcpls::*;
 
@@ -326,7 +326,7 @@ fn main() {
     let server_name = args.arg_hostname.as_str().try_into().expect("invalid DNS name");
 
     tcp_connect(dest_address, &mut tcpls_session);
-    
+
     let tcp_conn = tcpls_session.tcp_connections.get_mut((tcpls_session.next_connection_id - 1) as usize).unwrap();
 
     let socket = tcp_conn.socket.get_mut(0).unwrap();

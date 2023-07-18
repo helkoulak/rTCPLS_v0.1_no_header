@@ -3,7 +3,7 @@
 /// This module contains optional APIs for implementing TCPLS.
 use crate::cipher::Iv;
 use crate::client::ClientConnectionData;
-use crate::common_state::{CommonState, Protocol, Side};
+use crate::common_state::Protocol;
 use crate::conn::ConnectionCore;
 use crate::enums::ProtocolVersion;
 
@@ -11,21 +11,21 @@ use crate::msgs::handshake::{ClientExtension, ServerExtension};
 use crate::server::ServerConnectionData;
 
 use ring::aead;
-use mio::net::TcpStream;
+use mio::net::{TcpListener, TcpStream};
 
 use std::fmt::{self, Debug};
-use std::u32;
+use std::{io, u32, vec};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::fs;
 use std::io::{BufReader, Read};
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 
-use std::cell::RefCell;
+
 
 use crate::{ClientConfig, RootCertStore, ServerConfig, ServerName, Error, ConnectionCommon,
             SupportedCipherSuite, ALL_CIPHER_SUITES, SupportedProtocolVersion, version, Certificate,
-            PrivateKey, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, tcpls, KeyLogFile, cipher, ALL_VERSIONS, Ticketer, server};
+            PrivateKey, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, KeyLogFile, cipher, ALL_VERSIONS, Ticketer, server};
 
 use crate::verify::{AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth};
 
@@ -90,6 +90,7 @@ pub enum TcplsFrame {
         pub tls_ctx: Option<TlsContext>,
         pub tcp_connections: Vec<TcpConnection>,
         pub pending_tcp_connections: Vec<TcpConnection>,
+        pub server_listeners: Vec<TcpListener>,
         pub open_connections_ids: Vec<u32>,
         pub closed_connections_ids: Vec<u32>,
         pub next_connection_id: u32,
@@ -108,6 +109,7 @@ pub enum TcplsFrame {
                 tls_ctx: None,
                 tcp_connections: Vec::new(),
                 pending_tcp_connections: Vec::new(),
+                server_listeners: Vec::new(),
                 open_connections_ids: Vec::new(),
                 closed_connections_ids: Vec::new(),
                 next_connection_id: 0,
@@ -322,15 +324,8 @@ pub enum TcplsFrame {
     }
 
 
-
-
-
-    pub fn tcp_connect(dest_address: SocketAddr, tcpls_session: &mut TcplsSession) {
-
+    pub fn create_tcpls_connection_object(tcpls_session: &mut TcplsSession, socket: TcpStream, is_server: bool) {
         let mut tcp_conn = TcpConnection::new();
-
-        let socket = TcpStream::connect(dest_address).expect("TCP connection establishment failed");
-
 
         tcp_conn.socket.push(socket);
 
@@ -343,10 +338,25 @@ pub enum TcplsFrame {
         }
 
         tcpls_session.open_connections_ids.push(tcp_conn.connection_id);
-        tcpls_session.tcp_connections.push(tcp_conn);
+        if !is_server{
+            tcpls_session.tcp_connections.push(tcp_conn);
+        }else {
+            tcpls_session.pending_tcp_connections.push(tcp_conn);
+        }
+
         tcpls_session.next_connection_id += 1;
         tcpls_session.next_local_address_id += 1;
         tcpls_session.next_remote_address_id += 1;
+
+    }
+
+
+
+
+    pub fn tcp_connect(dest_address: SocketAddr, tcpls_session: &mut TcplsSession) {
+
+        let socket = TcpStream::connect(dest_address).expect("TCP connection establishment failed");
+        create_tcpls_connection_object(tcpls_session, socket, false);
 
     }
 
@@ -509,7 +519,23 @@ pub fn put_u32(v: u32, bytes: &mut [u8]) {
     let bytes: &mut [u8; 4] = (&mut bytes[..4]).try_into().unwrap();
     *bytes = u32::to_be_bytes(v);
 }
+pub fn server_create_listener(local_address: &str, default_port: u16) -> TcpListener {
 
+    let mut addr:SocketAddr = local_address.parse().unwrap();
+
+    addr.set_port(default_port);
+
+    TcpListener::bind(addr).expect("cannot listen on port")
+}
+
+pub fn server_accept_connection(listener: TcpListener, tcpls_session: &mut TcplsSession) -> Result<(), io::Error>{
+
+    let (remote_socket, remote_address) = listener.accept().unwrap();
+    create_tcpls_connection_object(tcpls_session, remote_socket, true);
+
+    Ok(())
+
+}
 
  pub fn server_new_tls_session(config: Arc<ServerConfig>) -> ServerConnection {
 
@@ -597,7 +623,6 @@ impl ServerConnection {
                 "TLS 1.3 support is required for TCPLS".into(),
             ));
         }
-
 
         let ext = ServerExtension::TCPLS;
 
