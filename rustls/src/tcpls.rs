@@ -4,39 +4,29 @@
 use crate::cipher::Iv;
 use crate::client::ClientConnectionData;
 use crate::common_state::{CommonState, Protocol, Side};
-use crate::conn::{ConnectionCore, SideData};
-use crate::enums::{AlertDescription, ProtocolVersion};
+use crate::conn::ConnectionCore;
+use crate::enums::ProtocolVersion;
 
 use crate::msgs::handshake::{ClientExtension, ServerExtension};
 use crate::server::ServerConnectionData;
-use crate::suites::BulkAlgorithm;
-use crate::tls13::key_schedule::hkdf_expand;
-use crate::tls13::{Tls13CipherSuite, TLS13_AES_128_GCM_SHA256_INTERNAL};
 
-use ring::{aead, hkdf};
-
+use ring::aead;
 use mio::net::TcpStream;
-use mio::Token;
 
-use std::collections::{HashMap, VecDeque};
 use std::fmt::{self, Debug};
-use std::{io, u32};
+use std::u32;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::fs;
 use std::io::{BufReader, Read};
-use std::net::{IpAddr, SocketAddr, ToSocketAddrs, Ipv4Addr, Ipv6Addr};
-use std::str::FromStr;
-use std::cell::Ref;
-use std::env::Args;
-use std::process::Termination;
-use std::ptr::addr_of_mut;
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 
+use std::cell::RefCell;
 
-use crate::msgs::codec;
+use crate::{ClientConfig, RootCertStore, ServerConfig, ServerName, Error, ConnectionCommon,
+            SupportedCipherSuite, ALL_CIPHER_SUITES, SupportedProtocolVersion, version, Certificate,
+            PrivateKey, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, tcpls, KeyLogFile, cipher, ALL_VERSIONS, Ticketer, server};
 
-use crate::internal::record_layer::RecordLayer;
-use crate::{ClientConfig, RootCertStore, ServerConfig, ServerName, Error, ConnectionCommon, SupportedCipherSuite, ALL_CIPHER_SUITES, SupportedProtocolVersion, version, Certificate, PrivateKey, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, tcpls, KeyLogFile, cipher, ALL_VERSIONS, Ticketer, server};
 use crate::verify::{AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth};
 
 
@@ -146,7 +136,7 @@ pub enum TcplsFrame {
 
     pub struct TcpConnection {
         pub connection_id: u32,
-        pub socket: Option<TcpStream>,
+        pub socket: Vec<TcpStream>,
         pub local_address_id: u8,
         pub remote_address_id: u8,
         pub attached_stream: Option<Stream>,
@@ -160,11 +150,12 @@ pub enum TcplsFrame {
 
     }
 
+
     impl TcpConnection {
         pub fn new() -> Self{
             Self{
                 connection_id: 0,
-                socket: None,
+                socket: Vec::with_capacity(1),
                 local_address_id: 0,
                 remote_address_id: 0,
                 attached_stream: None,
@@ -341,7 +332,7 @@ pub enum TcplsFrame {
         let socket = TcpStream::connect(dest_address).expect("TCP connection establishment failed");
 
 
-        let _ = tcp_conn.socket.insert(socket);
+        tcp_conn.socket.push(socket);
 
         tcp_conn.connection_id = tcpls_session.next_connection_id;
         tcp_conn.local_address_id = tcpls_session.next_local_address_id;
@@ -372,7 +363,7 @@ pub enum TcplsFrame {
                                    protocol_ver: Vec<String>, auth_key: Option<String>, auth_certs: Option<String>,
                                    no_tickets: bool, no_sni: bool, proto: Vec<String>, max_frag_size: Option<usize>) -> Arc<ClientConfig> {
 
-        let mut root_store = build_cert_store(cert_path, cert_store);
+        let root_store = build_cert_store(cert_path, cert_store);
 
         let suites = if !cipher_suites.is_empty() {
             lookup_suites(&cipher_suites)
@@ -644,7 +635,7 @@ impl From<ServerConnection> for Connection {
 #[test]
 fn test_prep_crypto_context(){
     let mut iv= Iv::copy(&[0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]) ;
-    let mut iv_result= Iv::copy(&[0x0C, 0x0B, 0x0A, 0x05, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]) ;
+    let iv_result= Iv::copy(&[0x0C, 0x0B, 0x0A, 0x05, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]) ;
     let connection_id:u32 = 0x0C;
     prepare_connection_crypto_context(&mut iv, connection_id);
    assert_eq!(iv.value(), iv_result.value())

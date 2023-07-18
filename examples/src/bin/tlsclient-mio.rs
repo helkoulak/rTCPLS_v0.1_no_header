@@ -317,21 +317,19 @@ fn main() {
     if args.flag_verbose {
         env_logger::Builder::new().parse_filters("trace").init();
     }
-    let dest_address = tcpls::lookup_address(args.arg_hostname.as_str(), args.flag_port.unwrap());
+    let dest_address = lookup_address(args.arg_hostname.as_str(), args.flag_port.unwrap());
 
-    let mut tcpls_session = tcpls::TcplsSession::new();
+    let mut tcpls_session = TcplsSession::new();
 
     let config = build_tls_client_config_args(&args);
 
     let server_name = args.arg_hostname.as_str().try_into().expect("invalid DNS name");
 
     tcp_connect(dest_address, &mut tcpls_session);
+    
+    let tcp_conn = tcpls_session.tcp_connections.get_mut((tcpls_session.next_connection_id - 1) as usize).unwrap();
 
-    let connection_id = tcpls_session.next_connection_id - 1;
-
-    let tcp_conn = tcpls_session.tcp_connections.get(connection_id as usize).unwrap();
-
-    let socket = tcp_conn.socket.unwrap().by_ref();
+    let socket = tcp_conn.socket.get_mut(0).unwrap();
 
 
     let mut tlsclient = TlsClient::new(server_name, config.clone());
