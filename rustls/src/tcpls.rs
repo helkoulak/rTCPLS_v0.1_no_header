@@ -1,9 +1,9 @@
 #![allow(missing_docs)]
 
 /// This module contains optional APIs for implementing TCPLS.
-use crate::cipher::Iv;
+use crate::cipher::{Iv, MessageDecrypter, MessageEncrypter};
 use crate::client::ClientConnectionData;
-use crate::common_state::Protocol;
+use crate::common_state::*;
 use crate::conn::ConnectionCore;
 use crate::enums::ProtocolVersion;
 
@@ -14,18 +14,16 @@ use ring::aead;
 use mio::net::{TcpListener, TcpStream};
 
 use std::fmt::{self, Debug};
-use std::{io, u32, vec};
+use std::{io, process, u32, vec};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::fs;
-use std::io::{BufReader, Read};
+use std::io::{BufReader, Read, Write};
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 
 
 
-use crate::{ClientConfig, RootCertStore, ServerConfig, ServerName, Error, ConnectionCommon,
-            SupportedCipherSuite, ALL_CIPHER_SUITES, SupportedProtocolVersion, version, Certificate,
-            PrivateKey, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, KeyLogFile, cipher, ALL_VERSIONS, Ticketer, server};
+use crate::{ClientConfig, RootCertStore, ServerConfig, ServerName, Error, ConnectionCommon, SupportedCipherSuite, ALL_CIPHER_SUITES, SupportedProtocolVersion, version, Certificate, PrivateKey, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, KeyLogFile, cipher, ALL_VERSIONS, Ticketer, server, ContentType};
 
 use crate::verify::{AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth};
 
@@ -87,7 +85,8 @@ pub enum TcplsFrame {
 }
 
     pub struct TcplsSession {
-        pub tls_ctx: Option<TlsContext>,
+        pub tls_config: Vec<TlsConfig>,
+        pub tls_conn: Vec<Connection>,
         pub tcp_connections: Vec<TcpConnection>,
         pub pending_tcp_connections: Vec<TcpConnection>,
         pub server_listeners: Vec<TcpListener>,
@@ -101,12 +100,15 @@ pub enum TcplsFrame {
         pub is_server: bool,
         pub is_closed: bool,
         pub tls_hs_completed: bool,
+        pub tls_enc_iv: Iv,
+        pub tls_dec_iv:Iv,
     }
 
     impl TcplsSession {
         pub fn new() -> Self{
             Self{
-                tls_ctx: None,
+                tls_config: Vec::with_capacity(1),
+                tls_conn: Vec::with_capacity(1),
                 tcp_connections: Vec::new(),
                 pending_tcp_connections: Vec::new(),
                 server_listeners: Vec::new(),
@@ -120,6 +122,8 @@ pub enum TcplsFrame {
                 is_server: false,
                 is_closed: false,
                 tls_hs_completed: false,
+                tls_enc_iv: Default::default(),
+                tls_dec_iv: Default::default(),
             }
         }
 
@@ -127,13 +131,10 @@ pub enum TcplsFrame {
 
     }
 
-    pub enum  TlsContext{
+    pub enum TlsConfig {
         Client(Arc<ClientConfig>),
         Server(Arc<ServerConfig>),
     }
-
-
-
 
 
     pub struct TcpConnection {
@@ -168,8 +169,6 @@ pub enum TcplsFrame {
             }
 
         }
-
-
     }
 
     pub enum TcplsConnectionState {
@@ -324,12 +323,13 @@ pub enum TcplsFrame {
     }
 
 
-    pub fn create_tcpls_connection_object(tcpls_session: &mut TcplsSession, socket: TcpStream, is_server: bool) {
+    pub fn create_tcpls_connection_object(tcpls_session: &mut TcplsSession, socket: TcpStream, is_server: bool) -> u32{
         let mut tcp_conn = TcpConnection::new();
 
         tcp_conn.socket.push(socket);
 
-        tcp_conn.connection_id = tcpls_session.next_connection_id;
+        let new_tcp_connection_id = tcpls_session.next_connection_id;
+        tcp_conn.connection_id = new_tcp_connection_id;
         tcp_conn.local_address_id = tcpls_session.next_local_address_id;
         tcp_conn.remote_address_id = tcpls_session.next_remote_address_id;
 
@@ -348,21 +348,42 @@ pub enum TcplsFrame {
         tcpls_session.next_local_address_id += 1;
         tcpls_session.next_remote_address_id += 1;
 
+        tcpls_session.next_connection_id
+
     }
 
 
 
 
-    pub fn tcp_connect(dest_address: SocketAddr, tcpls_session: &mut TcplsSession) {
+    pub fn tcpls_connect(dest_address: SocketAddr, tcpls_session: &mut TcplsSession, config: Arc<ClientConfig>, server_name: ServerName) {
 
         let socket = TcpStream::connect(dest_address).expect("TCP connection establishment failed");
-        create_tcpls_connection_object(tcpls_session, socket, false);
+        let new_tcp_conn_id= create_tcpls_connection_object(tcpls_session, socket, false);
+        let client_conn = ClientConnection::new(config, server_name).expect("Establishment of TLS session failed");
+        tcpls_session.tls_hs_completed = true;
+        tcpls_session.tls_conn.push(Connection::Client(client_conn));
+        prepare_connection_crypto_context(tcpls_session, new_tcp_conn_id);
+        tcpls_session.tls_config.push(TlsConfig::Client(config.clone()));
+
 
     }
 
+// pub(crate) fn prepare_connection_crypto_context(tcpls_session: &mut TcplsSession, new_conn_id: u32) {
+//
+//     let mut tls_conn = tcpls_session.tls_conn.get_mut(0).unwrap();
+//     match new_conn_id {
+//         0 => {
+//             tcpls_session.tls_enc_iv = record_layer.get_encryption_iv();
+//             tcpls_session.tls_dec_iv = tcpls_session.tls_conn.record_layer.get_decryption_iv();
+//         }
+//         _ => {
+//             derive_connection_iv(client_conn.record_layer.get_mut_ref_enc_iv(), new_tcp_conn_id);
+//             derive_connection_iv(client_conn.record_layer.get_mut_ref_dec_iv(), new_tcp_conn_id);
+//         }
+//     }
+// }
 
-
-    pub fn client_new_tls_session(config: Arc<ClientConfig>, name: ServerName) -> ClientConnection{
+    pub fn client_new_tls_connection(config: Arc<ClientConfig>, name: ServerName) -> ClientConnection{
 
         ClientConnection::new(config, name).expect("Establishing a TLS session has failed")
     }
@@ -502,18 +523,20 @@ pub enum TcplsFrame {
     }
 
 
-pub(crate) fn prepare_connection_crypto_context(iv: &mut Iv, connection_id: u32) {
-    let mut conn_id = [0u8; aead::NONCE_LEN];
-    put_u32(connection_id, &mut conn_id[..4]);
 
-    conn_id
-        .iter_mut()
-        .zip(iv.0.iter_mut())
-        .for_each(|(conn_id, iv)| {
-            *iv ^= *conn_id;
-        });
 
-}
+    pub(crate) fn derive_connection_iv(iv: &Iv, connection_id: u32) -> Iv {
+        let mut conn_id = [0u8; aead::NONCE_LEN];
+        put_u32(connection_id, &mut conn_id[..4]);
+
+        conn_id
+            .iter_mut()
+            .zip(iv.0.iter_mut())
+            .for_each(|(conn_id, iv)| {
+                *conn_id ^= *iv;
+            });
+        Iv::copy(&conn_id)
+    }
 
 pub fn put_u32(v: u32, bytes: &mut [u8]) {
     let bytes: &mut [u8; 4] = (&mut bytes[..4]).try_into().unwrap();
@@ -530,14 +553,14 @@ pub fn server_create_listener(local_address: &str, default_port: u16) -> TcpList
 
 pub fn server_accept_connection(listener: TcpListener, tcpls_session: &mut TcplsSession) -> Result<(), io::Error>{
 
-    let (remote_socket, remote_address) = listener.accept().unwrap();
-    create_tcpls_connection_object(tcpls_session, remote_socket, true);
+    let (listening_socket, remote_address) = listener.accept().unwrap();
+    create_tcpls_connection_object(tcpls_session, listening_socket, true);
 
     Ok(())
 
 }
 
- pub fn server_new_tls_session(config: Arc<ServerConfig>) -> ServerConnection {
+ pub fn server_new_tls_connection(config: Arc<ServerConfig>) -> ServerConnection {
 
         ServerConnection::new(config).expect("Establishing a TLS session has failed")
     }
@@ -546,7 +569,7 @@ pub fn server_accept_connection(listener: TcpListener, tcpls_session: &mut Tcpls
 
 
 
-/// A TCPLS client or server connection.
+/// A TLS client or server connection.
 #[derive(Debug)]
 pub enum Connection {
     /// A client connection
@@ -562,7 +585,7 @@ pub struct ClientConnection {
 }
 
 impl ClientConnection {
-    /// Make a new TCPLS ClientConnection.
+    /// Make a new TLS ClientConnection.
     pub fn new(
         config: Arc<ClientConfig>,
         name: ServerName,
@@ -614,7 +637,7 @@ pub struct ServerConnection {
 }
 
 impl ServerConnection {
-    /// Make a new TCPLS ServerConnection.
+    /// Make a new TLS ServerConnection.
     pub fn new(
         config: Arc<ServerConfig>,
     ) -> Result<Self, Error> {
@@ -660,9 +683,9 @@ impl From<ServerConnection> for Connection {
 #[test]
 fn test_prep_crypto_context(){
     let mut iv= Iv::copy(&[0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]) ;
-    let iv_result= Iv::copy(&[0x0C, 0x0B, 0x0A, 0x05, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]) ;
+    let iv_2= Iv::copy(&[0x0C, 0x0B, 0x0A, 0x05, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]) ;
     let connection_id:u32 = 0x0C;
-    prepare_connection_crypto_context(&mut iv, connection_id);
-   assert_eq!(iv.value(), iv_result.value())
+    let iv_result = derive_connection_iv(&iv, connection_id);
+   assert_eq!(iv_2.value(), iv_result.value())
 
    }

@@ -9,11 +9,15 @@ pub trait MessageDecrypter: Send + Sync {
     /// Perform the decryption over the concerned TLS message.
 
     fn decrypt(&self, m: OpaqueMessage, seq: u64) -> Result<PlainMessage, Error>;
+    fn get_dec_iv(&self) -> Iv;
+    fn get_mut_ref_dec_iv(&mut self) -> &mut Iv;
 }
 
 /// Objects with this trait can encrypt TLS messages.
 pub(crate) trait MessageEncrypter: Send + Sync {
     fn encrypt(&self, m: BorrowedPlainMessage, seq: u64) -> Result<OpaqueMessage, Error>;
+    fn get_enc_iv(&self) -> Iv;
+    fn get_mut_ref_enc_iv(&mut self) -> &mut Iv;
 }
 
 impl dyn MessageEncrypter {
@@ -89,6 +93,14 @@ impl MessageEncrypter for InvalidMessageEncrypter {
     fn encrypt(&self, _m: BorrowedPlainMessage, _seq: u64) -> Result<OpaqueMessage, Error> {
         Err(Error::EncryptError)
     }
+
+    fn get_enc_iv(&self) -> Iv {
+        todo!()
+    }
+
+    fn get_mut_ref_enc_iv(&mut self) -> &mut Iv {
+        todo!()
+    }
 }
 
 /// A `MessageDecrypter` which doesn't work.
@@ -97,5 +109,13 @@ struct InvalidMessageDecrypter {}
 impl MessageDecrypter for InvalidMessageDecrypter {
     fn decrypt(&self, _m: OpaqueMessage, _seq: u64) -> Result<PlainMessage, Error> {
         Err(Error::DecryptError)
+    }
+
+    fn get_dec_iv(&self) -> Iv {
+        todo!()
+    }
+
+    fn get_mut_ref_dec_iv(&mut self) -> &mut Iv {
+        todo!()
     }
 }

@@ -19,7 +19,7 @@ use docopt::Docopt;
 use env_logger::builder;
 
 use rustls::{OwnedTrustAnchor, RootCertStore, tcpls};
-use rustls::tcpls::TlsContext::Client;
+use rustls::tcpls::TlsConfig::Client;
 
 const CLIENT: mio::Token = mio::Token(0);
 
@@ -28,7 +28,7 @@ const CLIENT: mio::Token = mio::Token(0);
 struct TlsClient {
     closing: bool,
     clean_closure: bool,
-    tls_conn: rustls::tcpls::ClientConnection,
+    tls_conn: ClientConnection,
 }
 
 impl  TlsClient {
@@ -38,10 +38,9 @@ impl  TlsClient {
         cfg: Arc<rustls::ClientConfig>,
     ) -> Self {
         Self {
-
             closing: false,
             clean_closure: false,
-            tls_conn: rustls::tcpls::client_new_tls_session(cfg, server_name),
+            tls_conn: client_new_tls_connection(cfg, server_name),
         }
     }
 
@@ -58,7 +57,7 @@ impl  TlsClient {
         }
 
         if ev.is_writable() && ! self.tls_conn.is_handshaking() {
-            let buf = [0; TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH];
+            let buf = [0x0F; 100 * 1024];
             self.tls_conn.writer().write(& buf);
             self.do_write(socket);
         }
@@ -332,21 +331,22 @@ fn main() {
     let socket = tcp_conn.socket.get_mut(0).unwrap();
 
 
-    let mut tlsclient = TlsClient::new(server_name, config.clone());
+    let mut client = TlsClient::new(server_name, config.clone());
 
-    tcpls_session.tls_ctx.insert(Client(config));
+    tcpls_session.tls_config.push(Client(config));
 
+    client.tls_conn.set_buffer_limit(None);
 
     let mut poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(50);
-    tlsclient.register(poll.registry(), socket);
+    client.register(poll.registry(), socket);
 
     loop {
         poll.poll(&mut events, None).unwrap();
 
         for ev in events.iter() {
-            tlsclient.ready(ev, socket);
-            tlsclient.reregister(poll.registry(), socket);
+            client.ready(ev, socket);
+            client.reregister(poll.registry(), socket);
         }
     }
 }

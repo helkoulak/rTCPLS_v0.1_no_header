@@ -162,6 +162,14 @@ impl MessageEncrypter for Tls13MessageEncrypter {
             payload: Payload::new(payload),
         })
     }
+
+    fn get_enc_iv(&self) -> Iv{
+        Iv::copy(&self.iv.0)
+    }
+
+    fn get_mut_ref_enc_iv(&mut self) -> &mut Iv{
+        self.iv.as_mut()
+    }
 }
 
 impl MessageDecrypter for Tls13MessageDecrypter {
@@ -197,4 +205,13 @@ impl MessageDecrypter for Tls13MessageDecrypter {
         msg.version = ProtocolVersion::TLSv1_3;
         Ok(msg.into_plain_message())
     }
+
+    fn get_dec_iv(&self) -> Iv{
+        Iv::copy(&self.iv.0)
+    }
+
+    fn get_mut_ref_dec_iv(&mut self) -> &mut Iv {
+        self.iv.as_mut()
+    }
+
 }

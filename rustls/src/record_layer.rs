@@ -1,4 +1,4 @@
-use crate::cipher::{MessageDecrypter, MessageEncrypter};
+use crate::cipher::{Iv, MessageDecrypter, MessageEncrypter};
 use crate::error::Error;
 use crate::msgs::message::{BorrowedPlainMessage, OpaqueMessage, PlainMessage};
 
@@ -209,6 +209,23 @@ impl RecordLayer {
             .encrypt(plain, seq)
             .unwrap()
     }
+
+    pub(crate) fn get_enc_iv(&self) -> Iv{
+        self.message_encrypter.get_enc_iv()
+    }
+
+    pub(crate) fn get_dec_iv(&self) -> Iv{
+        self.message_decrypter.get_dec_iv()
+    }
+
+    pub(crate) fn get_mut_ref_enc_iv(&mut self) -> &mut Iv {
+        self.message_encrypter.get_mut_ref_enc_iv()
+    }
+
+    pub(crate) fn get_mut_ref_dec_iv(&mut self) -> &mut Iv {
+        self.message_decrypter.get_mut_ref_dec_iv()
+    }
+
 }
 
 /// Result of decryption.

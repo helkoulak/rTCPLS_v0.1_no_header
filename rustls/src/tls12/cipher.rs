@@ -140,6 +140,14 @@ impl MessageDecrypter for GcmMessageDecrypter {
         payload.truncate(plain_len);
         Ok(msg.into_plain_message())
     }
+
+    fn get_dec_iv(&self) -> Iv {
+        todo!()
+    }
+
+    fn get_mut_ref_dec_iv(&mut self) -> &mut Iv {
+        todo!()
+    }
 }
 
 impl MessageEncrypter for GcmMessageEncrypter {
@@ -162,6 +170,14 @@ impl MessageEncrypter for GcmMessageEncrypter {
             version: msg.version,
             payload: Payload::new(payload),
         })
+    }
+
+    fn get_enc_iv(&self) -> Iv {
+        todo!()
+    }
+
+    fn get_mut_ref_enc_iv(&mut self) -> &mut Iv {
+        todo!()
     }
 }
 
@@ -212,6 +228,14 @@ impl MessageDecrypter for ChaCha20Poly1305MessageDecrypter {
         payload.truncate(plain_len);
         Ok(msg.into_plain_message())
     }
+
+    fn get_dec_iv(&self) -> Iv {
+        todo!()
+    }
+
+    fn get_mut_ref_dec_iv(&mut self) -> &mut Iv {
+        todo!()
+    }
 }
 
 impl MessageEncrypter for ChaCha20Poly1305MessageEncrypter {
@@ -232,5 +256,13 @@ impl MessageEncrypter for ChaCha20Poly1305MessageEncrypter {
             version: msg.version,
             payload: Payload::new(buf),
         })
+    }
+
+    fn get_enc_iv(&self) -> Iv {
+        todo!()
+    }
+
+    fn get_mut_ref_enc_iv(&mut self) -> &mut Iv {
+        todo!()
     }
 }
