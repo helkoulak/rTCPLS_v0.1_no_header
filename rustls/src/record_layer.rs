@@ -28,6 +28,7 @@ pub struct RecordLayer {
     read_seq: u64,
     encrypt_state: DirectionState,
     decrypt_state: DirectionState,
+    sending_connection_id: u32,
 
     // Message encrypted with other keys may be encountered, so failures
     // should be swallowed by the caller.  This struct tracks the amount
@@ -45,6 +46,7 @@ impl RecordLayer {
             read_seq: 0,
             encrypt_state: DirectionState::Invalid,
             decrypt_state: DirectionState::Invalid,
+            sending_connection_id: 0,
             trial_decryption_len: None,
         }
     }
@@ -61,6 +63,10 @@ impl RecordLayer {
     #[cfg(feature = "secret_extraction")]
     pub(crate) fn read_seq(&self) -> u64 {
         self.read_seq
+    }
+
+    pub(crate) fn set_sending_connection_id(&mut self, conn_id: u32) {
+        self.sending_connection_id = conn_id;
     }
 
     fn doing_trial_decryption(&mut self, requested: usize) -> bool {
@@ -179,7 +185,7 @@ impl RecordLayer {
         let encrypted_len = encr.payload.0.len();
         match self
             .message_decrypter
-            .decrypt(encr, self.read_seq)
+            .decrypt(encr, self.read_seq, self.sending_connection_id)
         {
             Ok(plaintext) => {
                 self.read_seq += 1;
@@ -206,26 +212,9 @@ impl RecordLayer {
         let seq = self.write_seq;
         self.write_seq += 1;
         self.message_encrypter
-            .encrypt(plain, seq)
+            .encrypt(plain, seq, self.sending_connection_id)
             .unwrap()
     }
-
-    pub(crate) fn get_enc_iv(&self) -> Iv{
-        self.message_encrypter.get_enc_iv()
-    }
-
-    pub(crate) fn get_dec_iv(&self) -> Iv{
-        self.message_decrypter.get_dec_iv()
-    }
-
-    pub(crate) fn get_mut_ref_enc_iv(&mut self) -> &mut Iv {
-        self.message_encrypter.get_mut_ref_enc_iv()
-    }
-
-    pub(crate) fn get_mut_ref_dec_iv(&mut self) -> &mut Iv {
-        self.message_decrypter.get_mut_ref_dec_iv()
-    }
-
 }
 
 /// Result of decryption.

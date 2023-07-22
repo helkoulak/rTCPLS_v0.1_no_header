@@ -513,22 +513,6 @@ impl CommonState {
             .map(AsRef::as_ref)
     }
 
-    pub(crate) fn get_encryption_iv(&self) -> Iv{
-        self.record_layer.get_encryption_iv()
-    }
-
-    pub(crate) fn get_decryption_iv(&self) -> Iv{
-        self.record_layer.get_decryption_iv()
-    }
-
-    pub(crate) fn get_mut_ref_encryption_iv(&mut self) -> &mut Iv {
-        self.record_layer.get_mut_ref_enc_iv()
-    }
-
-    pub(crate) fn set_decryption_iv(&mut self) -> &mut Iv {
-        self.record_layer.get_mut_ref_dec_iv()
-    }
-
     /// Returns true if the caller should call [`Connection::read_tls`] as soon
     /// as possible.
     ///

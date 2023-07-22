@@ -603,7 +603,7 @@ impl KeySchedule {
             .record_layer
             .set_message_encrypter(Box::new(Tls13MessageEncrypter {
                 enc_key: aead::LessSafeKey::new(key),
-                iv,
+                iv: vec![iv],
             }));
     }
 
@@ -618,7 +618,7 @@ impl KeySchedule {
         let iv = derive_traffic_iv(secret);
         Box::new(Tls13MessageDecrypter {
             dec_key: aead::LessSafeKey::new(key),
-            iv,
+            iv: vec![iv],
         })
     }
 

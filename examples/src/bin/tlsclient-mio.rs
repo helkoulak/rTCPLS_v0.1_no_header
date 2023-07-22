@@ -7,6 +7,7 @@ use std::fs;
 use std::io;
 use std::io::{BufReader, Read, Write};
 use std::net::SocketAddr;
+use std::ops::DerefMut;
 use std::str;
 
 
@@ -18,7 +19,7 @@ extern crate serde_derive;
 use docopt::Docopt;
 use env_logger::builder;
 
-use rustls::{OwnedTrustAnchor, RootCertStore, tcpls};
+use rustls::{client, OwnedTrustAnchor, RootCertStore, tcpls};
 use rustls::tcpls::TlsConfig::Client;
 
 const CLIENT: mio::Token = mio::Token(0);
@@ -324,29 +325,24 @@ fn main() {
 
     let server_name = args.arg_hostname.as_str().try_into().expect("invalid DNS name");
 
-    tcp_connect(dest_address, &mut tcpls_session);
+    tcpls_connect(dest_address, &mut tcpls_session, config, server_name);
 
-    let tcp_conn = tcpls_session.tcp_connections.get_mut((tcpls_session.next_connection_id - 1) as usize).unwrap();
-
-    let socket = tcp_conn.socket.get_mut(0).unwrap();
+    let mut tls_connection = tcpls_session.tls_conn.as_mut().unwrap().deref_mut();
 
 
-    let mut client = TlsClient::new(server_name, config.clone());
 
-    tcpls_session.tls_config.push(Client(config));
 
-    client.tls_conn.set_buffer_limit(None);
 
     let mut poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(50);
-    client.register(poll.registry(), socket);
+    //client.register(poll.registry(), socket);
 
     loop {
         poll.poll(&mut events, None).unwrap();
 
         for ev in events.iter() {
-            client.ready(ev, socket);
-            client.reregister(poll.registry(), socket);
+            // client.ready(ev, socket);
+            // client.reregister(poll.registry(), socket);
         }
     }
 }

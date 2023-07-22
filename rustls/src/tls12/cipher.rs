@@ -112,7 +112,7 @@ const GCM_EXPLICIT_NONCE_LEN: usize = 8;
 const GCM_OVERHEAD: usize = GCM_EXPLICIT_NONCE_LEN + 16;
 
 impl MessageDecrypter for GcmMessageDecrypter {
-    fn decrypt(&self, mut msg: OpaqueMessage, seq: u64) -> Result<PlainMessage, Error> {
+    fn decrypt(&self, mut msg: OpaqueMessage, seq: u64, conn_id: u32) -> Result<PlainMessage, Error> {
         let payload = &mut msg.payload.0;
         if payload.len() < GCM_OVERHEAD {
             return Err(Error::DecryptError);
@@ -140,18 +140,10 @@ impl MessageDecrypter for GcmMessageDecrypter {
         payload.truncate(plain_len);
         Ok(msg.into_plain_message())
     }
-
-    fn get_dec_iv(&self) -> Iv {
-        todo!()
-    }
-
-    fn get_mut_ref_dec_iv(&mut self) -> &mut Iv {
-        todo!()
-    }
 }
 
 impl MessageEncrypter for GcmMessageEncrypter {
-    fn encrypt(&self, msg: BorrowedPlainMessage, seq: u64) -> Result<OpaqueMessage, Error> {
+    fn encrypt(&self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32) -> Result<OpaqueMessage, Error> {
         let nonce = make_nonce(&self.iv, seq);
         let aad = make_tls12_aad(seq, msg.typ, msg.version, msg.payload.len());
 
@@ -170,14 +162,6 @@ impl MessageEncrypter for GcmMessageEncrypter {
             version: msg.version,
             payload: Payload::new(payload),
         })
-    }
-
-    fn get_enc_iv(&self) -> Iv {
-        todo!()
-    }
-
-    fn get_mut_ref_enc_iv(&mut self) -> &mut Iv {
-        todo!()
     }
 }
 
@@ -200,7 +184,7 @@ struct ChaCha20Poly1305MessageDecrypter {
 const CHACHAPOLY1305_OVERHEAD: usize = 16;
 
 impl MessageDecrypter for ChaCha20Poly1305MessageDecrypter {
-    fn decrypt(&self, mut msg: OpaqueMessage, seq: u64) -> Result<PlainMessage, Error> {
+    fn decrypt(&self, mut msg: OpaqueMessage, seq: u64, connection_id: u32) -> Result<PlainMessage, Error> {
         let payload = &mut msg.payload.0;
 
         if payload.len() < CHACHAPOLY1305_OVERHEAD {
@@ -228,18 +212,10 @@ impl MessageDecrypter for ChaCha20Poly1305MessageDecrypter {
         payload.truncate(plain_len);
         Ok(msg.into_plain_message())
     }
-
-    fn get_dec_iv(&self) -> Iv {
-        todo!()
-    }
-
-    fn get_mut_ref_dec_iv(&mut self) -> &mut Iv {
-        todo!()
-    }
 }
 
 impl MessageEncrypter for ChaCha20Poly1305MessageEncrypter {
-    fn encrypt(&self, msg: BorrowedPlainMessage, seq: u64) -> Result<OpaqueMessage, Error> {
+    fn encrypt(&self, msg: BorrowedPlainMessage, seq: u64, connection_id: u32) -> Result<OpaqueMessage, Error> {
         let nonce = make_nonce(&self.enc_offset, seq);
         let aad = make_tls12_aad(seq, msg.typ, msg.version, msg.payload.len());
 
@@ -256,13 +232,5 @@ impl MessageEncrypter for ChaCha20Poly1305MessageEncrypter {
             version: msg.version,
             payload: Payload::new(buf),
         })
-    }
-
-    fn get_enc_iv(&self) -> Iv {
-        todo!()
-    }
-
-    fn get_mut_ref_enc_iv(&mut self) -> &mut Iv {
-        todo!()
     }
 }

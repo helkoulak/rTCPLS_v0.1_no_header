@@ -190,6 +190,11 @@ pub fn put_u64(v: u64, bytes: &mut [u8]) {
     *bytes = u64::to_be_bytes(v);
 }
 
+pub fn put_u32(v: u32, bytes: &mut [u8]) {
+    let bytes: &mut [u8; 4] = (&mut bytes[..4]).try_into().unwrap();
+    *bytes = u32::to_be_bytes(v);
+}
+
 impl Codec for u64 {
     fn encode(&self, bytes: &mut Vec<u8>) {
         let mut b64 = [0u8; 8];

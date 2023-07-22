@@ -4,20 +4,17 @@ use crate::msgs::message::{BorrowedPlainMessage, OpaqueMessage, PlainMessage};
 
 use ring::{aead, hkdf};
 
+
 /// Objects with this trait can decrypt TLS messages.
 pub trait MessageDecrypter: Send + Sync {
     /// Perform the decryption over the concerned TLS message.
 
-    fn decrypt(&self, m: OpaqueMessage, seq: u64) -> Result<PlainMessage, Error>;
-    fn get_dec_iv(&self) -> Iv;
-    fn get_mut_ref_dec_iv(&mut self) -> &mut Iv;
+    fn decrypt(&self, m: OpaqueMessage, seq: u64, connection_id: u32) -> Result<PlainMessage, Error>;
 }
 
 /// Objects with this trait can encrypt TLS messages.
 pub(crate) trait MessageEncrypter: Send + Sync {
-    fn encrypt(&self, m: BorrowedPlainMessage, seq: u64) -> Result<OpaqueMessage, Error>;
-    fn get_enc_iv(&self) -> Iv;
-    fn get_mut_ref_enc_iv(&mut self) -> &mut Iv;
+    fn encrypt(&self, m: BorrowedPlainMessage, seq: u64, connection_id: u32) -> Result<OpaqueMessage, Error>;
 }
 
 impl dyn MessageEncrypter {
@@ -86,20 +83,27 @@ pub(crate) fn make_nonce(iv: &Iv, seq: u64) -> ring::aead::Nonce {
     aead::Nonce::assume_unique_for_key(nonce)
 }
 
+pub(crate) fn derive_connection_iv(iv: &mut Vec<Iv>, connection_id: u32){
+        let mut conn_id = [0u8; aead::NONCE_LEN];
+        codec::put_u32(connection_id, &mut conn_id[..4]);
+
+        conn_id
+            .iter_mut()
+            .zip(iv.get_mut(0).unwrap().0.iter_mut())
+            .for_each(|(conn_id, iv)| {
+                *conn_id ^= *iv;
+            });
+        iv.insert(connection_id as usize, Iv::copy(&conn_id));
+    }
+
+
+
 /// A `MessageEncrypter` which doesn't work.
 struct InvalidMessageEncrypter {}
 
 impl MessageEncrypter for InvalidMessageEncrypter {
-    fn encrypt(&self, _m: BorrowedPlainMessage, _seq: u64) -> Result<OpaqueMessage, Error> {
+    fn encrypt(&self, _m: BorrowedPlainMessage, _seq: u64, connection_id: u32) -> Result<OpaqueMessage, Error> {
         Err(Error::EncryptError)
-    }
-
-    fn get_enc_iv(&self) -> Iv {
-        todo!()
-    }
-
-    fn get_mut_ref_enc_iv(&mut self) -> &mut Iv {
-        todo!()
     }
 }
 
@@ -107,15 +111,7 @@ impl MessageEncrypter for InvalidMessageEncrypter {
 struct InvalidMessageDecrypter {}
 
 impl MessageDecrypter for InvalidMessageDecrypter {
-    fn decrypt(&self, _m: OpaqueMessage, _seq: u64) -> Result<PlainMessage, Error> {
+    fn decrypt(&self, _m: OpaqueMessage, _seq: u64, connection_id: u32) -> Result<PlainMessage, Error> {
         Err(Error::DecryptError)
-    }
-
-    fn get_dec_iv(&self) -> Iv {
-        todo!()
-    }
-
-    fn get_mut_ref_dec_iv(&mut self) -> &mut Iv {
-        todo!()
     }
 }

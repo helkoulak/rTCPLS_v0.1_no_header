@@ -1,3 +1,4 @@
+use std::arch::asm;
 use crate::cipher::{make_nonce, Iv, MessageDecrypter, MessageEncrypter};
 use crate::enums::ContentType;
 use crate::enums::{CipherSuite, ProtocolVersion};
@@ -111,12 +112,12 @@ impl fmt::Debug for Tls13CipherSuite {
 
 struct Tls13MessageEncrypter {
     enc_key: aead::LessSafeKey,
-    iv: Iv,
+    iv: Vec<Iv>,
 }
 
 struct Tls13MessageDecrypter {
     dec_key: aead::LessSafeKey,
-    iv: Iv,
+    iv: Vec<Iv>,
 }
 
 fn unpad_tls13(v: &mut Vec<u8>) -> ContentType {
@@ -143,13 +144,13 @@ fn make_tls13_aad(len: usize) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE]> {
 const TLS13_AAD_SIZE: usize = 1 + 2 + 2;
 
 impl MessageEncrypter for Tls13MessageEncrypter {
-    fn encrypt(&self, msg: BorrowedPlainMessage, seq: u64) -> Result<OpaqueMessage, Error> {
+    fn encrypt(&self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32) -> Result<OpaqueMessage, Error> {
         let total_len = msg.payload.len() + 1 + self.enc_key.algorithm().tag_len();
         let mut payload = Vec::with_capacity(total_len);
         payload.extend_from_slice(msg.payload);
         msg.typ.encode(&mut payload);
 
-        let nonce = make_nonce(&self.iv, seq);
+        let nonce = make_nonce(self.iv.get(conn_id as usize).unwrap(), seq);
         let aad = make_tls13_aad(total_len);
 
         self.enc_key
@@ -163,23 +164,16 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         })
     }
 
-    fn get_enc_iv(&self) -> Iv{
-        Iv::copy(&self.iv.0)
-    }
-
-    fn get_mut_ref_enc_iv(&mut self) -> &mut Iv{
-        self.iv.as_mut()
-    }
 }
 
 impl MessageDecrypter for Tls13MessageDecrypter {
-    fn decrypt(&self, mut msg: OpaqueMessage, seq: u64) -> Result<PlainMessage, Error> {
+    fn decrypt(&self, mut msg: OpaqueMessage, seq: u64, conn_id: u32) -> Result<PlainMessage, Error> {
         let payload = &mut msg.payload.0;
         if payload.len() < self.dec_key.algorithm().tag_len() {
             return Err(Error::DecryptError);
         }
 
-        let nonce = make_nonce(&self.iv, seq);
+        let nonce = make_nonce(self.iv.get(conn_id as usize).unwrap(), seq);
         let aad = make_tls13_aad(payload.len());
         let plain_len = self
             .dec_key
@@ -204,14 +198,6 @@ impl MessageDecrypter for Tls13MessageDecrypter {
 
         msg.version = ProtocolVersion::TLSv1_3;
         Ok(msg.into_plain_message())
-    }
-
-    fn get_dec_iv(&self) -> Iv{
-        Iv::copy(&self.iv.0)
-    }
-
-    fn get_mut_ref_dec_iv(&mut self) -> &mut Iv {
-        self.iv.as_mut()
     }
 
 }
