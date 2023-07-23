@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
 /// This module contains optional APIs for implementing TCPLS.
-use crate::cipher::{Iv, MessageDecrypter, MessageEncrypter};
+use crate::cipher::{derive_connection_iv, Iv, MessageDecrypter, MessageEncrypter};
 use crate::client::ClientConnectionData;
 use crate::common_state::*;
 use crate::conn::ConnectionCore;
@@ -25,7 +25,7 @@ use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 
 use crate::{ClientConfig, RootCertStore, ServerConfig, ServerName, Error, ConnectionCommon, SupportedCipherSuite, ALL_CIPHER_SUITES, SupportedProtocolVersion, version, Certificate, PrivateKey, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, KeyLogFile, cipher, ALL_VERSIONS, Ticketer, server, ContentType};
 use crate::msgs::codec;
-use crate::tcpls::Connection::Client;
+
 
 use crate::verify::{AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth};
 
@@ -87,8 +87,9 @@ pub enum TcplsFrame {
 }
 
     pub struct TcplsSession {
-        pub tls_config: Vec<TlsConfig>,
-        pub tls_conn: Option<Connection>,
+        pub tls_config: Option<TlsConfig>,
+        pub client_tls_conn: Option<ClientConnection>,
+        pub server_tls_conn: Option<ServerConnection>,
         pub tcp_connections: Vec<TcpConnection>,
         pub pending_tcp_connections: Vec<TcpConnection>,
         pub server_listeners: Vec<TcpListener>,
@@ -108,8 +109,9 @@ pub enum TcplsFrame {
     impl TcplsSession {
         pub fn new() -> Self{
             Self{
-                tls_config: Vec::with_capacity(1),
-                tls_conn: None,
+                tls_config: None,
+                client_tls_conn: None,
+                server_tls_conn: None,
                 tcp_connections: Vec::new(),
                 pending_tcp_connections: Vec::new(),
                 server_listeners: Vec::new(),
@@ -138,7 +140,7 @@ pub enum TcplsFrame {
 
     pub struct TcpConnection {
         pub connection_id: u32,
-        pub socket: Vec<TcpStream>,
+        pub socket: TcpStream,
         pub local_address_id: u8,
         pub remote_address_id: u8,
         pub attached_stream: Option<Stream>,
@@ -154,10 +156,10 @@ pub enum TcplsFrame {
 
 
     impl TcpConnection {
-        pub fn new() -> Self{
+        pub fn new(socket: TcpStream) -> Self{
             Self{
                 connection_id: 0,
-                socket: Vec::with_capacity(1),
+                socket: socket,
                 local_address_id: 0,
                 remote_address_id: 0,
                 attached_stream: None,
@@ -323,9 +325,7 @@ pub enum TcplsFrame {
 
 
     pub fn create_tcpls_connection_object(tcpls_session: &mut TcplsSession, socket: TcpStream, is_server: bool) -> u32{
-        let mut tcp_conn = TcpConnection::new();
-
-        tcp_conn.socket.push(socket);
+        let mut tcp_conn = TcpConnection::new(socket);
 
         let new_tcp_connection_id = tcpls_session.next_connection_id;
         tcp_conn.connection_id = new_tcp_connection_id;
@@ -363,11 +363,11 @@ pub enum TcplsFrame {
         if new_tcp_conn_id == 0 {
             let client_conn = ClientConnection::new(tls_config, server_name).expect("Establishment of TLS session failed");
             tcpls_session.tls_hs_completed = true;
-            let _ = tcpls_session.tls_conn.insert(Client(client_conn));
-            tcpls_session.tls_config.push(TlsConfig::Client(config.clone()));
+            let _ = tcpls_session.client_tls_conn.insert(client_conn);
+            let _ = tcpls_session.tls_config.insert(TlsConfig::Client(config.clone()));
         }
 
-        // prepare_connection_crypto_context(tcpls_session, new_tcp_conn_id);
+        //prepare_connection_crypto_context(tcpls_session, new_tcp_conn_id);
 
 
 
@@ -537,11 +537,10 @@ pub enum TcplsFrame {
         TcpListener::bind(addr).expect("cannot listen on port")
     }
 
-    pub fn server_accept_connection(listener: TcpListener, tcpls_session: &mut TcplsSession) -> Result<(), io::Error>{
+    pub fn server_accept_connection(listener: TcpListener, tcpls_session: &mut TcplsSession) {
 
-        let (listening_socket, remote_address) = listener.accept().unwrap();
+        let (listening_socket, remote_address) = listener.accept().expect("encountered error while accepting connection");  //TODO: check the meaning of socket in the context of server
         create_tcpls_connection_object(tcpls_session, listening_socket, true);
-        Ok(())
     }
 
     pub fn server_new_tls_connection(config: Arc<ServerConfig>) -> ServerConnection {
@@ -553,13 +552,13 @@ pub enum TcplsFrame {
 
 
 /// A TLS client or server connection.
-#[derive(Debug)]
-pub enum Connection {
-    /// A client connection
-    Client(ClientConnection),
-    /// A server connection
-    Server(ServerConnection),
-}
+// #[derive(Debug)]
+// pub enum Connection {
+//     /// A client connection
+//     Client(ClientConnection),
+//     /// A server connection
+//     Server(ServerConnection),
+// }
 
 
 /// A TCPLS client connection.
@@ -609,11 +608,11 @@ impl Debug for ClientConnection {
             .finish()
     }
 }
-impl From<ClientConnection> for Connection {
-    fn from(c: ClientConnection) -> Self {
-        Client(c)
-    }
-}
+// impl From<ClientConnection> for Connection {
+//     fn from(c: ClientConnection) -> Self {
+//         Client(c)
+//     }
+// }
 
 /// A TCPLS server connection.
 pub struct ServerConnection {
@@ -658,11 +657,11 @@ impl Debug for ServerConnection {
             .finish()
     }
 }
-impl From<ServerConnection> for Connection {
-    fn from(c: ServerConnection) -> Self {
-        Self::Server(c)
-    }
-}
+// impl From<ServerConnection> for Connection {
+//     fn from(c: ServerConnection) -> Self {
+//         Self::Server(c)
+//     }
+// }
 
 #[test]
 fn test_prep_crypto_context(){
