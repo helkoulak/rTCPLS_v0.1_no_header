@@ -84,7 +84,7 @@ impl TlsClient {
         // Read TLS data.  This fails if the underlying TCP connection
         // is broken.
 
-        match self.tcpls_session.client_tls_conn.as_mut().unwrap().read_tls(&mut self.tcpls_session.tcp_connections.get_mut(0).unwrap().socket) {
+        match self.tcpls_session.client_tls_conn.as_mut().unwrap().read_tls(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket) {
             Err(error) => {
                 if error.kind() == io::ErrorKind::WouldBlock {
                     return;
@@ -138,7 +138,7 @@ impl TlsClient {
 
     fn do_write(&mut self) {
 
-        self.tcpls_session.client_tls_conn.as_mut().unwrap().write_tls(&mut self.tcpls_session.tcp_connections.get_mut(0).unwrap().socket)
+        self.tcpls_session.client_tls_conn.as_mut().unwrap().write_tls(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket)
             .unwrap();
     }
 
@@ -146,7 +146,7 @@ impl TlsClient {
     fn register(&mut self, registry: &mio::Registry) {
         let interest = self.event_set();
         registry
-            .register(&mut self.tcpls_session.tcp_connections.get_mut(0).unwrap().socket, CLIENT, interest)
+            .register(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket, CLIENT, interest)
             .unwrap();
     }
 
@@ -155,7 +155,7 @@ impl TlsClient {
 
         let interest = self.event_set();
         registry
-            .reregister(&mut self.tcpls_session.tcp_connections.get_mut(0).unwrap().socket, CLIENT, interest)
+            .reregister(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket, CLIENT, interest)
             .unwrap();
     }
 

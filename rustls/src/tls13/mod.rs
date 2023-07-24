@@ -1,5 +1,5 @@
 use std::arch::asm;
-use crate::cipher::{make_nonce, Iv, MessageDecrypter, MessageEncrypter};
+use crate::cipher::{make_nonce, Iv, MessageDecrypter, MessageEncrypter, derive_connection_iv};
 use crate::enums::ContentType;
 use crate::enums::{CipherSuite, ProtocolVersion};
 use crate::error::{Error, PeerMisbehaved};
@@ -164,6 +164,10 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         })
     }
 
+    fn derive_enc_connection_iv(&mut self, conn_id: u32) {
+        derive_connection_iv(&mut self.iv, conn_id);
+    }
+
 }
 
 impl MessageDecrypter for Tls13MessageDecrypter {
@@ -198,6 +202,10 @@ impl MessageDecrypter for Tls13MessageDecrypter {
 
         msg.version = ProtocolVersion::TLSv1_3;
         Ok(msg.into_plain_message())
+    }
+
+    fn derive_dec_connection_iv(&mut self, conn_id: u32) {
+        derive_connection_iv(&mut self.iv, conn_id);
     }
 
 }

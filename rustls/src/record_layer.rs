@@ -215,6 +215,17 @@ impl RecordLayer {
             .encrypt(plain, seq, self.sending_connection_id)
             .unwrap()
     }
+
+    pub(crate) fn derive_enc_connection_iv(&mut self, conn_id: u32) {
+        self.message_encrypter.derive_enc_connection_iv(conn_id);
+
+    }
+
+    pub(crate) fn derive_dec_connection_iv(&mut self, conn_id: u32) {
+        self.message_decrypter.derive_dec_connection_iv(conn_id);
+
+    }
+
 }
 
 /// Result of decryption.

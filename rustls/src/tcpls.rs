@@ -15,16 +15,18 @@ use mio::net::{TcpListener, TcpStream};
 
 use std::fmt::{self, Debug};
 use std::{io, process, u32, vec};
+use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::fs;
 use std::io::{BufReader, Read, Write};
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
-
+use mio::Token;
 
 
 use crate::{ClientConfig, RootCertStore, ServerConfig, ServerName, Error, ConnectionCommon, SupportedCipherSuite, ALL_CIPHER_SUITES, SupportedProtocolVersion, version, Certificate, PrivateKey, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, KeyLogFile, cipher, ALL_VERSIONS, Ticketer, server, ContentType};
 use crate::msgs::codec;
+use crate::record_layer::RecordLayer;
 
 
 use crate::verify::{AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth};
@@ -90,11 +92,8 @@ pub enum TcplsFrame {
         pub tls_config: Option<TlsConfig>,
         pub client_tls_conn: Option<ClientConnection>,
         pub server_tls_conn: Option<ServerConnection>,
-        pub tcp_connections: Vec<TcpConnection>,
-        pub pending_tcp_connections: Vec<TcpConnection>,
-        pub server_listeners: Vec<TcpListener>,
-        pub open_connections_ids: Vec<u32>,
-        pub closed_connections_ids: Vec<u32>,
+        pub tcp_connections: HashMap<u32, TcpConnection>,
+        pub pending_tcp_connections: HashMap<u32, TcpConnection>,
         pub next_connection_id: u32,
         pub next_local_address_id: u8,
         pub next_remote_address_id: u8,
@@ -112,11 +111,8 @@ pub enum TcplsFrame {
                 tls_config: None,
                 client_tls_conn: None,
                 server_tls_conn: None,
-                tcp_connections: Vec::new(),
-                pending_tcp_connections: Vec::new(),
-                server_listeners: Vec::new(),
-                open_connections_ids: Vec::new(),
-                closed_connections_ids: Vec::new(),
+                tcp_connections: HashMap::new(),
+                pending_tcp_connections: HashMap::new(),
                 next_connection_id: 0,
                 next_local_address_id: 0,
                 addresses_advertised: Vec::new(),
@@ -327,8 +323,8 @@ pub enum TcplsFrame {
     pub fn create_tcpls_connection_object(tcpls_session: &mut TcplsSession, socket: TcpStream, is_server: bool) -> u32{
         let mut tcp_conn = TcpConnection::new(socket);
 
-        let new_tcp_connection_id = tcpls_session.next_connection_id;
-        tcp_conn.connection_id = new_tcp_connection_id;
+        let new_conn_id = tcpls_session.next_connection_id;
+        tcp_conn.connection_id = new_conn_id;
         tcp_conn.local_address_id = tcpls_session.next_local_address_id;
         tcp_conn.remote_address_id = tcpls_session.next_remote_address_id;
 
@@ -336,18 +332,18 @@ pub enum TcplsFrame {
             tcp_conn.is_primary = true;
         }
 
-        tcpls_session.open_connections_ids.push(tcp_conn.connection_id);
+        // tcpls_session.open_connections_ids.push(tcp_conn.connection_id);
         if !is_server{
-            tcpls_session.tcp_connections.push(tcp_conn);
+            tcpls_session.tcp_connections.insert(new_conn_id, tcp_conn);
         }else {
-            tcpls_session.pending_tcp_connections.push(tcp_conn);
+            tcpls_session.pending_tcp_connections.insert(new_conn_id, tcp_conn);
         }
 
         tcpls_session.next_connection_id += 1;
         tcpls_session.next_local_address_id += 1;
         tcpls_session.next_remote_address_id += 1;
 
-        new_tcp_connection_id
+        new_conn_id
 
     }
 
@@ -360,32 +356,24 @@ pub enum TcplsFrame {
 
         let socket = TcpStream::connect(dest_address).expect("TCP connection establishment failed");
         let new_tcp_conn_id= create_tcpls_connection_object(tcpls_session, socket, false);
-        if new_tcp_conn_id == 0 {
+        if new_tcp_conn_id == 0{
             let client_conn = ClientConnection::new(tls_config, server_name).expect("Establishment of TLS session failed");
-            tcpls_session.tls_hs_completed = true;
             let _ = tcpls_session.client_tls_conn.insert(client_conn);
             let _ = tcpls_session.tls_config.insert(TlsConfig::Client(config.clone()));
         }
 
-        //prepare_connection_crypto_context(tcpls_session, new_tcp_conn_id);
-
-
-
+            // prepare_connection_crypto_context(&mut tcpls_session.client_tls_conn.as_mut().unwrap().core.common_state, new_tcp_conn_id);
     }
 
-    // pub(crate) fn prepare_connection_crypto_context(tcpls_session: &mut TcplsSession, new_conn_id: u32) {
+
+
+
+    // pub(crate) fn prepare_connection_crypto_context(common: &mut CommonState, new_conn_id: u32) {
+    //     if new_conn_id > 0 && ! common.is_handshaking() {
     //
-    //     let mut tls_conn = tcpls_session.tls_conn.get_mut(0).unwrap();
-    //     let mut iv_enc =
-    //     if new_conn_id > 0{
-    //
-    //         derive_connection_iv(tls_conn, new_tcp_conn_id);
-    //         derive_connection_iv(tls_conn.record_layer.get_mut_ref_dec_iv(), new_tcp_conn_id);
-    //
-    //
+    //         common.record_layer.derive_enc_connection_iv(new_conn_id);
+    //         common.record_layer.derive_dec_connection_iv(new_conn_id);
     //     }
-    //
-    //
     // }
 
     pub fn client_new_tls_connection(config: Arc<ClientConfig>, name: ServerName) -> ClientConnection{
@@ -528,19 +516,28 @@ pub enum TcplsFrame {
     }
 
 
-    pub fn server_create_listener(local_address: &str, default_port: u16) -> TcpListener {
+    pub fn server_create_listener(local_address: &str, port: u16) -> TcpListener {
 
-        let mut addr:SocketAddr = local_address.parse().unwrap();
+        let mut addr: SocketAddr = local_address.parse().unwrap();
 
-        addr.set_port(default_port);
+        addr.set_port(port);
 
         TcpListener::bind(addr).expect("cannot listen on port")
     }
 
-    pub fn server_accept_connection(listener: TcpListener, tcpls_session: &mut TcplsSession) {
+    pub fn server_accept_connection(listener: TcpListener, tcpls_session: &mut TcplsSession, config: Arc<ServerConfig>) {
+        let (socket, remote_address) =
+            listener.accept().expect("encountered error while accepting connection");
 
-        let (listening_socket, remote_address) = listener.accept().expect("encountered error while accepting connection");  //TODO: check the meaning of socket in the context of server
-        create_tcpls_connection_object(tcpls_session, listening_socket, true);
+        let conn_id = create_tcpls_connection_object(tcpls_session, socket, true);
+        if conn_id == 0 {
+            tcpls_session.is_server = true;
+
+            let server_conn =  ServerConnection::new(config.clone()).
+                expect("Establishing a TLS session has failed");
+            let _ = tcpls_session.server_tls_conn.insert(server_conn);
+            let _ = tcpls_session.tls_config.insert(TlsConfig::Server(config.clone()));
+        }
     }
 
     pub fn server_new_tls_connection(config: Arc<ServerConfig>) -> ServerConnection {

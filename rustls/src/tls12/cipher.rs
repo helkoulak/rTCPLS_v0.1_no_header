@@ -140,6 +140,10 @@ impl MessageDecrypter for GcmMessageDecrypter {
         payload.truncate(plain_len);
         Ok(msg.into_plain_message())
     }
+
+    fn derive_dec_connection_iv(&mut self, conn_id: u32) {
+        todo!()
+    }
 }
 
 impl MessageEncrypter for GcmMessageEncrypter {
@@ -162,6 +166,10 @@ impl MessageEncrypter for GcmMessageEncrypter {
             version: msg.version,
             payload: Payload::new(payload),
         })
+    }
+
+    fn derive_enc_connection_iv(&mut self, conn_id: u32) {
+        todo!()
     }
 }
 
@@ -212,6 +220,10 @@ impl MessageDecrypter for ChaCha20Poly1305MessageDecrypter {
         payload.truncate(plain_len);
         Ok(msg.into_plain_message())
     }
+
+    fn derive_dec_connection_iv(&mut self, conn_id: u32) {
+        todo!()
+    }
 }
 
 impl MessageEncrypter for ChaCha20Poly1305MessageEncrypter {
@@ -232,5 +244,9 @@ impl MessageEncrypter for ChaCha20Poly1305MessageEncrypter {
             version: msg.version,
             payload: Payload::new(buf),
         })
+    }
+
+    fn derive_enc_connection_iv(&mut self, conn_id: u32) {
+        todo!()
     }
 }

@@ -21,7 +21,7 @@ use rustls::server::{
     AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
 };
 use rustls::{self, RootCertStore, tcpls};
-use rustls::tcpls::{load_certs, load_private_key, lookup_suites, lookup_versions, server_create_listener};
+use rustls::tcpls::{load_certs, load_private_key, lookup_suites, lookup_versions, server_create_listener, TcplsSession};
 
 // Token for our listening socket.
 const LISTENER: mio::Token = mio::Token(0);
@@ -48,6 +48,7 @@ struct TlsServer {
     next_id: usize,
     tls_config: Arc<rustls::ServerConfig>,
     mode: ServerMode,
+    tcpls_session: TcplsSession
 }
 
 impl TlsServer {
@@ -58,6 +59,7 @@ impl TlsServer {
             next_id: 2,
             tls_config: cfg,
             mode,
+            tcpls_session: TcplsSession::new(),
         }
     }
 
@@ -68,7 +70,7 @@ impl TlsServer {
                     debug!("Accepting new connection from {:?}", addr);
 
                     let tls_conn =
-                        rustls::tcpls::server_new_tls_connection(Arc::clone(&self.tls_config));
+                        tcpls::server_new_tls_connection(Arc::clone(&self.tls_config));
                     let mode = self.mode.clone();
 
                     let token = mio::Token(self.next_id);
@@ -487,7 +489,6 @@ fn main() {
             .parse_filters("trace")
             .init();
     }
-
 
     let config = build_tls_server_config_args(&args);
 
