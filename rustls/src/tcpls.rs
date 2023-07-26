@@ -13,8 +13,6 @@ use crate::msgs::codec;
 use crate::record_layer::RecordLayer;
 use crate::verify::{AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth};
 
-use ring::aead;
-
 use mio::net::{TcpListener, TcpStream};
 use mio::Token;
 
@@ -24,9 +22,9 @@ use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::fs;
-use std::io::{BufReader, Read, Write};
+use std::io::{BufReader, Read};
 use std::mem::size_of;
-use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use octets::BufferTooShortError;
 
 
@@ -53,7 +51,6 @@ pub enum Frame {
     ACK {
         highest_record_sn_received: u64,
         connection_id: u32,
-
     },
 
     NewToken {
@@ -99,37 +96,19 @@ impl Frame {
 
             0x01 => Frame::Ping,
 
-            0x02..=0x03 => parse_stream_frame(frame_type, b).expect("parsing stream frame failed"),
+            0x02..=0x03 => parse_stream_frame(frame_type, b).unwrap(),
 
-            // 0x04 => Frame::ACK {
-            //     highest_record_sn_received: u64,
-            //     connection_id: u32,
-            // },
-            //
-            // 0x05 => Frame::NewToken {
-            //     token: [u8; 32],
-            //     sequence: u8,
-            // },
-            //
-            // 0x06 => Frame::ConnectionReset {
-            //     connection_id: u32,
-            // },
-            //
-            // 0x07 => Frame::NewAddress {
-            //     port: u16,
-            //     address: IpAddr,
-            //     address_version: u8,
-            //     address_id: u8,
-            // },
-            //
-            // 0x08 => Frame::RemoveAddress {
-            //     address_id: u8,
-            // },
-            //
-            // 0x09 => Frame::StreamChange {
-            //     next_record_stream_id: u32,
-            //     next_offset: u64,
-            // },
+            0x04 => parse_ack_frame(b).unwrap(),
+
+            0x05 => parse_new_token_frame(b).unwrap(),
+
+            0x06 => parse_connection_reset_frame(b).unwrap(),
+
+            0x07 => parse_new_address_frame(b).unwrap(),
+
+            0x08 => parse_remove_address_frame(b).unwrap(),
+
+            0x09 => parse_stream_change_frame(b).unwrap(),
 
 
             _ => return Err(InvalidMessage::InvalidFrameType.into()),
@@ -913,6 +892,116 @@ fn parse_stream_frame(frame_type: u8, b: &mut octets::Octets) -> Result<Frame, B
     })
 }
 
+fn parse_ack_frame(b: &mut octets::Octets) -> Result<Frame, BufferTooShortError> {
+
+    b.reverse(size_of::<u32>())?;
+    let connection_id = b.peek_u32().unwrap();
+
+    b.reverse(size_of::<u64>())?;
+    let highest_record_seq_received = b.peek_u64().unwrap();
+
+    Ok(Frame::ACK {
+        highest_record_sn_received: highest_record_seq_received,
+        connection_id,
+    })
+}
+
+
+fn parse_new_token_frame(b: &mut octets::Octets) -> Result<Frame, BufferTooShortError> {
+
+    b.reverse(size_of::<u8>())?;
+    let sequence = b.peek_u8().unwrap();
+
+    b.reverse(32)?;
+    let token = b.peek_bytes(32).unwrap().buf();
+
+    Ok(Frame::NewToken {
+        token: <[u8; 32]>::try_from(token).unwrap(),
+       sequence,
+
+    })
+}
+
+
+fn parse_connection_reset_frame(b: &mut octets::Octets) -> Result<Frame, BufferTooShortError> {
+
+    b.reverse(size_of::<u32>())?;
+    let connection_id = b.peek_u32().unwrap();
+
+    Ok(Frame::ConnectionReset {
+        connection_id
+    })
+}
+
+fn parse_new_address_frame(b: &mut octets::Octets) -> Result<Frame, BufferTooShortError> {
+
+    b.reverse(size_of::<u8>())?;
+    let address_id = b.peek_u8().unwrap();
+
+    b.reverse(size_of::<u8>())?;
+    let address_version = b.peek_u8().unwrap();
+
+    let address = match address_version {
+        4 => {
+            b.reverse(size_of::<u32>())?;
+            let bytes = b.peek_bytes(4).unwrap().buf();
+            IpAddr::V4(Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3]))
+        },
+        6 => {
+            b.reverse(16)?;
+            let bytes =  b.peek_bytes(16).unwrap().buf();
+
+            bytes_to_ipv6(bytes)
+        },
+        _ => panic!("Wrong ip address version"),
+    };
+    b.reverse(size_of::<u16>())?;
+    let port = b.peek_u16().unwrap();
+
+    Ok(Frame::NewAddress {
+        port,
+        address,
+        address_version,
+        address_id
+    })
+}
+
+fn parse_remove_address_frame(b: &mut octets::Octets) -> Result<Frame, BufferTooShortError> {
+
+    b.reverse(size_of::<u8>())?;
+    let address_id = b.peek_u8().unwrap();
+
+    Ok(Frame::RemoveAddress {
+        address_id
+    })
+}
+
+fn parse_stream_change_frame(b: &mut octets::Octets) -> Result<Frame, BufferTooShortError> {
+
+    b.reverse(size_of::<u32>())?;
+    let next_record_stream_id = b.peek_u32().unwrap();
+
+    b.reverse(size_of::<u64>())?;
+    let next_offset = b.peek_u64().unwrap();
+
+    Ok(Frame::StreamChange {
+        next_offset,
+        next_record_stream_id
+    })
+}
+
+
+fn bytes_to_ipv6(bytes: &[u8]) -> IpAddr {
+    IpAddr::V6(Ipv6Addr::new(u16::from_be_bytes(bytes[..2].try_into().unwrap()),
+                             u16::from_be_bytes(bytes[2..4].try_into().unwrap()),
+                             u16::from_be_bytes(bytes[4..6].try_into().unwrap()),
+                             u16::from_be_bytes(bytes[6..8].try_into().unwrap()),
+                             u16::from_be_bytes(bytes[8..10].try_into().unwrap()),
+                             u16::from_be_bytes(bytes[10..12].try_into().unwrap()),
+                             u16::from_be_bytes(bytes[12..14].try_into().unwrap()),
+                             u16::from_be_bytes(bytes[14..16].try_into().unwrap())))
+}
+
 // fn parse_datagram_frame(ty: u64, b: &mut octets::Octets) -> Result<Frame> {
 //     let first = ty as u8;
 //
@@ -1501,7 +1590,7 @@ impl Debug for ServerConnection {
 //     }
 // }
 
-// #[test]
+#[test]
 fn test_prep_crypto_context(){
 
     let mut iv= Iv::copy(&[0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]) ;
@@ -1519,7 +1608,7 @@ fn test_prep_crypto_context(){
 fn test_parse_stream_frame(){
 
     let mut buf:&[u8] = &[0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x02, 0x03] ;
-    let len = buf.len();
+
     let mut d = octets::Octets::with_slice_reverse(&mut buf);
 
     let stream_frame = Frame::from_bytes(&mut d).unwrap();
@@ -1533,5 +1622,58 @@ fn test_parse_stream_frame(){
     };
 
     assert_eq!(stream_frame, stream_frame_2);
+
+}
+#[test]
+fn test_parse_new_token_frame(){
+
+    let mut buf:&[u8] = &[0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x02, 0x03
+                                , 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x02, 0x03, 0x02, 0x05];
+
+    let mut d = octets::Octets::with_slice_reverse(&mut buf);
+
+    let new_token_frame = Frame::from_bytes(&mut d).unwrap();
+
+    let new_token_frame_2 = Frame::NewToken {
+        token: [0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x06, 0x00, 0x00, 0x00, 0x02, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x02, 0x03],
+        sequence: 0x02,
+    };
+
+    assert_eq!(new_token_frame, new_token_frame_2);
+
+}
+#[test]
+fn test_parse_new_address_frame(){
+
+    let mut v4:&[u8] = &[0x00, 0x06, 0x0A, 0x00, 0x00, 0x02, 0x04, 0x02, 0x07];
+
+
+    let mut d = octets::Octets::with_slice_reverse(&mut v4);
+
+    let new_v4_frame = Frame::from_bytes(&mut d).unwrap();
+
+    let new_v4_frame_2 = Frame::NewAddress {
+        port: 6,
+        address: IpAddr::V4(Ipv4Addr::new(0x0A, 0x00, 0x00, 0x02)),
+        address_version: 0x04,
+        address_id:0x02,
+    };
+
+    assert_eq!(new_v4_frame, new_v4_frame_2);
+
+    let mut v6: &[u8] = &[0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x06, 0x03, 0x07];
+    
+    let mut d = octets::Octets::with_slice_reverse(&mut v6);
+
+    let new_v6_frame = Frame::from_bytes(&mut d).unwrap();
+
+    let new_v6_frame_2 = Frame::NewAddress {
+        port: 0x0C0B,
+        address: bytes_to_ipv6(&[0x0A, 0x09, 0x08, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00]),
+        address_version: 0x06,
+        address_id:0x03,
+    };
+    assert_eq!(new_v6_frame, new_v6_frame_2);
 
 }
