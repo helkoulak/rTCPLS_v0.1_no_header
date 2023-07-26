@@ -6,12 +6,17 @@ use crate::client::ClientConnectionData;
 use crate::common_state::*;
 use crate::conn::ConnectionCore;
 use crate::enums::ProtocolVersion;
-
 use crate::msgs::handshake::{ClientExtension, ServerExtension};
 use crate::server::ServerConnectionData;
+use crate::{ClientConfig, RootCertStore, ServerConfig, ServerName, ConnectionCommon, SupportedCipherSuite, ALL_CIPHER_SUITES, SupportedProtocolVersion, version, Certificate, PrivateKey, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, KeyLogFile, cipher, ALL_VERSIONS, Ticketer, server, ContentType, InvalidMessage, Error};
+use crate::msgs::codec;
+use crate::record_layer::RecordLayer;
+use crate::verify::{AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth};
 
 use ring::aead;
+
 use mio::net::{TcpListener, TcpStream};
+use mio::Token;
 
 use std::fmt::{self, Debug};
 use std::{io, process, u32, vec};
@@ -20,16 +25,9 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::fs;
 use std::io::{BufReader, Read, Write};
+use std::mem::size_of;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
-use mio::Token;
-
-
-use crate::{ClientConfig, RootCertStore, ServerConfig, ServerName, Error, ConnectionCommon, SupportedCipherSuite, ALL_CIPHER_SUITES, SupportedProtocolVersion, version, Certificate, PrivateKey, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, KeyLogFile, cipher, ALL_VERSIONS, Ticketer, server, ContentType};
-use crate::msgs::codec;
-use crate::record_layer::RecordLayer;
-
-
-use crate::verify::{AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth};
+use octets::BufferTooShortError;
 
 
 pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize = crate::msgs::fragmenter::MAX_FRAGMENT_LEN - STREAM_FRAME_OVERHEAD;
@@ -37,8 +35,8 @@ pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize = crate::msgs::fragmenter
 pub const STREAM_FRAME_OVERHEAD: usize = 15; // Type = 1 Byte + Stream Id = 4 Bytes + Offset = 8 Bytes + Length = 2 Bytes
 
 
-#[derive(Clone, PartialEq, Eq)]
-pub enum TcplsFrame {
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Frame {
     Padding,
 
     Ping,
@@ -48,6 +46,7 @@ pub enum TcplsFrame {
         length: u16,
         offset: u64,
         stream_id: u32,
+        fin: u8,
 
     },
 
@@ -87,6 +86,848 @@ pub enum TcplsFrame {
 
     }
 }
+
+
+impl Frame {
+    pub fn from_bytes(
+        b: &mut octets::Octets) -> Result<Frame, InvalidMessage> {
+        let frame_type = b.peek_u8().expect("failed");
+
+        let frame = match frame_type {
+            0x00 => Frame::Padding,
+
+
+            0x01 => Frame::Ping,
+
+            0x02..=0x03 => parse_stream_frame(frame_type, b).expect("parsing stream frame failed"),
+
+            // 0x04 => Frame::ACK {
+            //     highest_record_sn_received: u64,
+            //     connection_id: u32,
+            // },
+            //
+            // 0x05 => Frame::NewToken {
+            //     token: [u8; 32],
+            //     sequence: u8,
+            // },
+            //
+            // 0x06 => Frame::ConnectionReset {
+            //     connection_id: u32,
+            // },
+            //
+            // 0x07 => Frame::NewAddress {
+            //     port: u16,
+            //     address: IpAddr,
+            //     address_version: u8,
+            //     address_id: u8,
+            // },
+            //
+            // 0x08 => Frame::RemoveAddress {
+            //     address_id: u8,
+            // },
+            //
+            // 0x09 => Frame::StreamChange {
+            //     next_record_stream_id: u32,
+            //     next_offset: u64,
+            // },
+
+
+            _ => return Err(InvalidMessage::InvalidFrameType.into()),
+        };
+
+
+        Ok(frame)
+    }
+
+    // pub fn to_bytes(&self, b: &mut octets::OctetsMut) -> Result<usize> {
+    //     let before = b.cap();
+    //
+    //     match self {
+    //         Frame::Padding { len } => {
+    //             let mut left = *len;
+    //
+    //             while left > 0 {
+    //                 b.put_varint(0x00)?;
+    //
+    //                 left -= 1;
+    //             }
+    //         },
+    //
+    //         Frame::Ping => {
+    //             b.put_varint(0x01)?;
+    //         },
+    //
+    //         Frame::ACK {
+    //             ack_delay,
+    //             ranges,
+    //             ecn_counts,
+    //         } => {
+    //             if ecn_counts.is_none() {
+    //                 b.put_varint(0x02)?;
+    //             } else {
+    //                 b.put_varint(0x03)?;
+    //             }
+    //
+    //             let mut it = ranges.iter().rev();
+    //
+    //             let first = it.next().unwrap();
+    //             let ack_block = (first.end - 1) - first.start;
+    //
+    //             b.put_varint(first.end - 1)?;
+    //             b.put_varint(*ack_delay)?;
+    //             b.put_varint(it.len() as u64)?;
+    //             b.put_varint(ack_block)?;
+    //
+    //             let mut smallest_ack = first.start;
+    //
+    //             for block in it {
+    //                 let gap = smallest_ack - block.end - 1;
+    //                 let ack_block = (block.end - 1) - block.start;
+    //
+    //                 b.put_varint(gap)?;
+    //                 b.put_varint(ack_block)?;
+    //
+    //                 smallest_ack = block.start;
+    //             }
+    //
+    //             if let Some(ecn) = ecn_counts {
+    //                 b.put_varint(ecn.ect0_count)?;
+    //                 b.put_varint(ecn.ect1_count)?;
+    //                 b.put_varint(ecn.ecn_ce_count)?;
+    //             }
+    //         },
+    //
+    //         Frame::ResetStream {
+    //             stream_id,
+    //             error_code,
+    //             final_size,
+    //         } => {
+    //             b.put_varint(0x04)?;
+    //
+    //             b.put_varint(*stream_id)?;
+    //             b.put_varint(*error_code)?;
+    //             b.put_varint(*final_size)?;
+    //         },
+    //
+    //         Frame::StopSending {
+    //             stream_id,
+    //             error_code,
+    //         } => {
+    //             b.put_varint(0x05)?;
+    //
+    //             b.put_varint(*stream_id)?;
+    //             b.put_varint(*error_code)?;
+    //         },
+    //
+    //         Frame::Crypto { data } => {
+    //             encode_crypto_header(data.off(), data.len() as u64, b)?;
+    //
+    //             b.put_bytes(data)?;
+    //         },
+    //
+    //         Frame::CryptoHeader { .. } => (),
+    //
+    //         Frame::NewToken { token } => {
+    //             b.put_varint(0x07)?;
+    //
+    //             b.put_varint(token.len() as u64)?;
+    //             b.put_bytes(token)?;
+    //         },
+    //
+    //         Frame::Stream { stream_id, data } => {
+    //             encode_stream_header(
+    //                 *stream_id,
+    //                 data.off(),
+    //                 data.len() as u64,
+    //                 data.fin(),
+    //                 b,
+    //             )?;
+    //
+    //             b.put_bytes(data)?;
+    //         },
+    //
+    //         Frame::StreamHeader { .. } => (),
+    //
+    //         Frame::MaxData { max } => {
+    //             b.put_varint(0x10)?;
+    //
+    //             b.put_varint(*max)?;
+    //         },
+    //
+    //         Frame::MaxStreamData { stream_id, max } => {
+    //             b.put_varint(0x11)?;
+    //
+    //             b.put_varint(*stream_id)?;
+    //             b.put_varint(*max)?;
+    //         },
+    //
+    //         Frame::MaxStreamsBidi { max } => {
+    //             b.put_varint(0x12)?;
+    //
+    //             b.put_varint(*max)?;
+    //         },
+    //
+    //         Frame::MaxStreamsUni { max } => {
+    //             b.put_varint(0x13)?;
+    //
+    //             b.put_varint(*max)?;
+    //         },
+    //
+    //         Frame::DataBlocked { limit } => {
+    //             b.put_varint(0x14)?;
+    //
+    //             b.put_varint(*limit)?;
+    //         },
+    //
+    //         Frame::StreamDataBlocked { stream_id, limit } => {
+    //             b.put_varint(0x15)?;
+    //
+    //             b.put_varint(*stream_id)?;
+    //             b.put_varint(*limit)?;
+    //         },
+    //
+    //         Frame::StreamsBlockedBidi { limit } => {
+    //             b.put_varint(0x16)?;
+    //
+    //             b.put_varint(*limit)?;
+    //         },
+    //
+    //         Frame::StreamsBlockedUni { limit } => {
+    //             b.put_varint(0x17)?;
+    //
+    //             b.put_varint(*limit)?;
+    //         },
+    //
+    //         Frame::NewConnectionId {
+    //             seq_num,
+    //             retire_prior_to,
+    //             conn_id,
+    //             reset_token,
+    //         } => {
+    //             b.put_varint(0x18)?;
+    //
+    //             b.put_varint(*seq_num)?;
+    //             b.put_varint(*retire_prior_to)?;
+    //             b.put_u8(conn_id.len() as u8)?;
+    //             b.put_bytes(conn_id.as_ref())?;
+    //             b.put_bytes(reset_token.as_ref())?;
+    //         },
+    //
+    //         Frame::RetireConnectionId { seq_num } => {
+    //             b.put_varint(0x19)?;
+    //
+    //             b.put_varint(*seq_num)?;
+    //         },
+    //
+    //         Frame::PathChallenge { data } => {
+    //             b.put_varint(0x1a)?;
+    //
+    //             b.put_bytes(data.as_ref())?;
+    //         },
+    //
+    //         Frame::PathResponse { data } => {
+    //             b.put_varint(0x1b)?;
+    //
+    //             b.put_bytes(data.as_ref())?;
+    //         },
+    //
+    //         Frame::ConnectionClose {
+    //             error_code,
+    //             frame_type,
+    //             reason,
+    //         } => {
+    //             b.put_varint(0x1c)?;
+    //
+    //             b.put_varint(*error_code)?;
+    //             b.put_varint(*frame_type)?;
+    //             b.put_varint(reason.len() as u64)?;
+    //             b.put_bytes(reason.as_ref())?;
+    //         },
+    //
+    //         Frame::ApplicationClose { error_code, reason } => {
+    //             b.put_varint(0x1d)?;
+    //
+    //             b.put_varint(*error_code)?;
+    //             b.put_varint(reason.len() as u64)?;
+    //             b.put_bytes(reason.as_ref())?;
+    //         },
+    //
+    //         Frame::HandshakeDone => {
+    //             b.put_varint(0x1e)?;
+    //         },
+    //
+    //         Frame::Datagram { data } => {
+    //             encode_dgram_header(data.len() as u64, b)?;
+    //
+    //             b.put_bytes(data.as_ref())?;
+    //         },
+    //
+    //         Frame::DatagramHeader { .. } => (),
+    //     }
+    //
+    //     Ok(before - b.cap())
+    // }
+
+    // pub fn wire_len(&self) -> usize {
+    //     match self {
+    //         Frame::Padding { len } => *len,
+    //
+    //         Frame::Ping => 1,
+    //
+    //         Frame::ACK {
+    //             ack_delay,
+    //             ranges,
+    //             ecn_counts,
+    //         } => {
+    //             let mut it = ranges.iter().rev();
+    //
+    //             let first = it.next().unwrap();
+    //             let ack_block = (first.end - 1) - first.start;
+    //
+    //             let mut len = 1 + // frame type
+    //                 octets::varint_len(first.end - 1) + // largest_ack
+    //                 octets::varint_len(*ack_delay) + // ack_delay
+    //                 octets::varint_len(it.len() as u64) + // block_count
+    //                 octets::varint_len(ack_block); // first_block
+    //
+    //             let mut smallest_ack = first.start;
+    //
+    //             for block in it {
+    //                 let gap = smallest_ack - block.end - 1;
+    //                 let ack_block = (block.end - 1) - block.start;
+    //
+    //                 len += octets::varint_len(gap) + // gap
+    //                     octets::varint_len(ack_block); // ack_block
+    //
+    //                 smallest_ack = block.start;
+    //             }
+    //
+    //             if let Some(ecn) = ecn_counts {
+    //                 len += octets::varint_len(ecn.ect0_count) +
+    //                     octets::varint_len(ecn.ect1_count) +
+    //                     octets::varint_len(ecn.ecn_ce_count);
+    //             }
+    //
+    //             len
+    //         },
+    //
+    //         Frame::ResetStream {
+    //             stream_id,
+    //             error_code,
+    //             final_size,
+    //         } => {
+    //             1 + // frame type
+    //                 octets::varint_len(*stream_id) + // stream_id
+    //                 octets::varint_len(*error_code) + // error_code
+    //                 octets::varint_len(*final_size) // final_size
+    //         },
+    //
+    //         Frame::StopSending {
+    //             stream_id,
+    //             error_code,
+    //         } => {
+    //             1 + // frame type
+    //                 octets::varint_len(*stream_id) + // stream_id
+    //                 octets::varint_len(*error_code) // error_code
+    //         },
+    //
+    //         Frame::Crypto { data } => {
+    //             1 + // frame type
+    //                 octets::varint_len(data.off()) + // offset
+    //                 2 + // length, always encode as 2-byte varint
+    //                 data.len() // data
+    //         },
+    //
+    //         Frame::CryptoHeader { offset, length, .. } => {
+    //             1 + // frame type
+    //                 octets::varint_len(*offset) + // offset
+    //                 2 + // length, always encode as 2-byte varint
+    //                 length // data
+    //         },
+    //
+    //         Frame::NewToken { token } => {
+    //             1 + // frame type
+    //                 octets::varint_len(token.len() as u64) + // token length
+    //                 token.len() // token
+    //         },
+    //
+    //         Frame::Stream { stream_id, data } => {
+    //             1 + // frame type
+    //                 octets::varint_len(*stream_id) + // stream_id
+    //                 octets::varint_len(data.off()) + // offset
+    //                 2 + // length, always encode as 2-byte varint
+    //                 data.len() // data
+    //         },
+    //
+    //         Frame::StreamHeader {
+    //             stream_id,
+    //             offset,
+    //             length,
+    //             ..
+    //         } => {
+    //             1 + // frame type
+    //                 octets::varint_len(*stream_id) + // stream_id
+    //                 octets::varint_len(*offset) + // offset
+    //                 2 + // length, always encode as 2-byte varint
+    //                 length // data
+    //         },
+    //
+    //         Frame::MaxData { max } => {
+    //             1 + // frame type
+    //                 octets::varint_len(*max) // max
+    //         },
+    //
+    //         Frame::MaxStreamData { stream_id, max } => {
+    //             1 + // frame type
+    //                 octets::varint_len(*stream_id) + // stream_id
+    //                 octets::varint_len(*max) // max
+    //         },
+    //
+    //         Frame::MaxStreamsBidi { max } => {
+    //             1 + // frame type
+    //                 octets::varint_len(*max) // max
+    //         },
+    //
+    //         Frame::MaxStreamsUni { max } => {
+    //             1 + // frame type
+    //                 octets::varint_len(*max) // max
+    //         },
+    //
+    //         Frame::DataBlocked { limit } => {
+    //             1 + // frame type
+    //                 octets::varint_len(*limit) // limit
+    //         },
+    //
+    //         Frame::StreamDataBlocked { stream_id, limit } => {
+    //             1 + // frame type
+    //                 octets::varint_len(*stream_id) + // stream_id
+    //                 octets::varint_len(*limit) // limit
+    //         },
+    //
+    //         Frame::StreamsBlockedBidi { limit } => {
+    //             1 + // frame type
+    //                 octets::varint_len(*limit) // limit
+    //         },
+    //
+    //         Frame::StreamsBlockedUni { limit } => {
+    //             1 + // frame type
+    //                 octets::varint_len(*limit) // limit
+    //         },
+    //
+    //         Frame::NewConnectionId {
+    //             seq_num,
+    //             retire_prior_to,
+    //             conn_id,
+    //             reset_token,
+    //         } => {
+    //             1 + // frame type
+    //                 octets::varint_len(*seq_num) + // seq_num
+    //                 octets::varint_len(*retire_prior_to) + // retire_prior_to
+    //                 1 + // conn_id length
+    //                 conn_id.len() + // conn_id
+    //                 reset_token.len() // reset_token
+    //         },
+    //
+    //         Frame::RetireConnectionId { seq_num } => {
+    //             1 + // frame type
+    //                 octets::varint_len(*seq_num) // seq_num
+    //         },
+    //
+    //         Frame::PathChallenge { .. } => {
+    //             1 + // frame type
+    //                 8 // data
+    //         },
+    //
+    //         Frame::PathResponse { .. } => {
+    //             1 + // frame type
+    //                 8 // data
+    //         },
+    //
+    //         Frame::ConnectionClose {
+    //             frame_type,
+    //             error_code,
+    //             reason,
+    //             ..
+    //         } => {
+    //             1 + // frame type
+    //                 octets::varint_len(*error_code) + // error_code
+    //                 octets::varint_len(*frame_type) + // frame_type
+    //                 octets::varint_len(reason.len() as u64) + // reason_len
+    //                 reason.len() // reason
+    //         },
+    //
+    //         Frame::ApplicationClose { reason, error_code } => {
+    //             1 + // frame type
+    //                 octets::varint_len(*error_code) + // error_code
+    //                 octets::varint_len(reason.len() as u64) + // reason_len
+    //                 reason.len() // reason
+    //         },
+    //
+    //         Frame::HandshakeDone => {
+    //             1 // frame type
+    //         },
+    //
+    //         Frame::Datagram { data } => {
+    //             1 + // frame type
+    //                 2 + // length, always encode as 2-byte varint
+    //                 data.len() // data
+    //         },
+    //
+    //         Frame::DatagramHeader { length } => {
+    //             1 + // frame type
+    //                 2 + // length, always encode as 2-byte varint
+    //                 *length // data
+    //         },
+    //     }
+    // }
+
+    // pub fn ack_eliciting(&self) -> bool {
+    //     // Any other frame is ack-eliciting (note the `!`).
+    //     !matches!(
+    //         self,
+    //         Frame::Padding { .. } |
+    //             Frame::ACK { .. } |
+    //             Frame::ApplicationClose { .. } |
+    //             Frame::ConnectionClose { .. }
+    //     )
+    // }
+    //
+    // pub fn probing(&self) -> bool {
+    //     matches!(
+    //         self,
+    //         Frame::Padding { .. } |
+    //             Frame::NewConnectionId { .. } |
+    //             Frame::PathChallenge { .. } |
+    //             Frame::PathResponse { .. }
+    //     )
+    // }
+
+
+}
+
+// impl std::fmt::Debug for Frame {
+//     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+//         match self {
+//             Frame::Padding { len } => {
+//                 write!(f, "PADDING len={len}")?;
+//             },
+//
+//             Frame::Ping => {
+//                 write!(f, "PING")?;
+//             },
+//
+//             Frame::ACK {
+//                 ack_delay,
+//                 ranges,
+//                 ecn_counts,
+//             } => {
+//                 write!(
+//                     f,
+//                     "ACK delay={ack_delay} blocks={ranges:?} ecn_counts={ecn_counts:?}"
+//                 )?;
+//             },
+//
+//             Frame::ResetStream {
+//                 stream_id,
+//                 error_code,
+//                 final_size,
+//             } => {
+//                 write!(
+//                     f,
+//                     "RESET_STREAM stream={stream_id} err={error_code:x} size={final_size}"
+//                 )?;
+//             },
+//
+//             Frame::StopSending {
+//                 stream_id,
+//                 error_code,
+//             } => {
+//                 write!(f, "STOP_SENDING stream={stream_id} err={error_code:x}")?;
+//             },
+//
+//             Frame::Crypto { data } => {
+//                 write!(f, "CRYPTO off={} len={}", data.off(), data.len())?;
+//             },
+//
+//             Frame::CryptoHeader { offset, length } => {
+//                 write!(f, "CRYPTO off={offset} len={length}")?;
+//             },
+//
+//             Frame::NewToken { .. } => {
+//                 write!(f, "NEW_TOKEN (TODO)")?;
+//             },
+//
+//             Frame::Stream { stream_id, data } => {
+//                 write!(
+//                     f,
+//                     "STREAM id={} off={} len={} fin={}",
+//                     stream_id,
+//                     data.off(),
+//                     data.len(),
+//                     data.fin()
+//                 )?;
+//             },
+//
+//             Frame::StreamHeader {
+//                 stream_id,
+//                 offset,
+//                 length,
+//                 fin,
+//             } => {
+//                 write!(
+//                     f,
+//                     "STREAM id={stream_id} off={offset} len={length} fin={fin}"
+//                 )?;
+//             },
+//
+//             Frame::MaxData { max } => {
+//                 write!(f, "MAX_DATA max={max}")?;
+//             },
+//
+//             Frame::MaxStreamData { stream_id, max } => {
+//                 write!(f, "MAX_STREAM_DATA stream={stream_id} max={max}")?;
+//             },
+//
+//             Frame::MaxStreamsBidi { max } => {
+//                 write!(f, "MAX_STREAMS type=bidi max={max}")?;
+//             },
+//
+//             Frame::MaxStreamsUni { max } => {
+//                 write!(f, "MAX_STREAMS type=uni max={max}")?;
+//             },
+//
+//             Frame::DataBlocked { limit } => {
+//                 write!(f, "DATA_BLOCKED limit={limit}")?;
+//             },
+//
+//             Frame::StreamDataBlocked { stream_id, limit } => {
+//                 write!(
+//                     f,
+//                     "STREAM_DATA_BLOCKED stream={stream_id} limit={limit}"
+//                 )?;
+//             },
+//
+//             Frame::StreamsBlockedBidi { limit } => {
+//                 write!(f, "STREAMS_BLOCKED type=bidi limit={limit}")?;
+//             },
+//
+//             Frame::StreamsBlockedUni { limit } => {
+//                 write!(f, "STREAMS_BLOCKED type=uni limit={limit}")?;
+//             },
+//
+//             Frame::NewConnectionId {
+//                 seq_num,
+//                 retire_prior_to,
+//                 conn_id,
+//                 reset_token,
+//             } => {
+//                 write!(
+//                     f,
+//                     "NEW_CONNECTION_ID seq_num={seq_num} retire_prior_to={retire_prior_to} conn_id={conn_id:02x?} reset_token={reset_token:02x?}",
+//                 )?;
+//             },
+//
+//             Frame::RetireConnectionId { seq_num } => {
+//                 write!(f, "RETIRE_CONNECTION_ID seq_num={seq_num}")?;
+//             },
+//
+//             Frame::PathChallenge { data } => {
+//                 write!(f, "PATH_CHALLENGE data={data:02x?}")?;
+//             },
+//
+//             Frame::PathResponse { data } => {
+//                 write!(f, "PATH_RESPONSE data={data:02x?}")?;
+//             },
+//
+//             Frame::ConnectionClose {
+//                 error_code,
+//                 frame_type,
+//                 reason,
+//             } => {
+//                 write!(
+//                     f,
+//                     "CONNECTION_CLOSE err={error_code:x} frame={frame_type:x} reason={reason:x?}"
+//                 )?;
+//             },
+//
+//             Frame::ApplicationClose { error_code, reason } => {
+//                 write!(
+//                     f,
+//                     "APPLICATION_CLOSE err={error_code:x} reason={reason:x?}"
+//                 )?;
+//             },
+//
+//             Frame::HandshakeDone => {
+//                 write!(f, "HANDSHAKE_DONE")?;
+//             },
+//
+//             Frame::Datagram { data } => {
+//                 write!(f, "DATAGRAM len={}", data.len())?;
+//             },
+//
+//             Frame::DatagramHeader { length } => {
+//                 write!(f, "DATAGRAM len={length}")?;
+//             },
+//         }
+//
+//         Ok(())
+//     }
+// }
+
+// fn parse_ack_frame(ty: u64, b: &mut octets::Octets) -> Result<Frame, E> {
+//     let first = ty as u8;
+//
+//     let largest_ack = b.get_varint()?;
+//     let ack_delay = b.get_varint()?;
+//     let block_count = b.get_varint()?;
+//     let ack_block = b.get_varint()?;
+//
+//     if largest_ack < ack_block {
+//         return Err(Error::InvalidFrame);
+//     }
+//
+//     let mut smallest_ack = largest_ack - ack_block;
+//
+//     let mut ranges = ranges::RangeSet::default();
+//
+//     ranges.insert(smallest_ack..largest_ack + 1);
+//
+//     for _i in 0..block_count {
+//         let gap = b.get_varint()?;
+//
+//         if smallest_ack < 2 + gap {
+//             return Err(Error::InvalidFrame);
+//         }
+//
+//         let largest_ack = (smallest_ack - gap) - 2;
+//         let ack_block = b.get_varint()?;
+//
+//         if largest_ack < ack_block {
+//             return Err(Error::InvalidFrame);
+//         }
+//
+//         smallest_ack = largest_ack - ack_block;
+//
+//         ranges.insert(smallest_ack..largest_ack + 1);
+//     }
+//
+//     let ecn_counts = if first & 0x01 != 0 {
+//         let ecn = EcnCounts {
+//             ect0_count: b.get_varint()?,
+//             ect1_count: b.get_varint()?,
+//             ecn_ce_count: b.get_varint()?,
+//         };
+//
+//         Some(ecn)
+//     } else {
+//         None
+//     };
+//
+//     Ok(Frame::ACK {
+//         highest_record_sn_received: u64,
+//         connection_id: u32,
+//     })
+// }
+//
+// pub fn encode_crypto_header(
+//     offset: u64, length: u64, b: &mut octets::OctetsMut,
+// ) -> Result<()> {
+//     b.put_varint(0x06)?;
+//
+//     b.put_varint(offset)?;
+//
+//     // Always encode length field as 2-byte varint.
+//     b.put_varint_with_len(length, 2)?;
+//
+//     Ok(())
+// }
+//
+// pub fn encode_stream_header(
+//     stream_id: u64, offset: u64, length: u64, fin: bool,
+//     b: &mut octets::OctetsMut,
+// ) -> Result<()> {
+//     let mut ty: u8 = 0x08;
+//
+//     // Always encode offset.
+//     ty |= 0x04;
+//
+//     // Always encode length.
+//     ty |= 0x02;
+//
+//     if fin {
+//         ty |= 0x01;
+//     }
+//
+//     b.put_varint(u64::from(ty))?;
+//
+//     b.put_varint(stream_id)?;
+//     b.put_varint(offset)?;
+//
+//     // Always encode length field as 2-byte varint.
+//     b.put_varint_with_len(length, 2)?;
+//
+//     Ok(())
+// }
+//
+// pub fn encode_dgram_header(length: u64, b: &mut octets::OctetsMut) -> Result<()> {
+//     let mut ty: u8 = 0x30;
+//
+//     // Always encode length
+//     ty |= 0x01;
+//
+//     b.put_varint(u64::from(ty))?;
+//
+//     // Always encode length field as 2-byte varint.
+//     b.put_varint_with_len(length, 2)?;
+//
+//     Ok(())
+// }
+
+fn parse_stream_frame(frame_type: u8, b: &mut octets::Octets) -> Result<Frame, BufferTooShortError> {
+
+
+    b.reverse(size_of::<u32>())?;
+    let stream_id = b.peek_u32().unwrap();
+
+    b.reverse(size_of::<u64>())?;
+    let offset = b.peek_u64().unwrap();
+
+    b.reverse(size_of::<u16>())?;
+    let length = b.peek_u16().unwrap();
+
+    b.reverse(length as usize)?;
+
+    let stream_bytes = b.peek_bytes(length as usize)?.to_vec();
+
+
+    let fin = frame_type & 0x01 ;
+
+
+
+    Ok(Frame::Stream {
+        stream_data: stream_bytes,
+        length,
+        offset,
+        stream_id,
+        fin
+    })
+}
+
+// fn parse_datagram_frame(ty: u64, b: &mut octets::Octets) -> Result<Frame> {
+//     let first = ty as u8;
+//
+//     let len = if first & 0x01 != 0 {
+//         b.get_varint()? as usize
+//     } else {
+//         b.cap()
+//     };
+//
+//     let data = b.get_bytes(len)?;
+//
+//     Ok(Frame::Datagram {
+//         data: Vec::from(data.buf()),
+//     })
+// }
 
     pub struct TcplsSession {
         pub tls_config: Option<TlsConfig>,
@@ -660,7 +1501,7 @@ impl Debug for ServerConnection {
 //     }
 // }
 
-#[test]
+// #[test]
 fn test_prep_crypto_context(){
 
     let mut iv= Iv::copy(&[0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]) ;
@@ -668,7 +1509,29 @@ fn test_prep_crypto_context(){
 
     let iv_2= Iv::copy(&[0x0C, 0x0B, 0x0A, 0x08, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]) ;
     let connection_id:u32 = 0x01;
-    cipher::derive_connection_iv(&mut iv_vec, connection_id);
+    derive_connection_iv(&mut iv_vec, connection_id);
    assert_eq!(iv_2.value(), iv_vec.get(1).unwrap().value())
 
    }
+
+
+#[test]
+fn test_parse_stream_frame(){
+
+    let mut buf:&[u8] = &[0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x02, 0x03] ;
+    let len = buf.len();
+    let mut d = octets::Octets::with_slice_reverse(&mut buf);
+
+    let stream_frame = Frame::from_bytes(&mut d).unwrap();
+
+    let stream_frame_2 = Frame::Stream {
+        stream_data:vec![0x0C, 0x0B, 0x0A, 0x09, 0x08],
+        length: 5,
+        offset: 6,
+        stream_id: 2,
+        fin: 1,
+    };
+
+    assert_eq!(stream_frame, stream_frame_2);
+
+}

@@ -7,6 +7,7 @@ members = [
     "examples",
   # the main library and tests
     "rustls",
+    "octets",
 ]
 exclude = ["admin/rustfmt"]
 resolver = "2"

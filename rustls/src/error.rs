@@ -138,6 +138,8 @@ pub enum InvalidMessage {
     UnsupportedCurveType,
     /// A peer sent an unsupported key exchange algorithm.
     UnsupportedKeyExchangeAlgorithm(KeyExchangeAlgorithm),
+    /*Invalid TCPLS frame type*/
+    InvalidFrameType,
 }
 
 impl From<InvalidMessage> for Error {
