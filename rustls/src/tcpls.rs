@@ -41,16 +41,16 @@ pub enum Frame {
 
     Stream {
         stream_data: Vec<u8>,
-        length: u16,
+        length: u64,
         offset: u64,
-        stream_id: u32,
+        stream_id: u64,
         fin: u8,
 
     },
 
     ACK {
         highest_record_sn_received: u64,
-        connection_id: u32,
+        connection_id: u64,
     },
 
     NewToken {
@@ -60,12 +60,12 @@ pub enum Frame {
     },
 
     ConnectionReset {
-        connection_id: u32,
+        connection_id: u64,
 
     },
 
     NewAddress {
-        port: u16,
+        port: u64,
         address: IpAddr,
         address_version: u8,
         address_id: u8,
@@ -78,7 +78,7 @@ pub enum Frame {
     },
 
     StreamChange {
-        next_record_stream_id: u32,
+        next_record_stream_id: u64,
         next_offset: u64,
 
     }
@@ -118,63 +118,32 @@ impl Frame {
         Ok(frame)
     }
 
-    // pub fn to_bytes(&self, b: &mut octets::OctetsMut) -> Result<usize> {
-    //     let before = b.cap();
-    //
-    //     match self {
-    //         Frame::Padding { len } => {
-    //             let mut left = *len;
-    //
-    //             while left > 0 {
-    //                 b.put_varint(0x00)?;
-    //
-    //                 left -= 1;
-    //             }
-    //         },
-    //
-    //         Frame::Ping => {
-    //             b.put_varint(0x01)?;
-    //         },
-    //
-    //         Frame::ACK {
-    //             ack_delay,
-    //             ranges,
-    //             ecn_counts,
-    //         } => {
-    //             if ecn_counts.is_none() {
-    //                 b.put_varint(0x02)?;
-    //             } else {
-    //                 b.put_varint(0x03)?;
-    //             }
-    //
-    //             let mut it = ranges.iter().rev();
-    //
-    //             let first = it.next().unwrap();
-    //             let ack_block = (first.end - 1) - first.start;
-    //
-    //             b.put_varint(first.end - 1)?;
-    //             b.put_varint(*ack_delay)?;
-    //             b.put_varint(it.len() as u64)?;
-    //             b.put_varint(ack_block)?;
-    //
-    //             let mut smallest_ack = first.start;
-    //
-    //             for block in it {
-    //                 let gap = smallest_ack - block.end - 1;
-    //                 let ack_block = (block.end - 1) - block.start;
-    //
-    //                 b.put_varint(gap)?;
-    //                 b.put_varint(ack_block)?;
-    //
-    //                 smallest_ack = block.start;
-    //             }
-    //
-    //             if let Some(ecn) = ecn_counts {
-    //                 b.put_varint(ecn.ect0_count)?;
-    //                 b.put_varint(ecn.ect1_count)?;
-    //                 b.put_varint(ecn.ecn_ce_count)?;
-    //             }
-    //         },
+    pub fn to_bytes(&self, b: &mut octets::OctetsMut) -> Result<usize, InvalidMessage> {
+        let before = b.cap();
+
+        match self {
+            Frame::Padding => {b.put_varint(0x00).unwrap();},
+            Frame::Ping => {b.put_varint(0x01).unwrap();},
+            Frame::Stream {
+                stream_data,
+                length ,
+                offset,
+                stream_id,
+                fin,
+            } => {
+                b.put_bytes(stream_data).unwrap();
+                b.put_varint_backwards(*length).unwrap();
+                b.put_varint_backwards(*offset).unwrap();
+                b.put_varint_backwards(*stream_id).unwrap();
+                if fin == 0 {
+                    b.put_varint(0x02).unwrap();
+                }else {
+                    b.put_varint(0x03).unwrap();
+                }
+            },
+            _ => {}
+        }
+
     //
     //         Frame::ResetStream {
     //             stream_id,
@@ -344,8 +313,8 @@ impl Frame {
     //         Frame::DatagramHeader { .. } => (),
     //     }
     //
-    //     Ok(before - b.cap())
-    // }
+        Ok(before - b.cap())
+    }
 
     // pub fn wire_len(&self) -> usize {
     //     match self {
@@ -865,14 +834,14 @@ impl Frame {
 fn parse_stream_frame(frame_type: u8, b: &mut octets::Octets) -> Result<Frame, BufferTooShortError> {
 
 
-    b.reverse(size_of::<u32>())?;
-    let stream_id = b.peek_u32().unwrap();
+    b.reverse(size_of::<u8>())?; // check first byte after 'type' byte
+    let stream_id = b.peek_varint_backwards().unwrap();
 
-    b.reverse(size_of::<u64>())?;
-    let offset = b.peek_u64().unwrap();
+    b.reverse(size_of::<u8>())?; // go one step backwards to check the encoding length of the next VaInt
+    let offset = b.peek_varint_backwards().unwrap();
 
-    b.reverse(size_of::<u16>())?;
-    let length = b.peek_u16().unwrap();
+    b.reverse(size_of::<u8>())?;
+    let length = b.peek_varint_backwards().unwrap();
 
     b.reverse(length as usize)?;
 
@@ -894,11 +863,11 @@ fn parse_stream_frame(frame_type: u8, b: &mut octets::Octets) -> Result<Frame, B
 
 fn parse_ack_frame(b: &mut octets::Octets) -> Result<Frame, BufferTooShortError> {
 
-    b.reverse(size_of::<u32>())?;
-    let connection_id = b.peek_u32().unwrap();
+    b.reverse(size_of::<u8>())?;
+    let connection_id = b.peek_varint_backwards().unwrap();
 
-    b.reverse(size_of::<u64>())?;
-    let highest_record_seq_received = b.peek_u64().unwrap();
+    b.reverse(size_of::<u8>())?;
+    let highest_record_seq_received = b.peek_varint_backwards().unwrap();
 
     Ok(Frame::ACK {
         highest_record_sn_received: highest_record_seq_received,
@@ -925,8 +894,8 @@ fn parse_new_token_frame(b: &mut octets::Octets) -> Result<Frame, BufferTooShort
 
 fn parse_connection_reset_frame(b: &mut octets::Octets) -> Result<Frame, BufferTooShortError> {
 
-    b.reverse(size_of::<u32>())?;
-    let connection_id = b.peek_u32().unwrap();
+    b.reverse(size_of::<u8>())?;
+    let connection_id = b.peek_varint_backwards().unwrap();
 
     Ok(Frame::ConnectionReset {
         connection_id
@@ -955,8 +924,8 @@ fn parse_new_address_frame(b: &mut octets::Octets) -> Result<Frame, BufferTooSho
         },
         _ => panic!("Wrong ip address version"),
     };
-    b.reverse(size_of::<u16>())?;
-    let port = b.peek_u16().unwrap();
+    b.reverse(size_of::<u8>())?;
+    let port = b.peek_varint_backwards().unwrap();
 
     Ok(Frame::NewAddress {
         port,
@@ -978,15 +947,17 @@ fn parse_remove_address_frame(b: &mut octets::Octets) -> Result<Frame, BufferToo
 
 fn parse_stream_change_frame(b: &mut octets::Octets) -> Result<Frame, BufferTooShortError> {
 
-    b.reverse(size_of::<u32>())?;
-    let next_record_stream_id = b.peek_u32().unwrap();
+    b.reverse(size_of::<u8>())?;
+    let next_offset = b.peek_varint_backwards().unwrap();
 
-    b.reverse(size_of::<u64>())?;
-    let next_offset = b.peek_u64().unwrap();
+    b.reverse(size_of::<u8>())?;
+    let next_record_stream_id = b.peek_varint_backwards().unwrap();
+
+
 
     Ok(Frame::StreamChange {
+        next_record_stream_id,
         next_offset,
-        next_record_stream_id
     })
 }
 

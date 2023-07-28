@@ -222,6 +222,66 @@ impl<'a> Octets<'a> {
         Ok(out)
     }
 
+
+    /// Reads an unsigned variable-length integer in network byte-order from
+    /// the current offset and reverses the offset of the buffer.
+    pub fn peek_varint_backwards(&mut self) -> Result<u64> {
+        let first = self.peek_u8()?;
+        let mut temp  :u8  = 0;
+
+        let len = varint_parse_len(first);
+
+        if len > self.cap() {
+            return Err(BufferTooShortError);
+        }
+
+        let out = match len {
+            1 => u64::from(self.get_u8()?),
+
+            2 => {
+                self.off - 1;
+
+                let buf = self.peek_bytes_mut(2)?.buf;
+                temp = buf[0].clone();
+                buf[0] &= 0x00;
+                buf[0] = buf[1].clone();
+                buf[1] &= 0x00;
+                buf[1] = temp;
+
+                u64::from( self.peek_u16()? & 0x3fff)
+            },
+
+            4 => {
+                self.off - 3;
+
+                let buf = self.peek_bytes_mut(4)?.buf;
+                temp = buf[0].clone();
+                buf[0] &= 0x00;
+                buf[0] = buf[3].clone();
+                buf[3] &= 0x00;
+                buf[3] = temp;
+
+
+                u64::from(self.peek_u32()? & 0x3fffffff)},
+
+            8 => {
+                self.off - 7;
+
+                let buf = self.peek_bytes_mut(8)?.buf;
+                temp = buf[0].clone();
+                buf[0] &= 0x00;
+                buf[0] = buf[7].clone();
+                buf[7] &= 0x00;
+                buf[7] = temp;
+                self.peek_u64()? & 0x3fffffffffffffff
+            },
+
+            _ => unreachable!(),
+        };
+
+        Ok(out)
+    }
+
     /// Reads `len` bytes from the current offset without copying and advances
     /// the buffer.
     pub fn get_bytes(&mut self, len: usize) -> Result<Octets<'a>> {
@@ -378,7 +438,7 @@ impl<'a> OctetsMut<'a> {
     ///
     /// Since there's no copy, the input slice needs to be mutable to allow
     /// modifications.
-    pub fn with_slice_reverse(buf: &'a mut [u8], len: usize) -> Self {
+    pub fn with_slice_backwards(buf: &'a mut [u8], len: usize) -> Self {
         OctetsMut { buf, off: len - 1 }
     }
 
@@ -507,6 +567,67 @@ impl<'a> OctetsMut<'a> {
             8 => {
                 let buf = self.put_u64(v)?;
                 buf[0] |= 0xc0;
+                buf
+            },
+
+            _ => panic!("value is too large for varint"),
+        };
+
+        Ok(buf)
+    }
+
+    /// Writes an unsigned variable-length integer in network byte-order at the
+    /// current offset and advances the buffer. First and last byte will be switched to make reverse parsing possible
+    pub fn put_varint_backwards(&mut self, v: u64) -> Result<&mut [u8]> {
+        self.put_varint_with_len_backwards(v, varint_len(v))
+    }
+
+    /// Writes an unsigned variable-length integer of the specified length, in
+    /// network byte-order at the current offset and advances the buffer.
+    pub fn put_varint_with_len_backwards(
+        &mut self, v: u64, len: usize,
+    ) -> Result<&mut [u8]> {
+        if self.cap() < len {
+            return Err(BufferTooShortError);
+        }
+
+        let mut temp: u8 = 0;
+
+        let buf = match len {
+            1 => {
+                self.put_u8(v as u8)?
+            },
+
+            2 => {
+                let buf = self.put_u16(v as u16)?;
+                buf[0] |= 0x40;
+                temp = buf[0].clone();
+                buf[0] &= 0x00;
+                buf[0] = buf[1].clone();
+                buf[1] &= 0x00;
+                buf[1] = temp;
+                buf
+            },
+
+            4 => {
+                let buf = self.put_u32(v as u32)?;
+                buf[0] |= 0x80;
+                temp = buf[0].clone();
+                buf[0] &= 0x00;
+                buf[0] = buf[3].clone();
+                buf[3] &= 0x00;
+                buf[3] = temp;
+                buf
+            },
+
+            8 => {
+                let buf = self.put_u64(v)?;
+                buf[0] |= 0xc0;
+                temp = buf[0].clone();
+                buf[0] &= 0x00;
+                buf[0] = buf[7].clone();
+                buf[7] &= 0x00;
+                buf[7] = temp;
                 buf
             },
 
@@ -669,7 +790,7 @@ impl<'a> OctetsMut<'a> {
     }
 
     /// reverses the buffer's offset.
-    pub fn reverse(&mut self, reverse: usize) -> Result<()> {
+    pub fn backwards(&mut self, reverse: usize) -> Result<()> {
         if reverse > self.off() {
             return Err(BufferTooShortError);
         }
