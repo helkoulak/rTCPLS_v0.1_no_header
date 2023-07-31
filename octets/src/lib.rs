@@ -223,64 +223,7 @@ impl<'a> Octets<'a> {
     }
 
 
-    /// Reads an unsigned variable-length integer in network byte-order from
-    /// the current offset and reverses the offset of the buffer.
-    pub fn peek_varint_backwards(&mut self) -> Result<u64> {
-        let first = self.peek_u8()?;
-        let mut temp  :u8  = 0;
 
-        let len = varint_parse_len(first);
-
-        if len > self.cap() {
-            return Err(BufferTooShortError);
-        }
-
-        let out = match len {
-            1 => u64::from(self.peek_u8()?),
-
-            2 => {
-                self.off - 1;
-
-                let buf = self.peek_bytes_mut(2)?.buf;
-                temp = buf[0].clone();
-                buf[0] &= 0x00;
-                buf[0] = buf[1].clone();
-                buf[1] &= 0x00;
-                buf[1] = temp;
-
-                u64::from( self.peek_u16()? & 0x3fff)
-            },
-
-            4 => {
-                self.off - 3;
-
-                let buf = self.peek_bytes_mut(4)?.buf;
-                temp = buf[0].clone();
-                buf[0] &= 0x00;
-                buf[0] = buf[3].clone();
-                buf[3] &= 0x00;
-                buf[3] = temp;
-
-
-                u64::from(self.peek_u32()? & 0x3fffffff)},
-
-            8 => {
-                self.off - 7;
-
-                let buf = self.peek_bytes_mut(8)?.buf;
-                temp = buf[0].clone();
-                buf[0] &= 0x00;
-                buf[0] = buf[7].clone();
-                buf[7] &= 0x00;
-                buf[7] = temp;
-                self.peek_u64()? & 0x3fffffffffffffff
-            },
-
-            _ => unreachable!(),
-        };
-
-        Ok(out)
-    }
 
     /// Reads `len` bytes from the current offset without copying and advances
     /// the buffer.
@@ -368,7 +311,7 @@ impl<'a> Octets<'a> {
     }
 
     /// reverses the buffer's offset.
-    pub fn reverse(&mut self, reverse: usize) -> Result<()> {
+    pub fn backwards(&mut self, reverse: usize) -> Result<()> {
         if  reverse > self.off() {
             return Err(BufferTooShortError);
         }
@@ -453,6 +396,20 @@ impl<'a> OctetsMut<'a> {
     pub fn peek_u8(&mut self) -> Result<u8> {
         peek_u!(self, u8, 1)
     }
+
+    /// Reads an unsigned 16-bit integer from the current offset without
+    /// advancing the buffer.
+    pub fn peek_u16(&mut self) -> Result<u16> { peek_u!(self, u16, 2) }
+
+    /// Reads an unsigned 32-bit integer from the current offset without
+    /// advancing the buffer.
+    pub fn peek_u32(&mut self) -> Result<u32> {
+        peek_u!(self, u32, 4)
+    }
+
+    /// Reads an unsigned 64-bit integer from the current offset without
+    /// advancing the buffer.
+    pub fn peek_u64(&mut self) -> Result<u64> { peek_u!(self, u64, 8) }
 
     /// Writes an unsigned 8-bit integer at the current offset and advances
     /// the buffer.
@@ -724,6 +681,65 @@ impl<'a> OctetsMut<'a> {
         Ok(out)
     }
 
+    /// Reads an unsigned variable-length integer in network byte-order from
+    /// the current offset and reverses the offset of the buffer.
+    pub fn get_varint_backwards(&mut self) -> Result<u64> {
+        let first = self.peek_u8()?;
+        let mut temp  :u8  = 0;
+
+        let len = varint_parse_len(first);
+
+        if len > self.cap_backwards() {
+            return Err(BufferTooShortError);
+        }
+
+        let out = match len {
+            1 => u64::from(self.peek_u8()?),
+
+            2 => {
+                self.off -= 1;
+
+                let buf = self.peek_bytes_mut(2)?.buf;
+                temp = buf[0].clone();
+                buf[0] &= 0x00;
+                buf[0] = buf[1].clone();
+                buf[1] &= 0x00;
+                buf[1] = temp;
+
+                u64::from( self.peek_u16()? & 0x3fff)
+            },
+
+            4 => {
+                self.off -= 3;
+
+                let buf = self.peek_bytes_mut(4)?.buf;
+                temp = buf[0].clone();
+                buf[0] &= 0x00;
+                buf[0] = buf[3].clone();
+                buf[3] &= 0x00;
+                buf[3] = temp;
+
+
+                u64::from(self.peek_u32()? & 0x3fffffff)},
+
+            8 => {
+                self.off -= 7;
+
+                let buf = self.peek_bytes_mut(8)?.buf;
+                temp = buf[0].clone();
+                buf[0] &= 0x00;
+                buf[0] = buf[7].clone();
+                buf[7] &= 0x00;
+                buf[7] = temp;
+                self.peek_u64()? & 0x3fffffffffffffff
+            },
+
+            _ => unreachable!(),
+        };
+
+        Ok(out)
+    }
+
     /// Writes `len` bytes from the current offset without copying and advances
     /// the buffer.
     pub fn put_bytes(&mut self, v: &[u8]) -> Result<()> {
@@ -803,6 +819,11 @@ impl<'a> OctetsMut<'a> {
     /// Returns the remaining capacity in the buffer.
     pub fn cap(&self) -> usize {
         self.buf.len() - self.off
+    }
+
+    /// Returns the remaining capacity in the buffer.
+    pub fn cap_backwards(&self) -> usize {
+        self.off + 1
     }
 
     /// Returns the total length of the buffer.
@@ -917,7 +938,7 @@ mod tests {
 
         let mut b = Octets::with_slice_reverse(&d);
         assert_eq!(b.off(), b.len() - 1);
-        assert!(b.reverse(24).is_err());
+        assert!(b.backwards(24).is_err());
 
     }
 
@@ -928,7 +949,7 @@ mod tests {
 
         let mut b = Octets::with_slice_reverse(&d);
         assert_eq!(b.off(), b.len() - 1);
-        b.reverse(10).expect("TODO: panic message");
+        b.backwards(10).expect("TODO: panic message");
         assert_eq!(b.off(), 7);
 
     }
