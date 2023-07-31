@@ -236,7 +236,7 @@ impl<'a> Octets<'a> {
         }
 
         let out = match len {
-            1 => u64::from(self.get_u8()?),
+            1 => u64::from(self.peek_u8()?),
 
             2 => {
                 self.off - 1;
