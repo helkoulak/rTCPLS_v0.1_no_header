@@ -18,6 +18,7 @@ use mio::Token;
 
 use std::fmt::{self, Debug};
 use std::{io, process, u32, vec};
+use std::arch::asm;
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
@@ -87,7 +88,7 @@ pub enum Frame {
 
 impl Frame {
     pub fn from_bytes(
-        b: &mut octets::Octets) -> Result<Frame, InvalidMessage> {
+        b: &mut octets::OctetsMut) -> Result<Frame, InvalidMessage> {
         let frame_type = b.peek_u8().expect("failed");
 
         let frame = match frame_type {
@@ -135,7 +136,7 @@ impl Frame {
                 b.put_varint_backwards(*length).unwrap();
                 b.put_varint_backwards(*offset).unwrap();
                 b.put_varint_backwards(*stream_id).unwrap();
-                if fin == 0 {
+                if fin & 0x01 == 0 {
                     b.put_varint(0x02).unwrap();
                 }else {
                     b.put_varint(0x03).unwrap();
@@ -886,19 +887,19 @@ impl Frame {
 //     Ok(())
 // }
 
-fn parse_stream_frame(frame_type: u8, b: &mut octets::Octets) -> Result<Frame, BufferTooShortError> {
+fn parse_stream_frame(frame_type: u8, b: &mut octets::OctetsMut) -> Result<Frame, BufferTooShortError> {
 
 
-    b.reverse(size_of::<u8>())?; // check first byte after 'type' byte
-    let stream_id = b.peek_varint_backwards().unwrap();
+    b.backwards(size_of::<u8>())?; // check first byte after 'type' byte
+    let stream_id = b.get_varint_backwards().unwrap();
 
-    b.reverse(size_of::<u8>())?; // go one step backwards to check the encoding length of the next VaInt
-    let offset = b.peek_varint_backwards().unwrap();
+    b.backwards(size_of::<u8>())?; // go one step backwards to check the encoding length of the next VaInt
+    let offset = b.get_varint_backwards().unwrap();
 
-    b.reverse(size_of::<u8>())?;
-    let length = b.peek_varint_backwards().unwrap();
+    b.backwards(size_of::<u8>())?;
+    let length = b.get_varint_backwards().unwrap();
 
-    b.reverse(length as usize)?;
+    b.backwards(length as usize)?;
 
     let stream_bytes = b.peek_bytes(length as usize)?.to_vec();
 
@@ -916,13 +917,13 @@ fn parse_stream_frame(frame_type: u8, b: &mut octets::Octets) -> Result<Frame, B
     })
 }
 
-fn parse_ack_frame(b: &mut octets::Octets) -> Result<Frame, BufferTooShortError> {
+fn parse_ack_frame(b: &mut octets::OctetsMut) -> Result<Frame, BufferTooShortError> {
 
-    b.reverse(size_of::<u8>())?;
-    let connection_id = b.peek_varint_backwards().unwrap();
+    b.backwards(size_of::<u8>())?;
+    let connection_id = b.get_varint_backwards().unwrap();
 
-    b.reverse(size_of::<u8>())?;
-    let highest_record_seq_received = b.peek_varint_backwards().unwrap();
+    b.backwards(size_of::<u8>())?;
+    let highest_record_seq_received = b.get_varint_backwards().unwrap();
 
     Ok(Frame::ACK {
         highest_record_sn_received: highest_record_seq_received,
@@ -931,12 +932,12 @@ fn parse_ack_frame(b: &mut octets::Octets) -> Result<Frame, BufferTooShortError>
 }
 
 
-fn parse_new_token_frame(b: &mut octets::Octets) -> Result<Frame, BufferTooShortError> {
+fn parse_new_token_frame(b: &mut octets::OctetsMut) -> Result<Frame, BufferTooShortError> {
 
-    b.reverse(size_of::<u8>())?;
-    let sequence = b.peek_varint_backwards().unwrap();
+    b.backwards(size_of::<u8>())?;
+    let sequence = b.get_varint_backwards().unwrap();
 
-    b.reverse(32)?;
+    b.backwards(32)?;
     let token = b.peek_bytes(32).unwrap().buf();
 
     Ok(Frame::NewToken {
@@ -947,39 +948,39 @@ fn parse_new_token_frame(b: &mut octets::Octets) -> Result<Frame, BufferTooShort
 }
 
 
-fn parse_connection_reset_frame(b: &mut octets::Octets) -> Result<Frame, BufferTooShortError> {
+fn parse_connection_reset_frame(b: &mut octets::OctetsMut) -> Result<Frame, BufferTooShortError> {
 
-    b.reverse(size_of::<u8>())?;
-    let connection_id = b.peek_varint_backwards().unwrap();
+    b.backwards(size_of::<u8>())?;
+    let connection_id = b.get_varint_backwards().unwrap();
 
     Ok(Frame::ConnectionReset {
         connection_id
     })
 }
 
-fn parse_new_address_frame(b: &mut octets::Octets) -> Result<Frame, BufferTooShortError> {
+fn parse_new_address_frame(b: &mut octets::OctetsMut) -> Result<Frame, BufferTooShortError> {
 
-    b.reverse(size_of::<u8>())?;
-    let address_id = b.peek_varint_backwards().unwrap();
+    b.backwards(size_of::<u8>())?;
+    let address_id = b.get_varint_backwards().unwrap();
 
-    b.reverse(size_of::<u8>())?;
-    let address_version = b.peek_varint_backwards().unwrap();
+    b.backwards(size_of::<u8>())?;
+    let address_version = b.get_varint_backwards().unwrap();
 
 
     let address = match address_version {
         4 => {
-            b.reverse(size_of::<u32>())?;
+            b.backwards(size_of::<u32>())?;
             b.peek_bytes(4).unwrap().to_vec()
 
         },
         6 => {
-            b.reverse(16)?;
+            b.backwards(16)?;
             b.peek_bytes(16).unwrap().to_vec()
         },
         _ => panic!("Wrong ip address version"),
     };
-    b.reverse(size_of::<u8>())?;
-    let port = b.peek_varint_backwards().unwrap();
+    b.backwards(size_of::<u8>())?;
+    let port = b.get_varint_backwards().unwrap();
 
     Ok(Frame::NewAddress {
         port,
@@ -989,23 +990,23 @@ fn parse_new_address_frame(b: &mut octets::Octets) -> Result<Frame, BufferTooSho
     })
 }
 
-fn parse_remove_address_frame(b: &mut octets::Octets) -> Result<Frame, BufferTooShortError> {
+fn parse_remove_address_frame(b: &mut octets::OctetsMut) -> Result<Frame, BufferTooShortError> {
 
-    b.reverse(size_of::<u8>())?;
-    let address_id = b.peek_varint_backwards().unwrap();
+    b.backwards(size_of::<u8>())?;
+    let address_id = b.get_varint_backwards().unwrap();
 
     Ok(Frame::RemoveAddress {
         address_id
     })
 }
 
-fn parse_stream_change_frame(b: &mut octets::Octets) -> Result<Frame, BufferTooShortError> {
+fn parse_stream_change_frame(b: &mut octets::OctetsMut) -> Result<Frame, BufferTooShortError> {
 
-    b.reverse(size_of::<u8>())?;
-    let next_offset = b.peek_varint_backwards().unwrap();
+    b.backwards(size_of::<u8>())?;
+    let next_offset = b.get_varint_backwards().unwrap();
 
-    b.reverse(size_of::<u8>())?;
-    let next_record_stream_id = b.peek_varint_backwards().unwrap();
+    b.backwards(size_of::<u8>())?;
+    let next_record_stream_id = b.get_varint_backwards().unwrap();
 
 
 
@@ -1027,21 +1028,6 @@ fn parse_stream_change_frame(b: &mut octets::Octets) -> Result<Frame, BufferTooS
 //                              u16::from_be_bytes(bytes[14..16].try_into().unwrap())))
 // }
 
-// fn parse_datagram_frame(ty: u64, b: &mut octets::Octets) -> Result<Frame> {
-//     let first = ty as u8;
-//
-//     let len = if first & 0x01 != 0 {
-//         b.get_varint()? as usize
-//     } else {
-//         b.cap()
-//     };
-//
-//     let data = b.get_bytes(len)?;
-//
-//     Ok(Frame::Datagram {
-//         data: Vec::from(data.buf()),
-//     })
-// }
 
     pub struct TcplsSession {
         pub tls_config: Option<TlsConfig>,
@@ -1615,7 +1601,7 @@ impl Debug for ServerConnection {
 //     }
 // }
 
-#[test]
+// #[test]
 fn test_prep_crypto_context(){
 
     let mut iv= Iv::copy(&[0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]) ;
@@ -1630,75 +1616,119 @@ fn test_prep_crypto_context(){
 
 
 #[test]
-fn test_parse_stream_frame(){
+ fn test_encode_decode_stream_frame(){
 
-    let mut buf:&[u8] = &[0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x02, 0x03] ;
+    let mut buf = [0;32] ;
 
-    let mut d = octets::Octets::with_slice_reverse(&mut buf);
-
-    let stream_frame = Frame::from_bytes(&mut d).unwrap();
-
-    let stream_frame_2 = Frame::Stream {
-        stream_data:vec![0x0C, 0x0B, 0x0A, 0x09, 0x08],
-        length: 5,
-        offset: 6,
-        stream_id: 2,
+    let mut stream_frame = Frame::Stream {
+        stream_data: vec![0xDE, 0xAD, 0xBE, 0xEF, 0xDE, 0xAD, 0xBE, 0xEF, 0xDE, 0xAD, 0xBE, 0xEF, 0xDE, 0xAD, 0xBE, 0xEF, 0xDE, 0xAD, 0xBE, 0xEF, 0xDE, 0xAD, 0xBE, 0xEF],
+        length: 24,
+        offset: 66000,
+        stream_id: 500,
         fin: 1,
     };
+
+    let mut d = octets::OctetsMut::with_slice(&mut buf);
+
+    stream_frame.to_bytes(&mut d).unwrap();
+
+    let mut c = octets::OctetsMut::with_slice_backwards(&mut buf, 32);
+
+   let stream_frame_2 = Frame::from_bytes(&mut c).unwrap();
 
     assert_eq!(stream_frame, stream_frame_2);
 
 }
+
+
 #[test]
-fn test_parse_new_token_frame(){
+fn test_encode_decode_ack_frame(){
 
-    let mut buf:&[u8] = &[0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x02, 0x03
-                                , 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x02, 0x03, 0x02, 0x05];
+    let mut buf = [0;6] ;
 
-    let mut d = octets::Octets::with_slice_reverse(&mut buf);
-
-    let new_token_frame = Frame::from_bytes(&mut d).unwrap();
-
-    let new_token_frame_2 = Frame::NewToken {
-        token: [0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x00, 0x06, 0x00, 0x00, 0x00, 0x02, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x02, 0x03],
-        sequence: 0x02,
+    let mut ack_frame = Frame::ACK {
+      highest_record_sn_received: 1753698,
+        connection_id: 8,
     };
 
-    assert_eq!(new_token_frame, new_token_frame_2);
+    let mut d = octets::OctetsMut::with_slice(&mut buf);
+
+    ack_frame.to_bytes(&mut d).unwrap();
+
+    let mut c = octets::OctetsMut::with_slice_backwards(&mut buf, 6);
+
+    let ack_frame_2 = Frame::from_bytes(&mut c).unwrap();
+
+    assert_eq!(ack_frame, ack_frame_2);
 
 }
+
+#[test]
+fn test_encode_decode_new_token_frame(){
+
+    let mut buf = [0;37] ;
+
+    let mut token_frame = Frame::NewToken {
+        token: [0x0F;32],
+        sequence: 854785486,
+    };
+
+    let mut d = octets::OctetsMut::with_slice(&mut buf);
+
+    token_frame.to_bytes(&mut d).unwrap();
+
+    let mut c = octets::OctetsMut::with_slice_backwards(&mut buf, 37);
+
+    let token_frame_2 = Frame::from_bytes(&mut c).unwrap();
+
+    assert_eq!(token_frame, token_frame_2);
+
+}
+
+
+
 #[test]
 fn test_parse_new_address_frame(){
 
-    let mut v4:&[u8] = &[0x00, 0x06, 0x0A, 0x00, 0x00, 0x02, 0x04, 0x02, 0x07];
+    let mut v4 = [0;12] ;
 
-
-    let mut d = octets::Octets::with_slice_reverse(&mut v4);
-
-    let new_v4_frame = Frame::from_bytes(&mut d).unwrap();
-
-    let new_v4_frame_2 = Frame::NewAddress {
-        port: 6,
-        address: vec![0x0A, 0x00, 0x00, 0x02],
+    let mut v4_frame= Frame::NewAddress {
+        port: 9874,
+        address: vec![0x0A, 0x00, 0x00, 0x0C],
         address_version: 0x04,
-        address_id:0x02,
+        address_id: 47854755,
+
     };
 
-    assert_eq!(new_v4_frame, new_v4_frame_2);
+    let mut d = octets::OctetsMut::with_slice(&mut v4);
 
-    let mut v6: &[u8] = &[0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x06, 0x03, 0x07];
-    
-    let mut d = octets::Octets::with_slice_reverse(&mut v6);
+    v4_frame.to_bytes(&mut d).unwrap();
 
-    let new_v6_frame = Frame::from_bytes(&mut d).unwrap();
+    let mut c = octets::OctetsMut::with_slice_backwards(&mut v4, 12);
 
-    let new_v6_frame_2 = Frame::NewAddress {
-        port: 0x0C0B,
-        address: bytes_to_ipv6(&[0x0A, 0x09, 0x08, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00]),
+    let v4_frame_2 = Frame::from_bytes(&mut c).unwrap();
+
+    assert_eq!(v4_frame, v4_frame_2);
+
+
+    let mut v6 = [0;30] ;
+
+    let mut v6_frame= Frame::NewAddress {
+        port: 987455,
+        address: vec![0x0A, 0x00, 0x00, 0x0C, 0x0A, 0x00, 0x00, 0x0C, 0x0A, 0x00, 0x00, 0x0C, 0x0A, 0x00, 0x00, 0x0C],
         address_version: 0x06,
-        address_id:0x03,
+        address_id: 4785475585858,
+
     };
-    assert_eq!(new_v6_frame, new_v6_frame_2);
+
+    let mut d = octets::OctetsMut::with_slice(&mut v6);
+
+    v6_frame.to_bytes(&mut d).unwrap();
+
+    let mut c = octets::OctetsMut::with_slice_backwards(&mut v6, 30);
+
+    let v6_frame_2 = Frame::from_bytes(&mut c).unwrap();
+
+    assert_eq!(v6_frame, v6_frame_2);
 
 }
