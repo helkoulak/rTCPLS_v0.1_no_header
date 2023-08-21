@@ -43,7 +43,7 @@ impl TlsClient {
     }
 
     /// Handles events sent to the TlsClient by mio::Poll
-    fn ready(&mut self, ev: &mio::event::Event) {
+    fn handle_event(&mut self, ev: &mio::event::Event) {
 
         assert_eq!(ev.token(), CLIENT);
 
@@ -340,7 +340,7 @@ fn main() {
         poll.poll(&mut events, None).unwrap();
 
         for ev in events.iter() {
-            client.ready(ev);
+            client.handle_event(ev);
             client.reregister(poll.registry());
         }
     }
