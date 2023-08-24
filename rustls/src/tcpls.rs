@@ -87,7 +87,7 @@ pub enum Frame {
 
 
 impl Frame {
-    pub fn from_bytes(
+    pub fn parse(
         b: &mut octets::Octets) -> Result<Frame, InvalidMessage> {
         let frame_type = b.get_u8_reverse().expect("failed");
 
@@ -119,7 +119,7 @@ impl Frame {
         Ok(frame)
     }
 
-    pub fn to_bytes(&self, b: &mut octets::OctetsMut) -> Result<usize, InvalidMessage> {
+    pub fn encode(&self, b: &mut octets::OctetsMut) -> Result<usize, InvalidMessage> {
         let before = b.cap();
 
         match self {
@@ -1210,11 +1210,11 @@ impl Debug for ServerConnection {
 
     let mut d = octets::OctetsMut::with_slice(&mut buf);
 
-    stream_frame.to_bytes(&mut d).unwrap();
+    stream_frame.encode(&mut d).unwrap();
 
     let mut c = octets::Octets::with_slice_reverse(&mut buf);
 
-   let stream_frame_2 = Frame::from_bytes(&mut c).unwrap();
+   let stream_frame_2 = Frame::parse(&mut c).unwrap();
 
     assert_eq!(stream_frame, stream_frame_2);
 
@@ -1233,11 +1233,11 @@ fn test_encode_decode_ack_frame(){
 
     let mut d = octets::OctetsMut::with_slice(&mut buf);
 
-    ack_frame.to_bytes(&mut d).unwrap();
+    ack_frame.encode(&mut d).unwrap();
 
     let mut c = octets::Octets::with_slice_reverse(&mut buf);
 
-    let ack_frame_2 = Frame::from_bytes(&mut c).unwrap();
+    let ack_frame_2 = Frame::parse(&mut c).unwrap();
 
     assert_eq!(ack_frame, ack_frame_2);
 
@@ -1255,11 +1255,11 @@ fn test_encode_decode_new_token_frame(){
 
     let mut d = octets::OctetsMut::with_slice(&mut buf);
 
-    token_frame.to_bytes(&mut d).unwrap();
+    token_frame.encode(&mut d).unwrap();
 
     let mut c = octets::Octets::with_slice_reverse(&mut buf);
 
-    let token_frame_2 = Frame::from_bytes(&mut c).unwrap();
+    let token_frame_2 = Frame::parse(&mut c).unwrap();
 
     assert_eq!(token_frame, token_frame_2);
 
@@ -1282,11 +1282,11 @@ fn test_parse_new_address_frame(){
 
     let mut d = octets::OctetsMut::with_slice(&mut v4);
 
-    v4_frame.to_bytes(&mut d).unwrap();
+    v4_frame.encode(&mut d).unwrap();
 
     let mut c = octets::Octets::with_slice_reverse(&mut v4);
 
-    let v4_frame_2 = Frame::from_bytes(&mut c).unwrap();
+    let v4_frame_2 = Frame::parse(&mut c).unwrap();
 
     assert_eq!(v4_frame, v4_frame_2);
 
@@ -1303,11 +1303,11 @@ fn test_parse_new_address_frame(){
 
     let mut d = octets::OctetsMut::with_slice(&mut v6);
 
-    v6_frame.to_bytes(&mut d).unwrap();
+    v6_frame.encode(&mut d).unwrap();
 
     let mut c = octets::Octets::with_slice_reverse(&mut v6);
 
-    let v6_frame_2 = Frame::from_bytes(&mut c).unwrap();
+    let v6_frame_2 = Frame::parse(&mut c).unwrap();
 
     assert_eq!(v6_frame, v6_frame_2);
 
