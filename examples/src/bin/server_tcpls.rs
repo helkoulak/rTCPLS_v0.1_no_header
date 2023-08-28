@@ -100,7 +100,7 @@ impl TlsServer {
             self.connections
                 .get_mut(&token)
                 .unwrap()
-                .ready(registry, event);
+                .handle_event(registry, event);
 
             if self.connections[&token].is_closed() {
                 self.connections.remove(&token);
@@ -173,7 +173,7 @@ impl OpenConnection {
     }
 
     /// We're a connection, and we have something to do.
-    fn ready(&mut self, registry: &mio::Registry, ev: &mio::event::Event) {
+    fn handle_event(&mut self, registry: &mio::Registry, ev: &mio::event::Event) {
         // If we're readable: read some TLS.  Then
         // see if that yielded new plaintext.  Then
         // see if the backend is readable too.
