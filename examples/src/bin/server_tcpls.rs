@@ -183,6 +183,13 @@ impl OpenConnection {
             self.try_back_read();
         }
 
+
+        if ev.is_readable() & !self.tls_conn.is_handshaking(){
+            self.do_tls_read();
+            self.try_plain_read();
+            self.try_back_read();
+        }
+
         if ev.is_writable() {
             self.do_tls_write_and_handle_error();
         }

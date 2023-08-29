@@ -1,4 +1,5 @@
 #![allow(missing_docs)]
+#![allow(unused_qualifications)]
 
 /// This module contains optional APIs for implementing TCPLS.
 use crate::cipher::{derive_connection_iv, Iv, MessageDecrypter, MessageEncrypter};
@@ -18,7 +19,7 @@ use mio::Token;
 
 use std::fmt::{self, Debug};
 use std::{io, process, u32, vec};
-use std::arch::asm;
+use std::arch::{asm, is_aarch64_feature_detected};
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
@@ -27,11 +28,16 @@ use std::io::{BufReader, Read};
 use std::mem::size_of;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use octets::BufferError;
+use crate::tcpls::Frame::Stream;
+use crate::vecbuf::ChunkVecBuffer;
 
 
 pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize = crate::msgs::fragmenter::MAX_FRAGMENT_LEN - STREAM_FRAME_OVERHEAD;
 
 pub const STREAM_FRAME_OVERHEAD: usize = 15; // Type = 1 Byte + Stream Id = 4 Bytes + Offset = 8 Bytes + Length = 2 Bytes
+
+pub const DEFAULT_RECEIVED_PLAINTEXT_LIMIT: usize = 16 * 1024;
+pub const DEFAULT_BUFFER_LIMIT: usize = 64 * 1024;
 
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -597,16 +603,6 @@ fn parse_stream_change_frame(b: &mut octets::Octets) -> octets::Result<Frame> {
 }
 
 
-// fn bytes_to_ipv6(bytes: &[u8]) -> IpAddr {
-//     IpAddr::V6(Ipv6Addr::new(u16::from_be_bytes(bytes[..2].try_into().unwrap()),
-//                              u16::from_be_bytes(bytes[2..4].try_into().unwrap()),
-//                              u16::from_be_bytes(bytes[4..6].try_into().unwrap()),
-//                              u16::from_be_bytes(bytes[6..8].try_into().unwrap()),
-//                              u16::from_be_bytes(bytes[8..10].try_into().unwrap()),
-//                              u16::from_be_bytes(bytes[10..12].try_into().unwrap()),
-//                              u16::from_be_bytes(bytes[12..14].try_into().unwrap()),
-//                              u16::from_be_bytes(bytes[14..16].try_into().unwrap())))
-// }
 
 
     pub struct TcplsSession {
@@ -660,7 +656,6 @@ fn parse_stream_change_frame(b: &mut octets::Octets) -> octets::Result<Frame> {
         pub socket: TcpStream,
         pub local_address_id: u8,
         pub remote_address_id: u8,
-        pub attached_stream: Option<Stream>,
         pub nbr_bytes_received: u32,
         // nbr records received on this con since the last ack sent
         pub nbr_records_received: u32,
@@ -679,7 +674,6 @@ fn parse_stream_change_frame(b: &mut octets::Octets) -> octets::Result<Frame> {
                 socket: socket,
                 local_address_id: 0,
                 remote_address_id: 0,
-                attached_stream: None,
                 nbr_bytes_received: 0,
                 nbr_records_received: 0,
                 is_primary: false,
@@ -700,28 +694,71 @@ fn parse_stream_change_frame(b: &mut octets::Octets) -> octets::Result<Frame> {
     }
 
 
-    pub struct Stream {
+    pub struct BiStream {
 
-        stream_id: u32,
-        /** when this stream should first send an attach event before
-                            * sending any packet */
-        need_sending_attach_event: u32,
-        /**
-         * As soon as we have sent a stream attach event to the other peer, this
-         * stream is usable
-         */
-        stream_usable: bool,
+        pub stream_id: u32,
 
         /**
          * the stream should be cleaned up the next time tcpls_send is called
          */
-        marked_for_close: bool,
+        pub marked_for_close: bool,
 
         /**
          * Whether we still have to initialize the aead context for this stream.
          * That may happen if this stream is created before the handshake took place.
          */
-        aead_initialized: bool,
+        pub aead_initialized: bool,
+
+        pub write_seq: u64,
+        pub read_seq: u64,
+
+        /// buffers the decryption of the received TLS records
+        pub(crate) received_plaintext: ChunkVecBuffer,
+        /// buffers data to be sent if TLS handshake is still ongoing
+        pub(crate) sendable_plaintext: ChunkVecBuffer,
+        /// buffers encrypted TLS records that to be sent on the TCP socket
+        pub(crate) sendable_tls: ChunkVecBuffer,
+
+    }
+
+    impl BiStream {
+       pub fn new(id: u32) -> Self {
+            Self{
+                stream_id: id,
+                marked_for_close: false,
+                aead_initialized: false,
+                write_seq: 0,
+                read_seq: 0,
+                received_plaintext: ChunkVecBuffer::new(Some(DEFAULT_RECEIVED_PLAINTEXT_LIMIT)),
+                sendable_plaintext: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
+                sendable_tls: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
+            }
+       }
+    }
+
+    pub struct StreamMap {
+       pub streams: HashMap<u32, BiStream>,
+    }
+
+    impl StreamMap {
+
+        /// Build stream map
+        pub fn build_stream_map() -> Self {
+            let mut map = HashMap::new();
+            let stream = BiStream::new(0);
+            map.insert(0, stream);
+            Self {
+                streams: map,
+            }
+
+        }
+        /// open a new stream for the specified TCP connection
+        pub(crate) fn open_stream(&mut self, conn_id: u32) {
+            if !self.streams.contains_key(&conn_id) {
+                let stream = BiStream::new(conn_id);
+                self.streams.insert(conn_id, stream);
+            }
+        }
 
     }
 

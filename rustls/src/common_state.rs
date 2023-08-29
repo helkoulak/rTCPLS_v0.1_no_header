@@ -17,6 +17,8 @@ use crate::record_layer;
 #[cfg(feature = "secret_extraction")]
 use crate::suites::PartiallyExtractedSecrets;
 use crate::suites::SupportedCipherSuite;
+use crate::tcpls::{BiStream, StreamMap};
+use crate::tcpls::Frame::Stream;
 #[cfg(feature = "tls12")]
 use crate::tls12::ConnectionSecrets;
 use crate::vecbuf::ChunkVecBuffer;
@@ -39,9 +41,9 @@ pub struct CommonState {
     pub(crate) received_middlebox_ccs: u8,
     pub(crate) peer_certificates: Option<Vec<key::Certificate>>,
     message_fragmenter: MessageFragmenter,
-    pub(crate) received_plaintext: ChunkVecBuffer,
-    sendable_plaintext: ChunkVecBuffer,
-    pub(crate) sendable_tls: ChunkVecBuffer,
+
+    pub(crate) stream_map: StreamMap,
+
     queued_key_update_message: Option<Vec<u8>>,
 
     #[allow(dead_code)] // only read for QUIC
@@ -71,9 +73,8 @@ impl CommonState {
             received_middlebox_ccs: 0,
             peer_certificates: None,
             message_fragmenter: MessageFragmenter::default(),
-            received_plaintext: ChunkVecBuffer::new(Some(DEFAULT_RECEIVED_PLAINTEXT_LIMIT)),
-            sendable_plaintext: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
-            sendable_tls: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
+            stream_map: StreamMap::build_stream_map(),
+
             queued_key_update_message: None,
 
             protocol: Protocol::Tcp,
@@ -88,7 +89,17 @@ impl CommonState {
     ///
     /// [`Connection::write_tls`]: crate::Connection::write_tls
     pub fn wants_write(&self) -> bool {
-        !self.sendable_tls.is_empty()
+        let conn_id = self.record_layer.active_conn_id.clone();
+        !self.stream_map
+            .streams
+            .get(&conn_id)
+            .unwrap().sendable_tls.is_empty()
+    }
+
+
+    /// sets the id of the currently active tcp connection
+    pub(crate) fn set_sending_connection_id(&mut self, conn_id: u32) {
+        self.record_layer.set_sending_conn_id(conn_id);
     }
 
     /// Returns true if the connection is currently performing the TLS handshake.
@@ -239,9 +250,13 @@ impl CommonState {
         // but we're respecting it for plaintext data -- so we'll
         // be out by whatever the cipher+record overhead is.  That's a
         // constant and predictable amount, so it's not a terrible issue.
+        let conn_id = self.record_layer.active_conn_id.clone();
         let len = match limit {
             Limit::Yes => self
-                .sendable_tls
+                .stream_map
+                .streams
+                .get_mut(&conn_id)
+                .unwrap().sendable_tls
                 .apply_limit(payload.len()),
             Limit::No => payload.len(),
         };
@@ -285,13 +300,22 @@ impl CommonState {
     /// be less than `data.len()` if buffer limits were exceeded.
     fn send_plain(&mut self, data: &[u8], limit: Limit) -> usize {
         if !self.may_send_application_data {
+            let conn_id = self.record_layer.active_conn_id.clone();
             // If we haven't completed handshaking, buffer
             // plaintext to send once we do.
             let len = match limit {
                 Limit::Yes => self
+                    .stream_map
+                    .streams
+                    .get_mut(&conn_id)
+                    .unwrap()
                     .sendable_plaintext
                     .append_limited_copy(data),
                 Limit::No => self
+                    .stream_map
+                    .streams
+                    .get_mut(&conn_id)
+                    .unwrap()
                     .sendable_plaintext
                     .append(data.to_vec()),
             };
@@ -362,8 +386,15 @@ impl CommonState {
     /// [`Connection::write_tls`]: crate::Connection::write_tls
     /// [`Connection::process_new_packets`]: crate::Connection::process_new_packets
     pub fn set_buffer_limit(&mut self, limit: Option<usize>) {
-        self.sendable_plaintext.set_limit(limit);
-        self.sendable_tls.set_limit(limit);
+        let conn_id = self.record_layer.active_conn_id.clone();
+        self.stream_map
+            .streams
+            .get_mut(&conn_id)
+            .unwrap().sendable_plaintext.set_limit(limit);
+        self.stream_map
+            .streams
+            .get_mut(&conn_id)
+            .unwrap().sendable_tls.set_limit(limit);
     }
 
     /// Send any buffered plaintext.  Plaintext is buffered if
@@ -372,15 +403,23 @@ impl CommonState {
         if !self.may_send_application_data {
             return;
         }
-
-        while let Some(buf) = self.sendable_plaintext.pop() {
+        let conn_id = self.record_layer.active_conn_id.clone();
+        while let Some(buf) = self
+            .stream_map
+            .streams
+            .get_mut(&conn_id)
+            .unwrap().sendable_plaintext.pop() {
             self.send_plain(&buf, Limit::No);
         }
     }
 
     // Put m into sendable_tls for writing.
     fn queue_tls_message(&mut self, m: OpaqueMessage) {
-        self.sendable_tls.append(m.encode());
+        let conn_id = self.record_layer.active_conn_id.clone();
+        self.stream_map
+            .streams
+            .get_mut(&self.active_conn_id)
+            .unwrap().sendable_tls.append(m.encode());
     }
 
     /// Send a raw TLS message, fragmenting it if needed.
@@ -418,7 +457,7 @@ impl CommonState {
     }
 
     pub(crate) fn take_received_plaintext(&mut self, bytes: Payload) {
-        self.received_plaintext.append(bytes.0);
+        self.stream_map.streams.get_mut(&self.active_conn_id).unwrap().received_plaintext.append(bytes.0);
     }
 
     #[cfg(feature = "tls12")]
@@ -529,15 +568,18 @@ impl CommonState {
         //
         // In the handshake case we don't have readable plaintext before the handshake has
         // completed, but also don't want to read if we still have sendable tls.
-        self.received_plaintext.is_empty()
+        self.stream_map.streams.get(&self.active_conn_id).unwrap().received_plaintext.is_empty()
             && !self.has_received_close_notify
-            && (self.may_send_application_data || self.sendable_tls.is_empty())
+            && (self.may_send_application_data || self.stream_map.streams.get(&self.active_conn_id).unwrap().sendable_tls.is_empty())
     }
 
     pub(crate) fn current_io_state(&self) -> IoState {
         IoState {
-            tls_bytes_to_write: self.sendable_tls.len(),
-            plaintext_bytes_to_read: self.received_plaintext.len(),
+            tls_bytes_to_write: self.stream_map
+                .streams
+                .get(&self.active_conn_id)
+                .unwrap().sendable_tls.len(),
+            plaintext_bytes_to_read: self.stream_map.streams.get(&self.active_conn_id).unwrap().received_plaintext.len(),
             peer_has_closed: self.has_received_close_notify,
         }
     }
@@ -576,7 +618,10 @@ impl CommonState {
 
     pub(crate) fn perhaps_write_key_update(&mut self) {
         if let Some(message) = self.queued_key_update_message.take() {
-            self.sendable_tls.append(message);
+            self.stream_map
+                .streams
+                .get_mut(&self.active_conn_id)
+                .unwrap().sendable_tls.append(message);
         }
     }
 }
@@ -678,5 +723,5 @@ enum Limit {
     No,
 }
 
-const DEFAULT_RECEIVED_PLAINTEXT_LIMIT: usize = 16 * 1024;
-const DEFAULT_BUFFER_LIMIT: usize = 64 * 1024;
+/*const DEFAULT_RECEIVED_PLAINTEXT_LIMIT: usize = 16 * 1024;
+const DEFAULT_BUFFER_LIMIT: usize = 64 * 1024;*/

@@ -28,7 +28,7 @@ pub struct RecordLayer {
     read_seq: u64,
     encrypt_state: DirectionState,
     decrypt_state: DirectionState,
-    sending_connection_id: u32,
+    pub active_conn_id: u32,
 
     // Message encrypted with other keys may be encountered, so failures
     // should be swallowed by the caller.  This struct tracks the amount
@@ -46,9 +46,14 @@ impl RecordLayer {
             read_seq: 0,
             encrypt_state: DirectionState::Invalid,
             decrypt_state: DirectionState::Invalid,
-            sending_connection_id: 0,
+            active_conn_id: 0,
             trial_decryption_len: None,
         }
+    }
+
+    /// sets the id of the currently active tcp connection
+    pub(crate) fn set_sending_connection_id(&mut self, conn_id: u32) {
+        self.active_conn_id = conn_id;
     }
 
     pub(crate) fn is_encrypting(&self) -> bool {
@@ -65,8 +70,8 @@ impl RecordLayer {
         self.read_seq
     }
 
-    pub(crate) fn set_sending_connection_id(&mut self, conn_id: u32) {
-        self.sending_connection_id = conn_id;
+    pub(crate) fn set_sending_conn_id(&mut self, conn_id: u32) {
+        self.active_conn_id = conn_id;
     }
 
     fn doing_trial_decryption(&mut self, requested: usize) -> bool {
@@ -185,7 +190,7 @@ impl RecordLayer {
         let encrypted_len = encr.payload.0.len();
         match self
             .message_decrypter
-            .decrypt(encr, self.read_seq, self.sending_connection_id)
+            .decrypt(encr, self.read_seq, self.active_conn_id)
         {
             Ok(plaintext) => {
                 self.read_seq += 1;
@@ -212,7 +217,7 @@ impl RecordLayer {
         let seq = self.write_seq;
         self.write_seq += 1;
         self.message_encrypter
-            .encrypt(plain, seq, self.sending_connection_id)
+            .encrypt(plain, seq, self.active_conn_id)
             .unwrap()
     }
 
