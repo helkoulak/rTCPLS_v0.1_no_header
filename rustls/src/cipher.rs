@@ -1,4 +1,6 @@
 #![allow(missing_docs)]
+
+use std::collections::HashMap;
 use crate::error::Error;
 use crate::msgs::codec;
 use crate::msgs::message::{BorrowedPlainMessage, OpaqueMessage, PlainMessage};
@@ -86,17 +88,17 @@ pub(crate) fn make_nonce(iv: &Iv, seq: u64) -> ring::aead::Nonce {
     aead::Nonce::assume_unique_for_key(nonce)
 }
 
-pub(crate) fn derive_connection_iv(iv: &mut Vec<Iv>, connection_id: u32){
+pub(crate) fn derive_connection_iv(iv: &mut HashMap<u32, Iv>, connection_id: u32){
         let mut conn_id = [0u8; aead::NONCE_LEN];
         codec::put_u32(connection_id, &mut conn_id[..4]);
 
         conn_id
             .iter_mut()
-            .zip(iv.get_mut(0).unwrap().0.iter_mut())
+            .zip(iv.get_mut(&0).unwrap().0.iter_mut())
             .for_each(|(conn_id, iv)| {
                 *conn_id ^= *iv;
             });
-        iv.insert(connection_id as usize, Iv::copy(&conn_id));
+        iv.insert(connection_id, Iv::copy(&conn_id));
     }
 
 

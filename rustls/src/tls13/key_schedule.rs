@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use crate::cipher::{Iv, IvLen, MessageDecrypter};
 use crate::common_state::{CommonState, Side};
 use crate::error::Error;
@@ -598,12 +599,13 @@ impl KeySchedule {
     fn set_encrypter(&self, secret: &hkdf::Prk, common: &mut CommonState) {
         let key = derive_traffic_key(secret, self.suite.common.aead_algorithm);
         let iv = derive_traffic_iv(secret);
-
+        let mut iv_map = HashMap::new();
+        iv_map.insert(0, iv);
         common
             .record_layer
             .set_message_encrypter(Box::new(Tls13MessageEncrypter {
                 enc_key: aead::LessSafeKey::new(key),
-                iv: vec![iv],
+                iv: iv_map,
             }));
     }
 
@@ -616,9 +618,11 @@ impl KeySchedule {
     fn derive_decrypter(&self, secret: &hkdf::Prk) -> Box<dyn MessageDecrypter> {
         let key = derive_traffic_key(secret, self.suite.common.aead_algorithm);
         let iv = derive_traffic_iv(secret);
+        let mut iv_map = HashMap::new();
+        iv_map.insert(0, iv);
         Box::new(Tls13MessageDecrypter {
             dec_key: aead::LessSafeKey::new(key),
-            iv: vec![iv],
+            iv: iv_map,
         })
     }
 

@@ -1,4 +1,5 @@
 use std::arch::asm;
+use std::collections::HashMap;
 use crate::cipher::{make_nonce, Iv, MessageDecrypter, MessageEncrypter, derive_connection_iv};
 use crate::enums::ContentType;
 use crate::enums::{CipherSuite, ProtocolVersion};
@@ -112,12 +113,12 @@ impl fmt::Debug for Tls13CipherSuite {
 
 struct Tls13MessageEncrypter {
     enc_key: aead::LessSafeKey,
-    iv: Vec<Iv>,
+    iv: HashMap<u32, Iv>,
 }
 
 struct Tls13MessageDecrypter {
     dec_key: aead::LessSafeKey,
-    iv: Vec<Iv>,
+    iv: HashMap<u32, Iv>,
 }
 
 fn unpad_tls13(v: &mut Vec<u8>) -> ContentType {
@@ -150,7 +151,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         payload.extend_from_slice(msg.payload);
         msg.typ.encode(&mut payload);
 
-        let nonce = make_nonce(self.iv.get(conn_id as usize).unwrap(), seq);
+        let nonce = make_nonce(self.iv.get(&conn_id).unwrap(), seq);
         let aad = make_tls13_aad(total_len);
 
         self.enc_key
@@ -177,7 +178,7 @@ impl MessageDecrypter for Tls13MessageDecrypter {
             return Err(Error::DecryptError);
         }
 
-        let nonce = make_nonce(self.iv.get(conn_id as usize).unwrap(), seq);
+        let nonce = make_nonce(self.iv.get(&conn_id).unwrap(), seq);
         let aad = make_tls13_aad(payload.len());
         let plain_len = self
             .dec_key
