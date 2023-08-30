@@ -31,6 +31,8 @@ pub struct RecordLayer {
     /// id of currently used tcp connection
     pub active_conn_id: u32,
 
+    is_handshaking: bool,
+
     // Message encrypted with other keys may be encountered, so failures
     // should be swallowed by the caller.  This struct tracks the amount
     // of message size this is allowed for.
@@ -47,12 +49,17 @@ impl RecordLayer {
             encrypt_state: DirectionState::Invalid,
             decrypt_state: DirectionState::Invalid,
             active_conn_id: 0,
+            is_handshaking: true,
             trial_decryption_len: None,
         }
     }
 
     pub(crate) fn is_encrypting(&self) -> bool {
         self.encrypt_state == DirectionState::Active
+    }
+
+    pub(crate) fn set_not_handshaking(&mut self) {
+        self.is_handshaking = false;
     }
 
     #[cfg(feature = "secret_extraction")]
@@ -186,6 +193,11 @@ impl RecordLayer {
         let want_close_before_decrypt = self.seq_map.seq_num_map.get(&conn_id).unwrap().read_seq == SEQ_SOFT_LIMIT;
 
         let encrypted_len = encr.payload.0.len();
+
+        /// prepare crypto context for the specified connection
+        if !self.is_handshaking && conn_id != 0 {
+            self.message_decrypter.derive_dec_connection_iv(conn_id);
+        }
         match self
             .message_decrypter
             .decrypt(encr, self.seq_map.seq_num_map.get(&conn_id).unwrap().read_seq, conn_id)
@@ -215,19 +227,13 @@ impl RecordLayer {
         let conn_id = self.active_conn_id;
         let seq = self.seq_map.seq_num_map.get(&conn_id).unwrap().write_seq;
         self.seq_map.seq_num_map.get_mut(&conn_id).unwrap().write_seq += 1;
+        /// prepare crypto context for the specified connection
+        if !self.is_handshaking && conn_id != 0 {
+            self.message_encrypter.derive_enc_connection_iv(conn_id);
+        }
         self.message_encrypter
             .encrypt(plain, seq, conn_id)
             .unwrap()
-    }
-
-    pub(crate) fn derive_enc_connection_iv(&mut self, conn_id: u32) {
-        self.message_encrypter.derive_enc_connection_iv(conn_id);
-
-    }
-
-    pub(crate) fn derive_dec_connection_iv(&mut self, conn_id: u32) {
-        self.message_decrypter.derive_dec_connection_iv(conn_id);
-
     }
 
 }

@@ -340,6 +340,7 @@ impl CommonState {
     pub(crate) fn start_traffic(&mut self) {
         self.may_receive_application_data = true;
         self.start_outgoing_traffic();
+        self.record_layer.set_not_handshaking();
     }
 
     /// Sets a limit on the internal buffers used to buffer
