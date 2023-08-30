@@ -762,6 +762,49 @@ fn parse_stream_change_frame(b: &mut octets::Octets) -> octets::Result<Frame> {
 
     }
 
+    /// The sequence number space for an open tcp connection
+    pub struct RecSeqNumSpace {
+        write_seq: u64,
+        read_seq: u64,
+    }
+
+    impl RecSeqNumSpace {
+        pub fn new() -> Self {
+            Self{
+                read_seq: 0,
+                write_seq: 0,
+            }
+
+        }
+
+    }
+
+
+    /// The sequence number space for all open tcp connections
+    pub struct RecSeqNumMap{
+        seq_num_map: HashMap<u32, RecSeqNumSpace>,
+    }
+    impl RecSeqNumMap {
+        pub fn build_seq_num_map() -> Self {
+            let mut map = HashMap::new();
+            let seq = RecSeqNumSpace::new();
+            map.insert(0, seq);
+            Self {
+                seq_num_map: map,
+            }
+
+        }
+        /// start a new seq number space for the specified TCP connection
+        pub(crate) fn start_new_seq_space(&mut self, conn_id: u32) {
+            if !self.seq_num_map.contains_key(&conn_id) {
+                let space = RecSeqNumSpace::new();
+                self.seq_num_map.insert(conn_id, space);
+            }
+        }
+    }
+
+
+
 
     pub fn lookup_address(host: &str, port: u16) -> SocketAddr {
 
