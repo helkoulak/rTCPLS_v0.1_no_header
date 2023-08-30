@@ -709,9 +709,6 @@ fn parse_stream_change_frame(b: &mut octets::Octets) -> octets::Result<Frame> {
          */
         pub aead_initialized: bool,
 
-        pub write_seq: u64,
-        pub read_seq: u64,
-
         /// buffers the decryption of the received TLS records
         pub(crate) received_plaintext: ChunkVecBuffer,
         /// buffers data to be sent if TLS handshake is still ongoing
@@ -727,8 +724,6 @@ fn parse_stream_change_frame(b: &mut octets::Octets) -> octets::Result<Frame> {
                 stream_id: id,
                 marked_for_close: false,
                 aead_initialized: false,
-                write_seq: 0,
-                read_seq: 0,
                 received_plaintext: ChunkVecBuffer::new(Some(DEFAULT_RECEIVED_PLAINTEXT_LIMIT)),
                 sendable_plaintext: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
                 sendable_tls: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
