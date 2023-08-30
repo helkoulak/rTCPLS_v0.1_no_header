@@ -166,7 +166,9 @@ impl MessageEncrypter for Tls13MessageEncrypter {
     }
 
     fn derive_enc_connection_iv(&mut self, conn_id: u32) {
-        derive_connection_iv(&mut self.iv, conn_id);
+        if !self.iv.contains_key(&conn_id){
+            derive_connection_iv(&mut self.iv, conn_id);
+        }
     }
 
 }
@@ -206,7 +208,9 @@ impl MessageDecrypter for Tls13MessageDecrypter {
     }
 
     fn derive_dec_connection_iv(&mut self, conn_id: u32) {
-        derive_connection_iv(&mut self.iv, conn_id);
+        if !self.iv.contains_key(&conn_id) {
+            derive_connection_iv(&mut self.iv, conn_id);
+        }
     }
 
 }
