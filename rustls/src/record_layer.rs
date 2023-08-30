@@ -165,6 +165,10 @@ impl RecordLayer {
         self.seq_map.seq_num_map.get(&self.active_conn_id).unwrap().write_seq >= SEQ_HARD_LIMIT
     }
 
+    pub(crate) fn start_new_seq_space(&mut self, conn_id: u32){
+        self.seq_map.start_new_seq_space(conn_id);
+    }
+
     /// Decrypt a TLS message.
     ///
     /// `encr` is a decoded message allegedly received from the peer.
