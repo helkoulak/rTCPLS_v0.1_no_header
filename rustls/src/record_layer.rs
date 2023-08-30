@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use crate::cipher::{Iv, MessageDecrypter, MessageEncrypter};
 use crate::error::Error;
 use crate::msgs::message::{BorrowedPlainMessage, OpaqueMessage, PlainMessage};
@@ -24,8 +25,7 @@ enum DirectionState {
 pub struct RecordLayer {
     message_encrypter: Box<dyn MessageEncrypter>,
     message_decrypter: Box<dyn MessageDecrypter>,
-    write_seq: u64,
-    read_seq: u64,
+    seq_map: RecSeqNumMap,
     encrypt_state: DirectionState,
     decrypt_state: DirectionState,
     /// id of currently used tcp connection
@@ -43,8 +43,7 @@ impl RecordLayer {
         Self {
             message_encrypter: <dyn MessageEncrypter>::invalid(),
             message_decrypter: <dyn MessageDecrypter>::invalid(),
-            write_seq: 0,
-            read_seq: 0,
+            seq_map: RecSeqNumMap::build_seq_num_map(),
             encrypt_state: DirectionState::Invalid,
             decrypt_state: DirectionState::Invalid,
             active_conn_id: 0,
@@ -63,12 +62,12 @@ impl RecordLayer {
 
     #[cfg(feature = "secret_extraction")]
     pub(crate) fn write_seq(&self) -> u64 {
-        self.write_seq
+        self.seq_map.seq_num_map.get(&self.active_conn_id).unwrap().write_seq
     }
 
     #[cfg(feature = "secret_extraction")]
     pub(crate) fn read_seq(&self) -> u64 {
-        self.read_seq
+        self.seq_map.seq_num_map.get(&self.active_conn_id).unwrap().read_seq
     }
 
     pub(crate) fn set_sending_conn_id(&mut self, conn_id: u32) {
@@ -91,16 +90,18 @@ impl RecordLayer {
     /// Prepare to use the given `MessageEncrypter` for future message encryption.
     /// It is not used until you call `start_encrypting`.
     pub(crate) fn prepare_message_encrypter(&mut self, cipher: Box<dyn MessageEncrypter>) {
+        let conn_id = self.active_conn_id;
         self.message_encrypter = cipher;
-        self.write_seq = 0;
+        self.seq_map.seq_num_map.get_mut(&conn_id).unwrap().write_seq = 0;
         self.encrypt_state = DirectionState::Prepared;
     }
 
     /// Prepare to use the given `MessageDecrypter` for future message decryption.
     /// It is not used until you call `start_decrypting`.
     pub(crate) fn prepare_message_decrypter(&mut self, cipher: Box<dyn MessageDecrypter>) {
+        let conn_id = self.active_conn_id;
         self.message_decrypter = cipher;
-        self.read_seq = 0;
+        self.seq_map.seq_num_map.get_mut(&conn_id).unwrap().read_seq = 0;
         self.decrypt_state = DirectionState::Prepared;
     }
 
@@ -153,13 +154,13 @@ impl RecordLayer {
     /// Return true if we are getting close to encrypting too many
     /// messages with our encryption key.
     pub(crate) fn wants_close_before_encrypt(&self) -> bool {
-        self.write_seq == SEQ_SOFT_LIMIT
+        self.seq_map.seq_num_map.get(&self.active_conn_id).unwrap().write_seq == SEQ_SOFT_LIMIT
     }
 
     /// Return true if we outright refuse to do anything with the
     /// encryption key.
     pub(crate) fn encrypt_exhausted(&self) -> bool {
-        self.write_seq >= SEQ_HARD_LIMIT
+        self.seq_map.seq_num_map.get(&self.active_conn_id).unwrap().write_seq >= SEQ_HARD_LIMIT
     }
 
     /// Decrypt a TLS message.
@@ -186,15 +187,16 @@ impl RecordLayer {
         //
         // Note that there's no reason to refuse to decrypt: the security
         // failure has already happened.
-        let want_close_before_decrypt = self.read_seq == SEQ_SOFT_LIMIT;
+        let conn_id = self.active_conn_id;
+        let want_close_before_decrypt = self.seq_map.seq_num_map.get(&conn_id).unwrap().read_seq == SEQ_SOFT_LIMIT;
 
         let encrypted_len = encr.payload.0.len();
         match self
             .message_decrypter
-            .decrypt(encr, self.read_seq, self.active_conn_id)
+            .decrypt(encr, self.seq_map.seq_num_map.get(&conn_id).unwrap().read_seq, conn_id)
         {
             Ok(plaintext) => {
-                self.read_seq += 1;
+                self.seq_map.seq_num_map.get_mut(&conn_id).unwrap().read_seq += 1;
                 Ok(Some(Decrypted {
                     want_close_before_decrypt,
                     plaintext,
@@ -215,10 +217,11 @@ impl RecordLayer {
     pub(crate) fn encrypt_outgoing(&mut self, plain: BorrowedPlainMessage) -> OpaqueMessage {
         debug_assert!(self.encrypt_state == DirectionState::Active);
         assert!(!self.encrypt_exhausted());
-        let seq = self.write_seq;
-        self.write_seq += 1;
+        let conn_id = self.active_conn_id;
+        let seq = self.seq_map.seq_num_map.get(&conn_id).unwrap().write_seq;
+        self.seq_map.seq_num_map.get_mut(&conn_id).unwrap().write_seq += 1;
         self.message_encrypter
-            .encrypt(plain, seq, self.active_conn_id)
+            .encrypt(plain, seq, conn_id)
             .unwrap()
     }
 
@@ -233,6 +236,49 @@ impl RecordLayer {
     }
 
 }
+
+    /// The sequence number space for an open tcp connection
+    pub(crate) struct RecSeqNumSpace {
+        write_seq: u64,
+        read_seq: u64,
+    }
+
+    impl RecSeqNumSpace {
+        pub(crate)  fn new() -> Self {
+            Self{
+                read_seq: 0,
+                write_seq: 0,
+            }
+
+        }
+
+    }
+
+
+    /// The sequence number space for all open tcp connections
+    pub(crate) struct RecSeqNumMap{
+        seq_num_map: HashMap<u32, RecSeqNumSpace>,
+    }
+    impl RecSeqNumMap {
+        pub(crate) fn build_seq_num_map() -> Self {
+            let mut map = HashMap::new();
+            let seq = RecSeqNumSpace::new();
+            map.insert(0, seq);
+            Self {
+                seq_num_map: map,
+            }
+
+        }
+
+        /// start a new seq number space for the specified TCP connection
+        pub(crate) fn start_new_seq_space(&mut self, conn_id: u32) {
+            if !self.seq_num_map.contains_key(&conn_id) {
+                let space = RecSeqNumSpace::new();
+                self.seq_num_map.insert(conn_id, space);
+            }
+        }
+
+    }
 
 /// Result of decryption.
 #[derive(Debug)]
