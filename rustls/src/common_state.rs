@@ -89,10 +89,9 @@ impl CommonState {
     ///
     /// [`Connection::write_tls`]: crate::Connection::write_tls
     pub fn wants_write(&self) -> bool {
-        let conn_id = self.record_layer.active_conn_id;
         !self.stream_map
             .streams
-            .get(&conn_id)
+            .get(&self.record_layer.active_conn_id)
             .unwrap().sendable_tls.is_empty()
     }
 
