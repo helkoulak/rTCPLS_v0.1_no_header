@@ -51,11 +51,6 @@ impl RecordLayer {
         }
     }
 
-    /// sets the id of the currently active tcp connection
-    pub(crate) fn set_sending_connection_id(&mut self, conn_id: u32) {
-        self.active_conn_id = conn_id;
-    }
-
     pub(crate) fn is_encrypting(&self) -> bool {
         self.encrypt_state == DirectionState::Active
     }
