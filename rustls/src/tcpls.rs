@@ -915,20 +915,12 @@ fn parse_stream_change_frame(b: &mut octets::Octets) -> octets::Result<Frame> {
             let _ = tcpls_session.client_tls_conn.insert(client_conn);
             let _ = tcpls_session.tls_config.insert(TlsConfig::Client(config.clone()));
         }
-
-            // prepare_connection_crypto_context(&mut tcpls_session.client_tls_conn.as_mut().unwrap().core.common_state, new_tcp_conn_id);
+        else {
+            tcpls_session.client_tls_conn.as_mut().unwrap().core.common_state.stream_map.open_stream(new_tcp_conn_id);
+            tcpls_session.client_tls_conn.as_mut().unwrap().record_layer.start_new_seq_space(new_tcp_conn_id);
+        }
     }
 
-
-
-
-    // pub(crate) fn prepare_connection_crypto_context(common: &mut CommonState, new_conn_id: u32) {
-    //     if new_conn_id > 0 && ! common.is_handshaking() {
-    //
-    //         common.record_layer.derive_enc_connection_iv(new_conn_id);
-    //         common.record_layer.derive_dec_connection_iv(new_conn_id);
-    //     }
-    // }
 
     pub fn client_new_tls_connection(config: Arc<ClientConfig>, name: ServerName) -> ClientConnection{
 
