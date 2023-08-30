@@ -28,6 +28,7 @@ pub struct RecordLayer {
     read_seq: u64,
     encrypt_state: DirectionState,
     decrypt_state: DirectionState,
+    /// id of currently used tcp connection
     pub active_conn_id: u32,
 
     // Message encrypted with other keys may be encountered, so failures

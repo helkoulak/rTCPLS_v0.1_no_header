@@ -39,7 +39,7 @@ impl Connection {
     ///
     /// See [`ConnectionCommon::write_tls()`] for more information.
     pub fn write_tls(&mut self, wr: &mut dyn io::Write) -> Result<usize, io::Error> {
-        let conn_id = self.active_conn_id.clone();
+        let conn_id = self.record_layer.active_conn_id;
         self.stream_map
             .streams
             .get_mut(&conn_id)
@@ -327,7 +327,7 @@ impl<Data> ConnectionCommon<Data> {
     pub fn reader(&mut self) -> Reader {
         let common = &mut self.core.common_state;
         Reader {
-            received_plaintext: &mut common.stream_map.streams.get_mut(&common.active_conn_id).unwrap().received_plaintext,
+            received_plaintext: &mut common.stream_map.streams.get_mut(&common.record_layer.active_conn_id).unwrap().received_plaintext,
             /// Are we done? i.e., have we processed all received messages, and received a
             /// close_notify to indicate that no new messages will arrive?
             peer_cleanly_closed: common.has_received_close_notify
@@ -494,7 +494,7 @@ impl<Data> ConnectionCommon<Data> {
     /// [`process_new_packets()`]: ConnectionCommon::process_new_packets
     /// [`reader()`]: ConnectionCommon::reader
     pub fn read_tls(&mut self, rd: &mut dyn io::Read) -> Result<usize, io::Error> {
-        if self.stream_map.streams.get(&self.active_conn_id).unwrap().received_plaintext.is_full() {
+        if self.stream_map.streams.get(&self.record_layer.active_conn_id).unwrap().received_plaintext.is_full() {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
                 "received plaintext buffer full",
@@ -516,7 +516,7 @@ impl<Data> ConnectionCommon<Data> {
     /// After this function returns, the connection buffer may not yet be fully flushed. The
     /// [`CommonState::wants_write`] function can be used to check if the output buffer is empty.
     pub fn write_tls(&mut self, wr: &mut dyn io::Write) -> Result<usize, io::Error> {
-        let conn_id = self.active_conn_id.clone();
+        let conn_id = self.record_layer.active_conn_id;
         self.stream_map
             .streams
             .get_mut(&conn_id)
