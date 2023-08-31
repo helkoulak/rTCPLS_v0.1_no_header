@@ -1084,6 +1084,10 @@ fn parse_stream_change_frame(b: &mut octets::Octets) -> octets::Result<Frame> {
             let _ = tcpls_session.server_tls_conn.insert(server_conn);
             let _ = tcpls_session.tls_config.insert(TlsConfig::Server(config.clone()));
         }
+        else {
+            tcpls_session.server_tls_conn.as_mut().unwrap().core.common_state.stream_map.open_stream(conn_id);
+            tcpls_session.server_tls_conn.as_mut().unwrap().record_layer.start_new_seq_space(conn_id);
+        }
     }
 
     pub fn server_new_tls_connection(config: Arc<ServerConfig>) -> ServerConnection {
