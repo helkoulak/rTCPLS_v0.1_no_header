@@ -605,6 +605,10 @@ fn parse_stream_change_frame(b: &mut octets::Octets) -> octets::Result<Frame> {
 
 
 
+
+
+
+
     pub struct TcplsSession {
         pub tls_config: Option<TlsConfig>,
         pub client_tls_conn: Option<ClientConnection>,
@@ -614,7 +618,8 @@ fn parse_stream_change_frame(b: &mut octets::Octets) -> octets::Result<Frame> {
         pub next_connection_id: u32,
         pub next_local_address_id: u8,
         pub next_remote_address_id: u8,
-        pub addresses_advertised: Vec<SocketAddr>,
+        pub local_addresses: Vec<SocketAddr>,
+        pub peer_addresses: Vec<SocketAddr>,
         pub next_stream_id: u32,
         pub is_server: bool,
         pub is_closed: bool,
@@ -632,13 +637,76 @@ fn parse_stream_change_frame(b: &mut octets::Octets) -> octets::Result<Frame> {
                 pending_tcp_connections: HashMap::new(),
                 next_connection_id: 0,
                 next_local_address_id: 0,
-                addresses_advertised: Vec::new(),
+                local_addresses: Vec::new(),
+                peer_addresses: Vec::new(),
                 next_remote_address_id: 0,
                 next_stream_id: 0,
                 is_server: false,
                 is_closed: false,
                 tls_hs_completed: false,
+
             }
+        }
+
+        pub fn add_new_peer_address(&mut self, address: SocketAddr) {
+            if !self.peer_addresses.contains(&address){
+                self.peer_addresses.push(address);
+            }
+        }
+
+        pub fn add_new_local_address(&mut self, address: SocketAddr) {
+            if !self.local_addresses.contains(&address){
+                self.local_addresses.push(address);
+            }
+        }
+
+
+        pub fn tcpls_connect(&mut self, dest_address: SocketAddr, config: Arc<ClientConfig>, server_name: ServerName, is_server: bool) {
+            assert_ne!(is_server, true);
+
+            let tls_config = config.clone();
+            let socket = TcpStream::connect(dest_address).expect("TCP connection establishment failed");
+
+            self.add_new_local_address(socket.local_addr().unwrap().clone());
+            self.add_new_peer_address(dest_address);
+
+            let new_conn_id = self.create_tcpls_connection_object(socket, false);
+            if new_conn_id == 0{
+                let client_conn = ClientConnection::new(tls_config, server_name).expect("Establishment of TLS session failed");
+                let _ = self.client_tls_conn.insert(client_conn);
+                let _ = self.tls_config.insert(TlsConfig::Client(config.clone()));
+            }
+            else {
+                self.client_tls_conn.as_mut().unwrap().core.common_state.stream_map.open_stream(new_conn_id);
+                self.client_tls_conn.as_mut().unwrap().record_layer.start_new_seq_space(new_conn_id);
+            }
+        }
+
+        pub fn create_tcpls_connection_object(&mut self, socket: TcpStream, is_server: bool) -> u32{
+            let mut tcp_conn = TcpConnection::new(socket);
+
+            let new_conn_id = self.next_connection_id;
+            tcp_conn.connection_id = new_conn_id;
+            tcp_conn.local_address_id = self.next_local_address_id;
+            tcp_conn.remote_address_id = self.next_remote_address_id;
+
+            if tcp_conn.connection_id == 0 {
+                tcp_conn.is_primary = true;
+            }
+
+
+            if !is_server{
+                self.tcp_connections.insert(new_conn_id, tcp_conn);
+            }else {
+                self.pending_tcp_connections.insert(new_conn_id, tcp_conn);
+            }
+
+            self.next_connection_id += 1;
+            self.next_local_address_id += 1;
+            self.next_remote_address_id += 1;
+
+            new_conn_id
+
         }
 
 
@@ -874,52 +942,8 @@ fn parse_stream_change_frame(b: &mut octets::Octets) -> octets::Result<Frame> {
     }
 
 
-    pub fn create_tcpls_connection_object(tcpls_session: &mut TcplsSession, socket: TcpStream, is_server: bool) -> u32{
-        let mut tcp_conn = TcpConnection::new(socket);
-
-        let new_conn_id = tcpls_session.next_connection_id;
-        tcp_conn.connection_id = new_conn_id;
-        tcp_conn.local_address_id = tcpls_session.next_local_address_id;
-        tcp_conn.remote_address_id = tcpls_session.next_remote_address_id;
-
-        if tcp_conn.connection_id == 0 {
-            tcp_conn.is_primary = true;
-        }
-
-        // tcpls_session.open_connections_ids.push(tcp_conn.connection_id);
-        if !is_server{
-            tcpls_session.tcp_connections.insert(new_conn_id, tcp_conn);
-        }else {
-            tcpls_session.pending_tcp_connections.insert(new_conn_id, tcp_conn);
-        }
-
-        tcpls_session.next_connection_id += 1;
-        tcpls_session.next_local_address_id += 1;
-        tcpls_session.next_remote_address_id += 1;
-
-        new_conn_id
-
-    }
 
 
-
-
-    pub fn tcpls_connect(dest_address: SocketAddr, tcpls_session: &mut TcplsSession, config: Arc<ClientConfig>, server_name: ServerName) {
-
-        let tls_config = config.clone();
-
-        let socket = TcpStream::connect(dest_address).expect("TCP connection establishment failed");
-        let new_tcp_conn_id= create_tcpls_connection_object(tcpls_session, socket, false);
-        if new_tcp_conn_id == 0{
-            let client_conn = ClientConnection::new(tls_config, server_name).expect("Establishment of TLS session failed");
-            let _ = tcpls_session.client_tls_conn.insert(client_conn);
-            let _ = tcpls_session.tls_config.insert(TlsConfig::Client(config.clone()));
-        }
-        else {
-            tcpls_session.client_tls_conn.as_mut().unwrap().core.common_state.stream_map.open_stream(new_tcp_conn_id);
-            tcpls_session.client_tls_conn.as_mut().unwrap().record_layer.start_new_seq_space(new_tcp_conn_id);
-        }
-    }
 
 
     pub fn client_new_tls_connection(config: Arc<ClientConfig>, name: ServerName) -> ClientConnection{
