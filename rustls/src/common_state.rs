@@ -17,8 +17,8 @@ use crate::record_layer;
 #[cfg(feature = "secret_extraction")]
 use crate::suites::PartiallyExtractedSecrets;
 use crate::suites::SupportedCipherSuite;
-use crate::tcpls::{BiStream, StreamMap};
-use crate::tcpls::Frame::Stream;
+use crate::tcpls::bi_stream::{StreamMap, BiStream};
+use crate::tcpls::frame::Frame::Stream;
 #[cfg(feature = "tls12")]
 use crate::tls12::ConnectionSecrets;
 use crate::vecbuf::ChunkVecBuffer;

@@ -23,6 +23,7 @@ mio = { version = "0.8", features = ["net", "os-poll"] }
 webpki = { package = "rustls-webpki", version = "0.100.0", features = ["alloc", "std"] }
 rustls-pemfile = "1.0.0"
 octets = { version = "0.2", path = "../octets" }
+if-addrs = "0.10.1"
 
 
 [features]

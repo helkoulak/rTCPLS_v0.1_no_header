@@ -329,7 +329,7 @@ fn main() {
 
     let server_name = args.arg_hostname.as_str().try_into().expect("invalid DNS name");
 
-    tcpls_connect(dest_address, &mut client.tcpls_session, config, server_name);
+    client.tcpls_session.tcpls_connect(dest_address, config, server_name, false);
 
 
     let mut poll = mio::Poll::new().unwrap();
