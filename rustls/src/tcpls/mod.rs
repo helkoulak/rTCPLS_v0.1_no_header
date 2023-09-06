@@ -1,35 +1,6 @@
 #![allow(missing_docs)]
 #![allow(unused_qualifications)]
 
-pub(crate) mod bi_stream;
-pub(crate) mod frame;
-mod network_address;
-
-/// This module contains optional APIs for implementing TCPLS.
-use crate::cipher::{derive_connection_iv, Iv, MessageDecrypter, MessageEncrypter};
-use crate::client::ClientConnectionData;
-use crate::common_state::*;
-use crate::conn::ConnectionCore;
-use crate::enums::ProtocolVersion;
-use crate::msgs::codec;
-use crate::msgs::handshake::{ClientExtension, ServerExtension};
-use crate::record_layer::RecordLayer;
-use crate::server::ServerConnectionData;
-use crate::verify::{
-    AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
-};
-use crate::{
-    cipher, server, version, Certificate, ClientConfig, ConnectionCommon, ContentType, Error,
-    InvalidMessage, KeyLogFile, PrivateKey, RootCertStore, ServerConfig, ServerName,
-    SupportedCipherSuite, SupportedProtocolVersion, Ticketer, ALL_CIPHER_SUITES, ALL_VERSIONS,
-    DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS,
-};
-
-use mio::net::{TcpListener, TcpStream};
-use mio::Token;
-
-use crate::vecbuf::ChunkVecBuffer;
-use octets::BufferError;
 use std::arch::{asm, is_aarch64_feature_detected};
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
@@ -42,12 +13,43 @@ use std::sync::Arc;
 use std::{io, process, u32, vec};
 
 use if_addrs::get_if_addrs;
+use mio::net::{TcpListener, TcpStream};
+use mio::Token;
+
+use octets::BufferError;
+
+/// This module contains optional APIs for implementing TCPLS.
+use crate::cipher::{derive_connection_iv, Iv, MessageDecrypter, MessageEncrypter};
+use crate::client::ClientConnectionData;
+use crate::common_state::*;
+use crate::conn::ConnectionCore;
+use crate::enums::ProtocolVersion;
+use crate::msgs::codec;
+use crate::msgs::handshake::{ClientExtension, ServerExtension};
+use crate::record_layer::RecordLayer;
+use crate::server::ServerConnectionData;
 use crate::tcpls::network_address::AddressMap;
+use crate::vecbuf::ChunkVecBuffer;
+use crate::verify::{
+    AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
+};
+use crate::Connection::Client;
+use crate::{
+    cipher, server, version, Certificate, ClientConfig, ConnectionCommon, ContentType, Error,
+    InvalidMessage, KeyLogFile, PrivateKey, RootCertStore, ServerConfig, ServerName,
+    SupportedCipherSuite, SupportedProtocolVersion, Ticketer, ALL_CIPHER_SUITES, ALL_VERSIONS,
+    DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS,
+};
+
+pub(crate) mod bi_stream;
+pub(crate) mod frame;
+mod network_address;
 
 pub struct TcplsSession {
     pub tls_config: Option<TlsConfig>,
-    pub client_tls_conn: Option<ClientConnection>,
-    pub server_tls_conn: Option<ServerConnection>,
+    /*pub client_tls_conn: Option<ClientConnection>,
+    pub server_tls_conn: Option<ServerConnection>,*/
+    pub tls_conn: Option<Connection>,
     pub tcp_connections: HashMap<u32, TcpConnection>,
     pub pending_tcp_connections: HashMap<u32, TcpConnection>,
     pub next_connection_id: u32,
@@ -61,8 +63,9 @@ impl TcplsSession {
     pub fn new() -> Self {
         Self {
             tls_config: None,
-            client_tls_conn: None,
-            server_tls_conn: None,
+            /* client_tls_conn: None,
+            server_tls_conn: None,*/
+            tls_conn: None,
             tcp_connections: HashMap::new(),
             pending_tcp_connections: HashMap::new(),
             next_connection_id: 0,
@@ -85,24 +88,19 @@ impl TcplsSession {
         let tls_config = config.clone();
         let socket = TcpStream::connect(dest_address).expect("TCP connection establishment failed");
 
-        /* self.add_new_local_address(socket.local_addr().unwrap().clone());
-        self.add_new_peer_address(dest_address);*/
-
         let new_conn_id = self.create_tcpls_connection_object(socket, is_server);
         if new_conn_id == 0 {
             let client_conn = ClientConnection::new(tls_config, server_name)
                 .expect("Establishment of TLS session failed");
-            let _ = self.client_tls_conn.insert(client_conn);
+            let _ = self.tls_conn.insert(Connection::from(client_conn));
             let _ = self.tls_config.insert(TlsConfig::Client(config.clone()));
         } else {
-            self.client_tls_conn
+            self.tls_conn
                 .as_mut()
                 .unwrap()
-                .core
-                .common_state
                 .stream_map
                 .open_stream(new_conn_id);
-            self.client_tls_conn
+            self.tls_conn
                 .as_mut()
                 .unwrap()
                 .record_layer
@@ -115,8 +113,8 @@ impl TcplsSession {
 
         let new_conn_id = self.next_connection_id;
         tcp_conn.connection_id = new_conn_id;
-        tcp_conn.local_address_id = self.next_local_address_id;
-        tcp_conn.remote_address_id = self.next_peer_address_id;
+        tcp_conn.local_address_id = self.address_map.next_local_address_id;
+        tcp_conn.remote_address_id = self.address_map.next_peer_address_id;
 
         if tcp_conn.connection_id == 0 {
             tcp_conn.is_primary = true;
@@ -129,8 +127,8 @@ impl TcplsSession {
         }
 
         self.next_connection_id += 1;
-        self.next_local_address_id += 1;
-        self.next_peer_address_id += 1;
+        self.address_map.next_local_address_id += 1;
+        self.address_map.next_peer_address_id += 1;
 
         new_conn_id
     }
@@ -139,6 +137,18 @@ impl TcplsSession {
 pub enum TlsConfig {
     Client(Arc<ClientConfig>),
     Server(Arc<ServerConfig>),
+}
+
+impl From<Arc<ClientConfig>> for TlsConfig {
+    fn from(c: Arc<ClientConfig>) -> Self {
+        Self::Client(c)
+    }
+}
+
+impl From<Arc<ServerConfig>> for TlsConfig {
+    fn from(s: Arc<ServerConfig>) -> Self {
+        Self::Server(s)
+    }
 }
 
 pub struct TcpConnection {
@@ -462,21 +472,19 @@ pub fn server_accept_connection(
 
         let server_conn =
             ServerConnection::new(config.clone()).expect("Establishing a TLS session has failed");
-        let _ = tcpls_session.server_tls_conn.insert(server_conn);
+        let _ = tcpls_session.tls_conn.insert(Connection::from(server_conn));
         let _ = tcpls_session
             .tls_config
-            .insert(TlsConfig::Server(config.clone()));
+            .insert(TlsConfig::from(config));
     } else {
         tcpls_session
-            .server_tls_conn
+            .tls_conn
             .as_mut()
             .unwrap()
-            .core
-            .common_state
             .stream_map
             .open_stream(conn_id);
         tcpls_session
-            .server_tls_conn
+            .tls_conn
             .as_mut()
             .unwrap()
             .record_layer
@@ -489,13 +497,45 @@ pub fn server_new_tls_connection(config: Arc<ServerConfig>) -> ServerConnection 
 }
 
 /// A TLS client or server connection.
-// #[derive(Debug)]
-// pub enum Connection {
-//     /// A client connection
-//     Client(ClientConnection),
-//     /// A server connection
-//     Server(ServerConnection),
-// }
+#[derive(Debug)]
+pub enum Connection {
+    /// A client connection
+    Client(ClientConnection),
+    /// A server connection
+    Server(ServerConnection),
+}
+
+impl Deref for Connection {
+    type Target = CommonState;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Client(conn) => &conn.core.common_state,
+            Self::Server(conn) => &conn.core.common_state,
+        }
+    }
+}
+
+impl DerefMut for Connection {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            Self::Client(conn) => &mut conn.core.common_state,
+            Self::Server(conn) => &mut conn.core.common_state,
+        }
+    }
+}
+
+impl From<ClientConnection> for Connection {
+    fn from(c: ClientConnection) -> Self {
+        Self::Client(c)
+    }
+}
+
+impl From<ServerConnection> for Connection {
+    fn from(c: ServerConnection) -> Self {
+        Self::Server(c)
+    }
+}
 
 /// A TCPLS client connection.
 pub struct ClientConnection {
@@ -538,11 +578,8 @@ impl Debug for ClientConnection {
         f.debug_struct("tcpls::ClientConnection").finish()
     }
 }
-// impl From<ClientConnection> for Connection {
-//     fn from(c: ClientConnection) -> Self {
-//         Client(c)
-//     }
-// }
+
+
 
 /// A TCPLS server connection.
 pub struct ServerConnection {
@@ -584,11 +621,7 @@ impl Debug for ServerConnection {
         f.debug_struct("tcpls::ServerConnection").finish()
     }
 }
-// impl From<ServerConnection> for Connection {
-//     fn from(c: ServerConnection) -> Self {
-//         Self::Server(c)
-//     }
-// }
+
 
 // #[test]
 /*fn test_prep_crypto_context(){
