@@ -33,6 +33,7 @@ use crate::client::{tls13, ClientConfig, ServerName};
 
 use std::ops::Deref;
 use std::sync::Arc;
+use crate::common_state::Protocol::Tcpls;
 
 pub(super) type NextState = Box<dyn State<ClientConnectionData>>;
 pub(super) type NextStateOrError = Result<NextState, Error>;
@@ -246,6 +247,7 @@ fn emit_client_hello_for_retry(
             panic!("TLS 1.3 support is required for TCPLS");
         }
         exts.push(ClientExtension::TCPLS);
+        cx.common.protocol = Tcpls;
     }
 
 
