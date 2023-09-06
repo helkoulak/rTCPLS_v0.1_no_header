@@ -241,6 +241,13 @@ fn emit_client_hello_for_retry(
         exts.push(ClientExtension::SignedCertificateTimestampRequest);
     }
 
+    if config.enable_tcpls {
+        if !config.supports_version(ProtocolVersion::TLSv1_3) {
+            panic!("TLS 1.3 support is required for TCPLS");
+        }
+        exts.push(ClientExtension::TCPLS);
+    }
+
 
 
     if let Some(key_share) = &key_share {

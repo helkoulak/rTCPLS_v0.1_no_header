@@ -20,7 +20,7 @@ use docopt::Docopt;
 use rustls::server::{
     AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
 };
-use rustls::{self, RootCertStore, tcpls};
+use rustls::{self, RootCertStore, ServerConnection, tcpls};
 use rustls::tcpls::{load_certs, load_private_key, lookup_suites, lookup_versions, server_create_listener, TcplsSession};
 
 // Token for our listening socket.
@@ -120,7 +120,7 @@ struct OpenConnection {
     closing: bool,
     closed: bool,
     mode: ServerMode,
-    tls_conn: tcpls::ServerConnection,
+    tls_conn: ServerConnection,
     back: Option<TcpStream>,
     sent_http_response: bool,
 }
@@ -157,7 +157,7 @@ impl OpenConnection {
         socket: TcpStream,
         token: mio::Token,
         mode: ServerMode,
-        tls_conn: rustls::tcpls::ServerConnection,
+        tls_conn: ServerConnection,
     ) -> Self {
         let back = open_back(&mode);
         Self {

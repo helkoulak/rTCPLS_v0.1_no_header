@@ -296,6 +296,12 @@ pub struct ServerConfig {
     /// do any resumption.
     pub send_tls13_tickets: usize,
 
+    /// Whether to initiate a TCPLS session or a normal TLS session
+    ///
+    /// The default is false
+    pub enable_tcpls: bool,
+
+
 }
 
 impl fmt::Debug for ServerConfig {

@@ -1,25 +1,19 @@
-use std::process;
-use std::sync::Arc;
+#[macro_use]
+extern crate serde_derive;
 
-use mio::net::TcpStream;
-
-use std::fs;
+use std::{fs, process};
 use std::io;
 use std::io::{BufReader, Read, Write};
 use std::net::SocketAddr;
 use std::ops::{Deref, DerefMut};
 use std::str;
-
-
-use crate::tcpls::*;
-
-#[macro_use]
-extern crate serde_derive;
+use std::sync::Arc;
 
 use docopt::Docopt;
 use env_logger::builder;
 
-use rustls::{client, OwnedTrustAnchor, RootCertStore, tcpls};
+use rustls::{client, OwnedTrustAnchor, RootCertStore, };
+use rustls::tcpls::{build_tls_client_config, lookup_address, TcplsSession};
 use rustls::tcpls::TlsConfig::Client;
 
 const CLIENT: mio::Token = mio::Token(0);
@@ -47,22 +41,22 @@ impl TlsClient {
 
         assert_eq!(ev.token(), CLIENT);
 
-        if ev.is_readable() && self.tcpls_session.client_tls_conn.as_ref().unwrap().is_handshaking(){
+        if ev.is_readable() && self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking(){
             self.do_read();
         }
 
-        if ev.is_writable() && self.tcpls_session.client_tls_conn.as_ref().unwrap().is_handshaking(){
+        if ev.is_writable() && self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking(){
             self.do_write();
         }
 
-        if ev.is_writable() && ! self.tcpls_session.client_tls_conn.as_ref().unwrap().is_handshaking() {
+        if ev.is_writable() && ! self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() {
             let buf = [0x0F; 100 * 1024];
-            self.tcpls_session.client_tls_conn.as_mut().unwrap().writer().write(& buf);
+            self.tcpls_session.tls_conn.as_mut().unwrap().writer().write(& buf);
             self.do_write();
         }
 
 
-        if ev.is_readable() && ! self.tcpls_session.client_tls_conn.as_ref().unwrap().is_handshaking() {
+        if ev.is_readable() && ! self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() {
             self.do_read();
         }
 
@@ -75,7 +69,7 @@ impl TlsClient {
     fn read_source_to_end(&mut self, rd: &mut dyn io::Read) -> io::Result<usize> {
         let mut buf = Vec::new();
         let len = rd.read_to_end(&mut buf)?;
-        self.tcpls_session.client_tls_conn.as_mut().unwrap().writer().write_all(&buf).unwrap();
+        self.tcpls_session.tls_conn.as_mut().unwrap().writer().write_all(&buf).unwrap();
         Ok(len)
     }
 
@@ -84,7 +78,7 @@ impl TlsClient {
         // Read TLS data.  This fails if the underlying TCP connection
         // is broken.
 
-        match self.tcpls_session.client_tls_conn.as_mut().unwrap().read_tls(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket) {
+        match self.tcpls_session.tls_conn.as_mut().unwrap().read_tls(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket) {
             Err(error) => {
                 if error.kind() == io::ErrorKind::WouldBlock {
                     return;
@@ -108,7 +102,7 @@ impl TlsClient {
         // Reading some TLS data might have yielded new TLS
         // messages to process.  Errors from this indicate
         // TLS protocol problems and are fatal.
-        let io_state = match self.tcpls_session.client_tls_conn.as_mut().unwrap().process_new_packets() {
+        let io_state = match self.tcpls_session.tls_conn.as_mut().unwrap().process_new_packets() {
             Ok(io_state) => io_state,
             Err(err) => {
                 println!("TLS error: {:?}", err);
@@ -124,7 +118,7 @@ impl TlsClient {
         if io_state.plaintext_bytes_to_read() > 0 {
             let mut plaintext = Vec::new();
             plaintext.resize(io_state.plaintext_bytes_to_read(), 0u8);
-            self.tcpls_session.client_tls_conn.as_mut().unwrap().reader().read_exact(&mut plaintext).unwrap();
+            self.tcpls_session.tls_conn.as_mut().unwrap().reader().read_exact(&mut plaintext).unwrap();
             io::stdout().write_all(&plaintext).unwrap();
         }
 
@@ -138,7 +132,7 @@ impl TlsClient {
 
     fn do_write(&mut self) {
 
-        self.tcpls_session.client_tls_conn.as_mut().unwrap().write_tls(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket)
+        self.tcpls_session.tls_conn.as_mut().unwrap().write_tls(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket)
             .unwrap();
     }
 
@@ -163,8 +157,8 @@ impl TlsClient {
     /// IO readiness events.
     fn event_set(&mut self) -> mio::Interest {
 
-        let rd = self.tcpls_session.client_tls_conn.as_mut().unwrap().wants_read();
-        let wr = self.tcpls_session.client_tls_conn.as_mut().unwrap().wants_write();
+        let rd = self.tcpls_session.tls_conn.as_mut().unwrap().wants_read();
+        let wr = self.tcpls_session.tls_conn.as_mut().unwrap().wants_write();
 
         if rd && wr {
             mio::Interest::READABLE | mio::Interest::WRITABLE
@@ -182,18 +176,18 @@ impl TlsClient {
 impl io::Write for TlsClient {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
 
-        self.tcpls_session.client_tls_conn.as_mut().unwrap().writer().write(bytes)
+        self.tcpls_session.tls_conn.as_mut().unwrap().writer().write(bytes)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.tcpls_session.client_tls_conn.as_mut().unwrap().writer().flush()
+        self.tcpls_session.tls_conn.as_mut().unwrap().writer().flush()
     }
 }
 
 impl io::Read for TlsClient {
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
 
-        self.tcpls_session.client_tls_conn.as_mut().unwrap().reader().read(bytes)
+        self.tcpls_session.tls_conn.as_mut().unwrap().reader().read(bytes)
     }
 }
 

@@ -181,6 +181,9 @@ pub struct ClientConfig {
     /// The default is false.
     pub enable_early_data: bool,
 
+    /// exchange TCPLS extra client extensions if true
+    pub enable_tcpls: bool,
+
 }
 
 /// What mechanisms to support for resuming a TLS 1.2 session.

@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 #![allow(unused_qualifications)]
 
+use std::{io, process, u32, vec};
 use std::arch::{asm, is_aarch64_feature_detected};
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
@@ -10,7 +11,6 @@ use std::mem::size_of;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
-use std::{io, process, u32, vec};
 
 use if_addrs::get_if_addrs;
 use mio::net::{TcpListener, TcpStream};
@@ -18,11 +18,13 @@ use mio::Token;
 
 use octets::BufferError;
 
+use crate::{ALL_CIPHER_SUITES, ALL_VERSIONS, Certificate, cipher, ClientConfig, ClientConnection, Connection, ConnectionCommon, ContentType, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, Error, InvalidMessage, KeyLogFile, PrivateKey, RootCertStore, server, ServerConfig, ServerConnection, ServerName, SupportedCipherSuite, SupportedProtocolVersion, Ticketer, version};
 /// This module contains optional APIs for implementing TCPLS.
 use crate::cipher::{derive_connection_iv, Iv, MessageDecrypter, MessageEncrypter};
 use crate::client::ClientConnectionData;
 use crate::common_state::*;
 use crate::conn::ConnectionCore;
+use crate::Connection::Client;
 use crate::enums::ProtocolVersion;
 use crate::msgs::codec;
 use crate::msgs::handshake::{ClientExtension, ServerExtension};
@@ -33,22 +35,13 @@ use crate::vecbuf::ChunkVecBuffer;
 use crate::verify::{
     AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
 };
-use crate::Connection::Client;
-use crate::{
-    cipher, server, version, Certificate, ClientConfig, ConnectionCommon, ContentType, Error,
-    InvalidMessage, KeyLogFile, PrivateKey, RootCertStore, ServerConfig, ServerName,
-    SupportedCipherSuite, SupportedProtocolVersion, Ticketer, ALL_CIPHER_SUITES, ALL_VERSIONS,
-    DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS,
-};
 
-pub(crate) mod bi_stream;
-pub(crate) mod frame;
-mod network_address;
+pub mod bi_stream;
+pub mod frame;
+pub mod network_address;
 
 pub struct TcplsSession {
     pub tls_config: Option<TlsConfig>,
-    /*pub client_tls_conn: Option<ClientConnection>,
-    pub server_tls_conn: Option<ServerConnection>,*/
     pub tls_conn: Option<Connection>,
     pub tcp_connections: HashMap<u32, TcpConnection>,
     pub pending_tcp_connections: HashMap<u32, TcpConnection>,
@@ -63,8 +56,6 @@ impl TcplsSession {
     pub fn new() -> Self {
         Self {
             tls_config: None,
-            /* client_tls_conn: None,
-            server_tls_conn: None,*/
             tls_conn: None,
             tcp_connections: HashMap::new(),
             pending_tcp_connections: HashMap::new(),
@@ -376,6 +367,8 @@ pub fn build_tls_client_config(
         config.max_fragment_size = max_frag_size;
     }
 
+    config.enable_tcpls = true;
+
     Arc::new(config)
 }
 
@@ -496,7 +489,7 @@ pub fn server_new_tls_connection(config: Arc<ServerConfig>) -> ServerConnection 
     ServerConnection::new(config).expect("Establishing a TLS session has failed")
 }
 
-/// A TLS client or server connection.
+/*/// A TLS client or server connection.
 #[derive(Debug)]
 pub enum Connection {
     /// A client connection
@@ -620,7 +613,7 @@ impl Debug for ServerConnection {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("tcpls::ServerConnection").finish()
     }
-}
+}*/
 
 
 // #[test]
