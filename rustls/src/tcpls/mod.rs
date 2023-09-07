@@ -85,7 +85,7 @@ impl TcplsSession {
                 .expect("Establishment of TLS session failed");
             let _ = self.tls_conn.insert(Connection::from(client_conn));
             let _ = self.tls_config.insert(TlsConfig::Client(config.clone()));
-        } else {
+        } /*else {
             self.tls_conn
                 .as_mut()
                 .unwrap()
@@ -96,7 +96,7 @@ impl TcplsSession {
                 .unwrap()
                 .record_layer
                 .start_new_seq_space(new_conn_id);
-        }
+        }*/
     }
 
     pub fn create_tcpls_connection_object(&mut self, socket: TcpStream, is_server: bool) -> u32 {
@@ -469,7 +469,7 @@ pub fn server_accept_connection(
         let _ = tcpls_session
             .tls_config
             .insert(TlsConfig::from(config));
-    } else {
+    } /*else {
         tcpls_session
             .tls_conn
             .as_mut()
@@ -482,7 +482,7 @@ pub fn server_accept_connection(
             .unwrap()
             .record_layer
             .start_new_seq_space(conn_id);
-    }
+    }*/
 }
 
 pub fn server_new_tls_connection(config: Arc<ServerConfig>) -> ServerConnection {
