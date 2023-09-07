@@ -177,6 +177,13 @@ impl OpenConnection {
         // If we're readable: read some TLS.  Then
         // see if that yielded new plaintext.  Then
         // see if the backend is readable too.
+        if ev.is_readable() & !self.tls_conn.is_handshaking(){
+            self.do_tls_read();
+            self.try_plain_read();
+            self.try_back_read();
+        }
+
+
         if ev.is_readable() {
             self.do_tls_read();
             self.try_plain_read();
@@ -184,11 +191,7 @@ impl OpenConnection {
         }
 
 
-        if ev.is_readable() & !self.tls_conn.is_handshaking(){
-            self.do_tls_read();
-            self.try_plain_read();
-            self.try_back_read();
-        }
+
 
         if ev.is_writable() {
             self.do_tls_write_and_handle_error();
