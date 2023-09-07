@@ -12,7 +12,6 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-use if_addrs::get_if_addrs;
 use mio::net::{TcpListener, TcpStream};
 use mio::Token;
 
@@ -30,8 +29,8 @@ use crate::msgs::codec;
 use crate::msgs::handshake::{ClientExtension, ServerExtension};
 use crate::record_layer::RecordLayer;
 use crate::server::ServerConnectionData;
+use crate::tcpls::bi_stream::BiStream;
 use crate::tcpls::network_address::AddressMap;
-use crate::vecbuf::ChunkVecBuffer;
 use crate::verify::{
     AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
 };
@@ -39,6 +38,7 @@ use crate::verify::{
 pub mod bi_stream;
 pub mod frame;
 pub mod network_address;
+pub mod ranges;
 
 pub struct TcplsSession {
     pub tls_config: Option<TlsConfig>,
@@ -85,18 +85,7 @@ impl TcplsSession {
                 .expect("Establishment of TLS session failed");
             let _ = self.tls_conn.insert(Connection::from(client_conn));
             let _ = self.tls_config.insert(TlsConfig::Client(config.clone()));
-        } /*else {
-            self.tls_conn
-                .as_mut()
-                .unwrap()
-                .stream_map
-                .open_stream(new_conn_id);
-            self.tls_conn
-                .as_mut()
-                .unwrap()
-                .record_layer
-                .start_new_seq_space(new_conn_id);
-        }*/
+        }
     }
 
     pub fn create_tcpls_connection_object(&mut self, socket: TcpStream, is_server: bool) -> u32 {
@@ -143,7 +132,7 @@ impl From<Arc<ServerConfig>> for TlsConfig {
 }
 
 pub struct TcpConnection {
-    pub connection_id: u32,
+    pub connection_id: u64,
     pub socket: TcpStream,
     pub local_address_id: u8,
     pub remote_address_id: u8,
@@ -154,12 +143,15 @@ pub struct TcpConnection {
     pub is_primary: bool,
     // Is this connection the default one?
     pub state: TcplsConnectionState,
+
+    pub stream: BiStream,
+
 }
 
 impl TcpConnection {
-    pub fn new(socket: TcpStream) -> Self {
+    pub fn new(socket: TcpStream, id: u64) -> Self {
         Self {
-            connection_id: 0,
+            connection_id: id,
             socket: socket,
             local_address_id: 0,
             remote_address_id: 0,
@@ -167,6 +159,7 @@ impl TcpConnection {
             nbr_records_received: 0,
             is_primary: false,
             state: TcplsConnectionState::CLOSED,
+            stream: BiStream::new(id, true),
         }
     }
 }
@@ -469,20 +462,7 @@ pub fn server_accept_connection(
         let _ = tcpls_session
             .tls_config
             .insert(TlsConfig::from(config));
-    } /*else {
-        tcpls_session
-            .tls_conn
-            .as_mut()
-            .unwrap()
-            .stream_map
-            .open_stream(conn_id);
-        tcpls_session
-            .tls_conn
-            .as_mut()
-            .unwrap()
-            .record_layer
-            .start_new_seq_space(conn_id);
-    }*/
+    }
 }
 
 pub fn server_new_tls_connection(config: Arc<ServerConfig>) -> ServerConnection {

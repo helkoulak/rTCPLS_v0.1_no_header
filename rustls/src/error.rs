@@ -91,6 +91,9 @@ pub enum Error {
     /// The `max_fragment_size` value supplied in configuration was too small,
     /// or too large.
     BadMaxFragmentSize,
+
+    /// There is no more work to do.
+    Done,
 }
 
 /// A corrupt TLS message payload that resulted in an error.
@@ -434,6 +437,7 @@ impl fmt::Display for Error {
                 write!(f, "the supplied max_fragment_size was too small or large")
             }
             Self::General(ref err) => write!(f, "unexpected error: {}", err),
+            Self::Done => write!(f, "There is no more work to do"),
         }
     }
 }

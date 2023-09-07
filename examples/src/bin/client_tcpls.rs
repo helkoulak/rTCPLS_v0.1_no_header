@@ -50,7 +50,7 @@ impl TlsClient {
         }
 
         if ev.is_writable() && ! self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() {
-            let buf = [0x0F; 100 * 1024];
+            let buf = [0x0F; 20];
             self.tcpls_session.tls_conn.as_mut().unwrap().writer().write(& buf);
             self.do_write();
         }
