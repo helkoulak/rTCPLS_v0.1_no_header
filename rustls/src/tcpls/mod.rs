@@ -59,7 +59,7 @@ impl TcplsSession {
             tls_conn: None,
             tcp_connections: HashMap::new(),
             accepted_tcp_connections: HashMap::new(),
-            next_connection_id: 0,
+            next_conn_id: 0,
             address_map: AddressMap::new(),
             is_server: false,
             is_closed: false,
@@ -79,8 +79,10 @@ impl TcplsSession {
         let tls_config = config.clone();
         let socket = TcpStream::connect(dest_address).expect("TCP connection establishment failed");
 
-        let new_conn_id = self.create_tcpls_connection_object(socket, is_server);
-        if new_conn_id == 0 {
+        let new_id = self.create_tcpls_connection_object(socket, is_server);
+        self.attach_stream(new_id);
+
+        if new_id == 0 {
             let client_conn = ClientConnection::new(tls_config, server_name)
                 .expect("Establishment of TLS session failed");
             let _ = self.tls_conn.insert(Connection::from(client_conn));
