@@ -44,7 +44,7 @@ pub struct TcplsSession {
     pub tls_config: Option<TlsConfig>,
     pub tls_conn: Option<Connection>,
     pub tcp_connections: HashMap<u32, TcpConnection>,
-    pub pending_tcp_connections: HashMap<u32, TcpConnection>,
+    pub accepted_tcp_connections: HashMap<u32, TcpConnection>,
     pub next_connection_id: u32,
     pub address_map: AddressMap,
     pub is_server: bool,
@@ -58,7 +58,7 @@ impl TcplsSession {
             tls_config: None,
             tls_conn: None,
             tcp_connections: HashMap::new(),
-            pending_tcp_connections: HashMap::new(),
+            accepted_tcp_connections: HashMap::new(),
             next_connection_id: 0,
             address_map: AddressMap::new(),
             is_server: false,
@@ -89,10 +89,9 @@ impl TcplsSession {
     }
 
     pub fn create_tcpls_connection_object(&mut self, socket: TcpStream, is_server: bool) -> u32 {
-        let mut tcp_conn = TcpConnection::new(socket);
+        let mut tcp_conn = TcpConnection::new(socket, self.next_connection_id as u64);
 
         let new_conn_id = self.next_connection_id;
-        tcp_conn.connection_id = new_conn_id;
         tcp_conn.local_address_id = self.address_map.next_local_address_id;
         tcp_conn.remote_address_id = self.address_map.next_peer_address_id;
 
@@ -103,7 +102,7 @@ impl TcplsSession {
         if !is_server {
             self.tcp_connections.insert(new_conn_id, tcp_conn);
         } else {
-            self.pending_tcp_connections.insert(new_conn_id, tcp_conn);
+            self.accepted_tcp_connections.insert(new_conn_id, tcp_conn);
         }
 
         self.next_connection_id += 1;
