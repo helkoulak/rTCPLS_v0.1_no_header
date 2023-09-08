@@ -102,16 +102,57 @@ impl TcplsSession {
         }
 
         if !is_server {
-            self.tcp_connections.insert(new_conn_id, tcp_conn);
+            self.tcp_connections.insert(new_id, tcp_conn);
         } else {
-            self.accepted_tcp_connections.insert(new_conn_id, tcp_conn);
+            self.accepted_tcp_connections.insert(new_id, tcp_conn);
         }
 
-        self.next_connection_id += 1;
+        self.next_conn_id += 1;
         self.address_map.next_local_address_id += 1;
         self.address_map.next_peer_address_id += 1;
 
-        new_conn_id
+        new_id
+    }
+
+    /// Open a new stream and attach it to TCP connection.
+    /// Only one stream per connection is allowed to avoid HOL problem
+    pub fn attach_stream(&mut self, tcp_conn_id: u64) {
+        if !self.is_server {
+            let _ = self.tcp_connections
+                .get_mut(&tcp_conn_id)
+                .unwrap()
+                .stream
+                .insert(BiStream::new(tcp_conn_id));
+        } else {
+            let _ = self.accepted_tcp_connections
+                .get_mut(&tcp_conn_id)
+                .unwrap()
+                .stream
+                .insert(BiStream::new(tcp_conn_id));
+
+        }
+    }
+
+    pub fn server_accept_connection(
+        &mut self,
+        listener: TcpListener,
+        config: Arc<ServerConfig>,
+    ) {
+        let (socket, remote_address) = listener
+            .accept()
+            .expect("encountered error while accepting connection");
+
+        let conn_id = self.create_tcpls_connection_object(socket, true);
+        self.attach_stream(conn_id);
+
+        if conn_id == 0 {
+            self.is_server = true;
+
+            let server_conn =
+                ServerConnection::new(config.clone()).expect("Establishing a TLS session has failed");
+            let _ = self.tls_conn.insert(Connection::from(server_conn));
+            let _ = self.tls_config.insert(TlsConfig::from(config));
+        }
     }
 }
 
@@ -444,27 +485,7 @@ pub fn server_create_listener(local_address: &str, port: u16) -> TcpListener {
     TcpListener::bind(addr).expect("cannot listen on port")
 }
 
-pub fn server_accept_connection(
-    listener: TcpListener,
-    tcpls_session: &mut TcplsSession,
-    config: Arc<ServerConfig>,
-) {
-    let (socket, remote_address) = listener
-        .accept()
-        .expect("encountered error while accepting connection");
 
-    let conn_id = tcpls_session.create_tcpls_connection_object(socket, true);
-    if conn_id == 0 {
-        tcpls_session.is_server = true;
-
-        let server_conn =
-            ServerConnection::new(config.clone()).expect("Establishing a TLS session has failed");
-        let _ = tcpls_session.tls_conn.insert(Connection::from(server_conn));
-        let _ = tcpls_session
-            .tls_config
-            .insert(TlsConfig::from(config));
-    }
-}
 
 pub fn server_new_tls_connection(config: Arc<ServerConfig>) -> ServerConnection {
     ServerConnection::new(config).expect("Establishing a TLS session has failed")
