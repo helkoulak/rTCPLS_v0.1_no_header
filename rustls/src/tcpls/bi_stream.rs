@@ -34,14 +34,6 @@ use crate::tcpls::ranges;
 
 
 
-const SEND_BUFFER_SIZE: usize = MAX_FRAGMENT_SIZE;
-
-
-
-
-
-
-
 /// A TCPLS stream.
 pub struct BiStream {
 
@@ -549,7 +541,7 @@ impl SendBuf {
 
         // Split the remaining input data into consistently-sized buffers to
         // avoid fragmentation.
-        for chunk in data.chunks(SEND_BUFFER_SIZE) {
+        for chunk in data.chunks(MAX_FRAGMENT_SIZE) {
             len += chunk.len();
 
             let fin = len == data.len() && fin;
