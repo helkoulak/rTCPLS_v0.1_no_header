@@ -185,8 +185,7 @@ pub struct TcpConnection {
     pub is_primary: bool,
     // Is this connection the default one?
     pub state: TcplsConnectionState,
-
-    pub stream: BiStream,
+    pub stream: Option<BiStream>,
 
 }
 
@@ -201,9 +200,10 @@ impl TcpConnection {
             nbr_records_received: 0,
             is_primary: false,
             state: TcplsConnectionState::CLOSED,
-            stream: BiStream::new(id, true),
+            stream: None,
         }
     }
+
 }
 
 pub enum TcplsConnectionState {
