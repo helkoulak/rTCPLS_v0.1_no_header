@@ -44,22 +44,20 @@ pub struct BiStream {
     /// Send-side stream buffer.
     pub send: SendBuf,
 
-    /// Whether the stream was created by the local endpoint.
-    pub local: bool,
+/*    /// Whether the stream was created by the local endpoint.
+    pub local: bool,*/
 
     pub send_lowat: usize,
 }
 
 impl BiStream {
     /// Creates a new stream.
-    pub fn new(id: u64, local: bool) -> BiStream {
+    pub fn new(id: u64) -> BiStream {
 
         BiStream {
             stream_id: id,
             recv: RecvBuf::new(64 * 1024),
             send: SendBuf::new(64 * 1024),
-            local,
-
             send_lowat: 1,
         }
     }
@@ -102,15 +100,15 @@ impl BiStream {
     }
 }
 
-/// Returns true if the stream was created locally.
+/*/// Returns true if the stream was created locally.
 pub fn is_local(stream_id: u64, is_server: bool) -> bool {
     (stream_id & 0x1) == (is_server as u64)
-}
+}*/
 
-/// Returns true if the stream is bidirectional.
+/*/// Returns true if the stream is bidirectional.
 pub fn is_bidi(stream_id: u64) -> bool {
     (stream_id & 0x2) == 0
-}
+}*/
 
 /// Receive-side stream buffer.
 ///
