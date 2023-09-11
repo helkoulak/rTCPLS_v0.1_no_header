@@ -3,6 +3,7 @@
 
 use std::{io, process, u32, vec};
 use std::arch::{asm, is_aarch64_feature_detected};
+use std::cmp::min;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::fs;
@@ -30,6 +31,7 @@ use crate::msgs::handshake::{ClientExtension, ServerExtension};
 use crate::record_layer::RecordLayer;
 use crate::server::ServerConnectionData;
 use crate::tcpls::bi_stream::BiStream;
+use crate::tcpls::frame::Frame;
 use crate::tcpls::network_address::AddressMap;
 use crate::verify::{
     AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
@@ -43,9 +45,8 @@ pub mod ranges;
 pub struct TcplsSession {
     pub tls_config: Option<TlsConfig>,
     pub tls_conn: Option<Connection>,
-    pub tcp_connections: HashMap<u64, TcpConnection>,
-    pub accepted_tcp_connections: HashMap<u64, TcpConnection>,
-    pub next_conn_id: u64,
+    pub tcp_connections: HashMap<u32, TcpConnection>,
+    pub next_conn_id: u32,
     pub address_map: AddressMap,
     pub is_server: bool,
     pub is_closed: bool,
@@ -58,7 +59,6 @@ impl TcplsSession {
             tls_config: None,
             tls_conn: None,
             tcp_connections: HashMap::new(),
-            accepted_tcp_connections: HashMap::new(),
             next_conn_id: 0,
             address_map: AddressMap::new(),
             is_server: false,
@@ -80,17 +80,27 @@ impl TcplsSession {
         let socket = TcpStream::connect(dest_address).expect("TCP connection establishment failed");
 
         let new_id = self.create_tcpls_connection_object(socket, is_server);
-        self.attach_stream(new_id);
 
         if new_id == 0 {
             let client_conn = ClientConnection::new(tls_config, server_name)
                 .expect("Establishment of TLS session failed");
             let _ = self.tls_conn.insert(Connection::from(client_conn));
             let _ = self.tls_config.insert(TlsConfig::Client(config.clone()));
+        }else {
+            self.tls_conn
+                .as_mut()
+                .unwrap()
+                .stream_map
+                .open_stream(new_id);
+            self.tls_conn
+                .as_mut()
+                .unwrap()
+                .record_layer
+                .start_new_seq_space(new_id);
         }
     }
 
-    pub fn create_tcpls_connection_object(&mut self, socket: TcpStream, is_server: bool) -> u64 {
+    pub fn create_tcpls_connection_object(&mut self, socket: TcpStream, is_server: bool) -> u32 {
         let mut tcp_conn = TcpConnection::new(socket, self.next_conn_id);
 
         let new_id = self.next_conn_id;
@@ -101,11 +111,7 @@ impl TcplsSession {
             tcp_conn.is_primary = true;
         }
 
-        if !is_server {
-            self.tcp_connections.insert(new_id, tcp_conn);
-        } else {
-            self.accepted_tcp_connections.insert(new_id, tcp_conn);
-        }
+        self.tcp_connections.insert(new_id, tcp_conn);
 
         self.next_conn_id += 1;
         self.address_map.next_local_address_id += 1;
@@ -114,23 +120,10 @@ impl TcplsSession {
         new_id
     }
 
-    /// Open a new stream and attach it to TCP connection.
+    /// Open a new stream and assign it to specified TCP connection.
     /// Only one stream per connection is allowed to avoid HOL problem
-    pub fn attach_stream(&mut self, tcp_conn_id: u64) {
-        if !self.is_server {
-            let _ = self.tcp_connections
-                .get_mut(&tcp_conn_id)
-                .unwrap()
-                .stream
-                .insert(BiStream::new(tcp_conn_id));
-        } else {
-            let _ = self.accepted_tcp_connections
-                .get_mut(&tcp_conn_id)
-                .unwrap()
-                .stream
-                .insert(BiStream::new(tcp_conn_id));
-
-        }
+    pub fn open_stream(&mut self, tcp_conn_id: u32) {
+       self.tls_conn.as_mut().unwrap().open_stream(tcp_conn_id);
     }
 
     pub fn server_accept_connection(
@@ -143,7 +136,6 @@ impl TcplsSession {
             .expect("encountered error while accepting connection");
 
         let conn_id = self.create_tcpls_connection_object(socket, true);
-        self.attach_stream(conn_id);
 
         if conn_id == 0 {
             self.is_server = true;
@@ -152,8 +144,35 @@ impl TcplsSession {
                 ServerConnection::new(config.clone()).expect("Establishing a TLS session has failed");
             let _ = self.tls_conn.insert(Connection::from(server_conn));
             let _ = self.tls_config.insert(TlsConfig::from(config));
+        }else {
+            self.tls_conn
+                .as_mut()
+                .unwrap()
+                .stream_map
+                .open_stream(conn_id);
+            self.tls_conn
+                .as_mut()
+                .unwrap()
+                .record_layer
+                .start_new_seq_space(conn_id);
         }
+
     }
+
+
+    /*pub fn stream_send_on_connection(&mut self, app_data: &[u8], length: u64, conn_id: u64) -> Result<u64, Error>{
+        let mut stream = self.tcp_connections.get_mut(&conn_id).unwrap().stream.as_mut().unwrap();
+        let mut max_bytes = min(length, stream.send.cap() as u64);
+        let buf = app_data[..max_bytes];
+        let mut done = 0;
+
+        while max_bytes > 0 {
+            let
+
+
+        }
+
+    }*/
 }
 
 pub enum TlsConfig {
@@ -174,7 +193,7 @@ impl From<Arc<ServerConfig>> for TlsConfig {
 }
 
 pub struct TcpConnection {
-    pub connection_id: u64,
+    pub connection_id: u32,
     pub socket: TcpStream,
     pub local_address_id: u8,
     pub remote_address_id: u8,
@@ -185,12 +204,10 @@ pub struct TcpConnection {
     pub is_primary: bool,
     // Is this connection the default one?
     pub state: TcplsConnectionState,
-    pub stream: Option<BiStream>,
-
 }
 
 impl TcpConnection {
-    pub fn new(socket: TcpStream, id: u64) -> Self {
+    pub fn new(socket: TcpStream, id: u32) -> Self {
         Self {
             connection_id: id,
             socket: socket,
@@ -200,7 +217,6 @@ impl TcpConnection {
             nbr_records_received: 0,
             is_primary: false,
             state: TcplsConnectionState::CLOSED,
-            stream: None,
         }
     }
 

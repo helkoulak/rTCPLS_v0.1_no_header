@@ -2,6 +2,7 @@
 extern crate serde_derive;
 
 use std::{fs, process};
+use std::fs::File;
 use std::io;
 use std::io::{BufReader, Read, Write};
 use std::net::SocketAddr;
@@ -172,6 +173,21 @@ impl TlsClient {
     fn is_closed(&self) -> bool {
         self.closing
     }
+
+
+   /* fn read_file_and_calculate_hash(file_path: &str) -> Result<(Vec<u8>, Digest), Error> {
+        // Open the file
+        let mut file = File::open(file_path)?;
+
+        // Read the file contents into a byte vector
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer)?;
+
+        // Calculate the SHA-256 hash
+        let hash = ring::digest::digest(&ring::digest::SHA256, &buffer);
+
+        Ok((buffer,hash))
+    }*/
 }
 impl io::Write for TlsClient {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
