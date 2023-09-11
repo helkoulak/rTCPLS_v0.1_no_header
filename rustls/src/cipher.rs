@@ -107,7 +107,7 @@ pub(crate) fn derive_connection_iv(iv: &mut HashMap<u32, Iv>, connection_id: u32
 struct InvalidMessageEncrypter {}
 
 impl MessageEncrypter for InvalidMessageEncrypter {
-    fn encrypt(&self, _m: BorrowedPlainMessage, _seq: u64, connection_id: u32) -> Result<OpaqueMessage, Error> {
+    fn encrypt(&self, _m: BorrowedPlainMessage, _seq: u64, conn_id: u32) -> Result<OpaqueMessage, Error> {
         Err(Error::EncryptError)
     }
 
