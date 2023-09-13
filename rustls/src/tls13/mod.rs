@@ -156,7 +156,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
                 payload = Vec::with_capacity(total_len);
                 payload.extend_from_slice(msg.payload);
                 payload.extend_from_slice(vec![0; header_len].as_slice());
-                let mut octets = octets::OctetsMut::with_slice(&mut payload, msg.payload.len());
+                let mut octets = octets::OctetsMut::with_slice_at_offset(&mut payload, msg.payload.len());
                 msg.stream_header.unwrap().encode_stream_header(&mut octets).expect("encoding stream header failed");
 
             }
