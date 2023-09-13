@@ -10,6 +10,8 @@ use std::io::Read;
 pub(crate) struct ChunkVecBuffer {
     chunks: VecDeque<Vec<u8>>,
     limit: Option<usize>,
+    /// where the next chunk will be appended
+    offset: u64,
 }
 
 impl ChunkVecBuffer {
@@ -17,7 +19,12 @@ impl ChunkVecBuffer {
         Self {
             chunks: VecDeque::new(),
             limit,
+            offset: 0,
         }
+    }
+
+    pub(crate) fn get_offset(&self) -> u64 {
+        self.offset
     }
 
     /// Sets the upper limit on how many bytes this
@@ -67,7 +74,7 @@ impl ChunkVecBuffer {
     /// we're near the limit.
     pub(crate) fn append_limited_copy(&mut self, bytes: &[u8]) -> usize {
         let take = self.apply_limit(bytes.len());
-        self.append(bytes[..take].to_vec());
+        self.offset += self.append(bytes[..take].to_vec()) as u64;
         take
     }
 
@@ -78,14 +85,19 @@ impl ChunkVecBuffer {
         if !bytes.is_empty() {
             self.chunks.push_back(bytes);
         }
-
+        self.offset += len as u64;
         len
     }
 
     /// Take one of the chunks from this object.  This
     /// function panics if the object `is_empty`.
     pub(crate) fn pop(&mut self) -> Option<Vec<u8>> {
-        self.chunks.pop_front()
+        if let Some(T) = self.chunks.pop_front() {
+            self.offset -= T.len() as u64;
+            Some(T)
+        }else {
+            None
+        }
     }
 
     /// Read data out of this object, writing it into `buf`
