@@ -496,8 +496,8 @@ impl<'a> OctetsMut<'a> {
     ///
     /// Since there's no copy, the input slice needs to be mutable to allow
     /// modifications.
-    pub fn with_slice(buf: &'a mut [u8]) -> Self {
-        OctetsMut { buf, off: 0 }
+    pub fn with_slice(buf: &'a mut [u8], offset: usize) -> Self {
+        OctetsMut { buf, off: offset }
     }
 
     /// Creates an `OctetsMut` from the given slice, without copying with offset pointing to the end of buf.
