@@ -7,6 +7,7 @@ use crate::msgs::ccs::ChangeCipherSpecPayload;
 use crate::msgs::codec::{Codec, Reader};
 use crate::msgs::enums::AlertLevel;
 use crate::msgs::handshake::HandshakeMessagePayload;
+use crate::tcpls::frame::{Frame, StreamFrameHeader};
 
 #[derive(Debug)]
 pub enum MessagePayload {
@@ -203,6 +204,7 @@ impl PlainMessage {
             version: self.version,
             typ: self.typ,
             payload: &self.payload.0,
+            stream_header: None,
         }
     }
 }
@@ -269,6 +271,7 @@ pub struct BorrowedPlainMessage<'a> {
     pub typ: ContentType,
     pub version: ProtocolVersion,
     pub payload: &'a [u8],
+    pub stream_header: Option<StreamFrameHeader>, // Header of TCPLS stream frame that will encapsulate payload
 }
 
 impl<'a> BorrowedPlainMessage<'a> {

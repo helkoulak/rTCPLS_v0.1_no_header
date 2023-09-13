@@ -1,9 +1,13 @@
-use crate::InvalidMessage;
+use octets::{Octets, varint_len};
+use crate::{Error, InvalidMessage};
 
-pub const STREAM_FRAME_MAX_OVERHEAD: usize = 25; // Type = 1 Byte + Stream Id = 8 Bytes + Offset = 8 Bytes + Length = 8 Bytes
+/// Type = 1 Byte + Stream Id = 4 Bytes + Offset = 8 Bytes + Length = 2 Bytes.
+/// This is the maximum overhead for a stream frame for a single TLS record.
+pub const STREAM_FRAME_MAX_OVERHEAD: usize = 15;
 
+/*/// Payload max length for a TCPLS stream frame
 pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize =
-    crate::msgs::fragmenter::MAX_FRAGMENT_LEN - STREAM_FRAME_MAX_OVERHEAD;
+    crate::msgs::fragmenter::MAX_FRAGMENT_LEN - STREAM_FRAME_MAX_OVERHEAD;*/
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Frame {
@@ -160,284 +164,6 @@ impl Frame {
     }
 }
 
-// impl std::fmt::Debug for Frame {
-//     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-//         match self {
-//             Frame::Padding { len } => {
-//                 write!(f, "PADDING len={len}")?;
-//             },
-//
-//             Frame::Ping => {
-//                 write!(f, "PING")?;
-//             },
-//
-//             Frame::ACK {
-//                 ack_delay,
-//                 ranges,
-//                 ecn_counts,
-//             } => {
-//                 write!(
-//                     f,
-//                     "ACK delay={ack_delay} blocks={ranges:?} ecn_counts={ecn_counts:?}"
-//                 )?;
-//             },
-//
-//             Frame::ResetStream {
-//                 stream_id,
-//                 error_code,
-//                 final_size,
-//             } => {
-//                 write!(
-//                     f,
-//                     "RESET_STREAM stream={stream_id} err={error_code:x} size={final_size}"
-//                 )?;
-//             },
-//
-//             Frame::StopSending {
-//                 stream_id,
-//                 error_code,
-//             } => {
-//                 write!(f, "STOP_SENDING stream={stream_id} err={error_code:x}")?;
-//             },
-//
-//             Frame::Crypto { data } => {
-//                 write!(f, "CRYPTO off={} len={}", data.off(), data.len())?;
-//             },
-//
-//             Frame::CryptoHeader { offset, length } => {
-//                 write!(f, "CRYPTO off={offset} len={length}")?;
-//             },
-//
-//             Frame::NewToken { .. } => {
-//                 write!(f, "NEW_TOKEN (TODO)")?;
-//             },
-//
-//             Frame::Stream { stream_id, data } => {
-//                 write!(
-//                     f,
-//                     "STREAM id={} off={} len={} fin={}",
-//                     stream_id,
-//                     data.off(),
-//                     data.len(),
-//                     data.fin()
-//                 )?;
-//             },
-//
-//             Frame::StreamHeader {
-//                 stream_id,
-//                 offset,
-//                 length,
-//                 fin,
-//             } => {
-//                 write!(
-//                     f,
-//                     "STREAM id={stream_id} off={offset} len={length} fin={fin}"
-//                 )?;
-//             },
-//
-//             Frame::MaxData { max } => {
-//                 write!(f, "MAX_DATA max={max}")?;
-//             },
-//
-//             Frame::MaxStreamData { stream_id, max } => {
-//                 write!(f, "MAX_STREAM_DATA stream={stream_id} max={max}")?;
-//             },
-//
-//             Frame::MaxStreamsBidi { max } => {
-//                 write!(f, "MAX_STREAMS type=bidi max={max}")?;
-//             },
-//
-//             Frame::MaxStreamsUni { max } => {
-//                 write!(f, "MAX_STREAMS type=uni max={max}")?;
-//             },
-//
-//             Frame::DataBlocked { limit } => {
-//                 write!(f, "DATA_BLOCKED limit={limit}")?;
-//             },
-//
-//             Frame::StreamDataBlocked { stream_id, limit } => {
-//                 write!(
-//                     f,
-//                     "STREAM_DATA_BLOCKED stream={stream_id} limit={limit}"
-//                 )?;
-//             },
-//
-//             Frame::StreamsBlockedBidi { limit } => {
-//                 write!(f, "STREAMS_BLOCKED type=bidi limit={limit}")?;
-//             },
-//
-//             Frame::StreamsBlockedUni { limit } => {
-//                 write!(f, "STREAMS_BLOCKED type=uni limit={limit}")?;
-//             },
-//
-//             Frame::NewConnectionId {
-//                 seq_num,
-//                 retire_prior_to,
-//                 conn_id,
-//                 reset_token,
-//             } => {
-//                 write!(
-//                     f,
-//                     "NEW_CONNECTION_ID seq_num={seq_num} retire_prior_to={retire_prior_to} conn_id={conn_id:02x?} reset_token={reset_token:02x?}",
-//                 )?;
-//             },
-//
-//             Frame::RetireConnectionId { seq_num } => {
-//                 write!(f, "RETIRE_CONNECTION_ID seq_num={seq_num}")?;
-//             },
-//
-//             Frame::PathChallenge { data } => {
-//                 write!(f, "PATH_CHALLENGE data={data:02x?}")?;
-//             },
-//
-//             Frame::PathResponse { data } => {
-//                 write!(f, "PATH_RESPONSE data={data:02x?}")?;
-//             },
-//
-//             Frame::ConnectionClose {
-//                 error_code,
-//                 frame_type,
-//                 reason,
-//             } => {
-//                 write!(
-//                     f,
-//                     "CONNECTION_CLOSE err={error_code:x} frame={frame_type:x} reason={reason:x?}"
-//                 )?;
-//             },
-//
-//             Frame::ApplicationClose { error_code, reason } => {
-//                 write!(
-//                     f,
-//                     "APPLICATION_CLOSE err={error_code:x} reason={reason:x?}"
-//                 )?;
-//             },
-//
-//             Frame::HandshakeDone => {
-//                 write!(f, "HANDSHAKE_DONE")?;
-//             },
-//
-//             Frame::Datagram { data } => {
-//                 write!(f, "DATAGRAM len={}", data.len())?;
-//             },
-//
-//             Frame::DatagramHeader { length } => {
-//                 write!(f, "DATAGRAM len={length}")?;
-//             },
-//         }
-//
-//         Ok(())
-//     }
-// }
-
-// fn parse_ack_frame(ty: u64, b: &mut octets::Octets) -> Result<Frame, E> {
-//     let first = ty as u8;
-//
-//     let largest_ack = b.get_varint()?;
-//     let ack_delay = b.get_varint()?;
-//     let block_count = b.get_varint()?;
-//     let ack_block = b.get_varint()?;
-//
-//     if largest_ack < ack_block {
-//         return Err(Error::InvalidFrame);
-//     }
-//
-//     let mut smallest_ack = largest_ack - ack_block;
-//
-//     let mut ranges = ranges::RangeSet::default();
-//
-//     ranges.insert(smallest_ack..largest_ack + 1);
-//
-//     for _i in 0..block_count {
-//         let gap = b.get_varint()?;
-//
-//         if smallest_ack < 2 + gap {
-//             return Err(Error::InvalidFrame);
-//         }
-//
-//         let largest_ack = (smallest_ack - gap) - 2;
-//         let ack_block = b.get_varint()?;
-//
-//         if largest_ack < ack_block {
-//             return Err(Error::InvalidFrame);
-//         }
-//
-//         smallest_ack = largest_ack - ack_block;
-//
-//         ranges.insert(smallest_ack..largest_ack + 1);
-//     }
-//
-//     let ecn_counts = if first & 0x01 != 0 {
-//         let ecn = EcnCounts {
-//             ect0_count: b.get_varint()?,
-//             ect1_count: b.get_varint()?,
-//             ecn_ce_count: b.get_varint()?,
-//         };
-//
-//         Some(ecn)
-//     } else {
-//         None
-//     };
-//
-//     Ok(Frame::ACK {
-//         highest_record_sn_received: u64,
-//         connection_id: u32,
-//     })
-// }
-//
-// pub fn encode_crypto_header(
-//     offset: u64, length: u64, b: &mut octets::OctetsMut,
-// ) -> Result<()> {
-//     b.put_varint(0x06)?;
-//
-//     b.put_varint(offset)?;
-//
-//     // Always encode length field as 2-byte varint.
-//     b.put_varint_with_len(length, 2)?;
-//
-//     Ok(())
-// }
-//
-// pub fn encode_stream_header(
-//     stream_id: u64, offset: u64, length: u64, fin: bool,
-//     b: &mut octets::OctetsMut,
-// ) -> Result<()> {
-//     let mut ty: u8 = 0x08;
-//
-//     // Always encode offset.
-//     ty |= 0x04;
-//
-//     // Always encode length.
-//     ty |= 0x02;
-//
-//     if fin {
-//         ty |= 0x01;
-//     }
-//
-//     b.put_varint(u64::from(ty))?;
-//
-//     b.put_varint(stream_id)?;
-//     b.put_varint(offset)?;
-//
-//     // Always encode length field as 2-byte varint.
-//     b.put_varint_with_len(length, 2)?;
-//
-//     Ok(())
-// }
-//
-// pub fn encode_dgram_header(length: u64, b: &mut octets::OctetsMut) -> Result<()> {
-//     let mut ty: u8 = 0x30;
-//
-//     // Always encode length
-//     ty |= 0x01;
-//
-//     b.put_varint(u64::from(ty))?;
-//
-//     // Always encode length field as 2-byte varint.
-//     b.put_varint_with_len(length, 2)?;
-//
-//     Ok(())
-// }
-
 fn parse_stream_frame(frame_type: u8, b: &mut octets::Octets) -> octets::Result<Frame> {
     let stream_id = b.get_varint_reverse().unwrap();
 
@@ -522,6 +248,46 @@ fn parse_stream_change_frame(b: &mut octets::Octets) -> octets::Result<Frame> {
         next_record_stream_id,
         next_offset,
     })
+}
+
+pub struct StreamFrameHeader {
+    length: u64,
+    offset: u64,
+    stream_id: u64,
+    fin: u8,
+}
+
+impl StreamFrameHeader {
+    pub fn new(length: u64, offset: u64, stream_id: u64, fin: u8) -> Self {
+        Self {
+            length,
+            offset,
+            stream_id,
+            fin,
+        }
+    }
+
+    pub fn encode_stream_header(
+        &mut self,
+        b: &mut octets::OctetsMut,
+    ) -> Result<(), Error> {
+        b.put_varint_reverse(self.length).unwrap();
+        b.put_varint_reverse(self.offset).unwrap();
+        b.put_varint_reverse(self.stream_id).unwrap();
+        if self.fin & 0x01 == 0 {
+            b.put_varint(0x02).unwrap();
+        } else {
+            b.put_varint(0x03).unwrap();
+        }
+        Ok(())
+    }
+
+    pub fn get_header_length(&self) -> usize {
+        varint_len(self.length) +
+            varint_len(self.offset) +
+            varint_len(self.stream_id) +
+            1
+    }
 }
 
 #[test]

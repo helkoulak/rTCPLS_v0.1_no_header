@@ -18,6 +18,7 @@ use crate::record_layer;
 use crate::suites::PartiallyExtractedSecrets;
 use crate::suites::SupportedCipherSuite;
 use crate::tcpls::bi_stream::StreamMap;
+use crate::tcpls::frame::{Frame, StreamFrameHeader};
 
 #[cfg(feature = "tls12")]
 use crate::tls12::ConnectionSecrets;
@@ -267,6 +268,12 @@ impl CommonState {
         // be out by whatever the cipher+record overhead is.  That's a
         // constant and predictable amount, so it's not a terrible issue.
         let conn_id = self.active_conn_id;
+        let offset = self
+            .stream_map
+            .streams
+            .get_mut(&conn_id)
+            .unwrap()
+            .sendable_tls.get_offset();
         let len = match limit {
             Limit::Yes => self
                 .stream_map
@@ -283,7 +290,17 @@ impl CommonState {
             ProtocolVersion::TLSv1_2,
             &payload[..len],
         );
-        for m in iter {
+        for mut m in iter {
+            let _ = m.stream_header.insert(
+                StreamFrameHeader::new(
+                    m.payload.len() as u64,
+                    offset,
+                    conn_id as u64,
+                    0
+                )
+            );
+
+
             self.send_single_fragment(m);
         }
 
