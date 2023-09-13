@@ -25,9 +25,7 @@ pub struct BiStream {
     pub(crate) sendable_plaintext: ChunkVecBuffer,
     /// buffers encrypted TLS records that to be sent on the TCP socket
     pub(crate) sendable_tls: ChunkVecBuffer,
-    
-    /// offset of the next buffered chunk of bytes
-    pub(crate) offset: u64,
+
 }
 
 impl BiStream {
@@ -39,7 +37,6 @@ impl BiStream {
             received_plaintext: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
             sendable_plaintext: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
             sendable_tls: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
-            offset: 0,
         }
     }
 }
