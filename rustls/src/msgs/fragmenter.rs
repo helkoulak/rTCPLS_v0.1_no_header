@@ -2,9 +2,11 @@ use crate::enums::ContentType;
 use crate::enums::ProtocolVersion;
 use crate::msgs::message::{BorrowedPlainMessage, PlainMessage};
 use crate::Error;
-pub const MAX_FRAGMENT_LEN: usize = 16384;
+use crate::tcpls::frame::STREAM_FRAME_MAX_OVERHEAD;
+
+pub const MAX_FRAGMENT_LEN: usize = 16384 - STREAM_FRAME_MAX_OVERHEAD;
 pub const PACKET_OVERHEAD: usize = 1 + 2 + 2;
-pub const MAX_FRAGMENT_SIZE: usize = MAX_FRAGMENT_LEN + PACKET_OVERHEAD;
+pub const MAX_FRAGMENT_SIZE: usize = MAX_FRAGMENT_LEN + PACKET_OVERHEAD + STREAM_FRAME_MAX_OVERHEAD;
 
 pub struct MessageFragmenter {
     max_frag: usize,
@@ -44,6 +46,7 @@ impl MessageFragmenter {
                 typ,
                 version,
                 payload: c,
+                stream_header: None,
             })
     }
 
