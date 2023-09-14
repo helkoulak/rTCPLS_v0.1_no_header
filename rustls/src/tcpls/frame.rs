@@ -288,6 +288,14 @@ impl StreamFrameHeader {
             varint_len(self.stream_id) +
             1
     }
+
+    pub fn get_header_size_reverse(b: &mut octets::Octets) -> usize {
+        b.rewind(1).unwrap();
+        1 + varint_len(b.get_varint_reverse().unwrap()) +
+            varint_len(b.get_varint_reverse().unwrap()) +
+            varint_len(b.get_varint_reverse().unwrap())
+
+    }
 }
 
 #[test]
