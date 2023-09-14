@@ -212,6 +212,11 @@ impl MessageDecrypter for Tls13MessageDecrypter {
         }
 
         msg.typ = unpad_tls13(payload);
+        if msg.typ == ContentType::ApplicationData {
+            let mut b = octets::Octets::with_slice_reverse(& payload);
+            let header_size = StreamFrameHeader::get_header_size_reverse(&mut b);
+            payload.truncate(plain_len - header_size - 1);
+        }
         if msg.typ == ContentType::Unknown(0) {
             return Err(PeerMisbehaved::IllegalTlsInnerPlaintext.into());
         }
