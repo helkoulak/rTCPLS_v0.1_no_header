@@ -439,6 +439,17 @@ impl<'a> Octets<'a> {
         Ok(())
     }
 
+    /// Rewind the buffer's offset.
+    pub fn rewind(&mut self, rewind: usize) -> Result<()> {
+        if self.off < rewind {
+            return Err(BufferError::BufferTooShortError);
+        }
+
+        self.off -= rewind;
+
+        Ok(())
+    }
+
     /// Returns the remaining capacity in the buffer.
     pub fn cap(&self) -> usize {
         self.buf.len() - self.off
