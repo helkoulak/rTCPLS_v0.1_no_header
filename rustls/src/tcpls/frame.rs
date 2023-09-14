@@ -3,7 +3,7 @@ use crate::{Error, InvalidMessage};
 
 /// Type = 1 Byte + Stream Id = 4 Bytes + Offset = 8 Bytes + Length = 2 Bytes.
 /// This is the maximum overhead for a stream frame for a single TLS record.
-pub const STREAM_FRAME_MAX_OVERHEAD: usize = 15;
+pub const TCPLS_STREAM_FRAME_MAX_OVERHEAD: usize = 15;
 
 /*/// Payload max length for a TCPLS stream frame
 pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize =
