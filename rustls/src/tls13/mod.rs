@@ -13,7 +13,7 @@ use crate::suites::{BulkAlgorithm, CipherSuiteCommon, SupportedCipherSuite};
 use ring::aead;
 
 use std::fmt;
-use crate::tcpls::frame::StreamFrameHeader;
+use crate::tcpls::frame::{TCPLS_STREAM_FRAME_MAX_OVERHEAD, StreamFrameHeader};
 
 pub(crate) mod key_schedule;
 
@@ -207,11 +207,12 @@ impl MessageDecrypter for Tls13MessageDecrypter {
 
         payload.truncate(plain_len);
 
-        if payload.len() > MAX_FRAGMENT_LEN + 1 {
+        if payload.len() > MAX_FRAGMENT_LEN + TCPLS_STREAM_FRAME_MAX_OVERHEAD + 1 {
             return Err(Error::PeerSentOversizedRecord);
         }
 
         msg.typ = unpad_tls13(payload);
+        // strip TCPLS stream frame header if applicable
         if msg.typ == ContentType::ApplicationData {
             let mut b = octets::Octets::with_slice_reverse(& payload);
             let header_size = StreamFrameHeader::get_header_size_reverse(&mut b);
