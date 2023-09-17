@@ -5,7 +5,7 @@ use crate::error::Error;
 use crate::msgs::base::Payload;
 use crate::msgs::codec;
 use crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
-use crate::msgs::message::{BorrowedPlainMessage, OpaqueMessage, PlainMessage};
+use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, OpaqueMessage, PlainMessage};
 
 use ring::aead;
 
@@ -112,8 +112,8 @@ const GCM_EXPLICIT_NONCE_LEN: usize = 8;
 const GCM_OVERHEAD: usize = GCM_EXPLICIT_NONCE_LEN + 16;
 
 impl MessageDecrypter for GcmMessageDecrypter {
-    fn decrypt(&self, mut msg: OpaqueMessage, seq: u64, conn_id: u32) -> Result<PlainMessage, Error> {
-        let payload = &mut msg.payload.0;
+    fn decrypt(&self, mut msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32) -> Result<PlainMessage, Error> {
+      /*  let payload = msg.payload.to_vec().as_mut_slice();
         if payload.len() < GCM_OVERHEAD {
             return Err(Error::DecryptError);
         }
@@ -137,7 +137,7 @@ impl MessageDecrypter for GcmMessageDecrypter {
             return Err(Error::PeerSentOversizedRecord);
         }
 
-        payload.truncate(plain_len);
+        //payload.truncate(plain_len);*/
         Ok(msg.into_plain_message())
     }
 
@@ -192,8 +192,8 @@ struct ChaCha20Poly1305MessageDecrypter {
 const CHACHAPOLY1305_OVERHEAD: usize = 16;
 
 impl MessageDecrypter for ChaCha20Poly1305MessageDecrypter {
-    fn decrypt(&self, mut msg: OpaqueMessage, seq: u64, connection_id: u32) -> Result<PlainMessage, Error> {
-        let payload = &mut msg.payload.0;
+    fn decrypt(&self, mut msg: BorrowedOpaqueMessage, seq: u64, connection_id: u32) -> Result<PlainMessage, Error> {
+        /*let payload = &mut msg.payload;
 
         if payload.len() < CHACHAPOLY1305_OVERHEAD {
             return Err(Error::DecryptError);
@@ -217,7 +217,7 @@ impl MessageDecrypter for ChaCha20Poly1305MessageDecrypter {
             return Err(Error::PeerSentOversizedRecord);
         }
 
-        payload.truncate(plain_len);
+        //payload.truncate(plain_len);*/
         Ok(msg.into_plain_message())
     }
 

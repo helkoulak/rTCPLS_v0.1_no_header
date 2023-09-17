@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use crate::error::Error;
 use crate::msgs::codec;
-use crate::msgs::message::{BorrowedPlainMessage, OpaqueMessage, PlainMessage};
+use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, OpaqueMessage, PlainMessage};
 
 use ring::{aead, hkdf};
 
@@ -12,7 +12,7 @@ use ring::{aead, hkdf};
 pub trait MessageDecrypter: Send + Sync {
     /// Perform the decryption over the concerned TLS message.
 
-    fn decrypt(&self, m: OpaqueMessage, seq: u64, connection_id: u32) -> Result<PlainMessage, Error>;
+    fn decrypt(&self, m: BorrowedOpaqueMessage, seq: u64, connection_id: u32) -> Result<PlainMessage, Error>;
     fn derive_dec_connection_iv(&mut self, conn_id: u32);
 }
 
@@ -120,7 +120,7 @@ impl MessageEncrypter for InvalidMessageEncrypter {
 struct InvalidMessageDecrypter {}
 
 impl MessageDecrypter for InvalidMessageDecrypter {
-    fn decrypt(&self, _m: OpaqueMessage, _seq: u64, connection_id: u32) -> Result<PlainMessage, Error> {
+    fn decrypt(&self, _m: BorrowedOpaqueMessage, _seq: u64, conn_id: u32) -> Result<PlainMessage, Error> {
         Err(Error::DecryptError)
     }
 

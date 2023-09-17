@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use crate::cipher::{Iv, MessageDecrypter, MessageEncrypter};
 use crate::error::Error;
-use crate::msgs::message::{BorrowedPlainMessage, OpaqueMessage, PlainMessage};
+use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, OpaqueMessage, PlainMessage};
 
 #[cfg(feature = "logging")]
 use crate::log::trace;
@@ -176,7 +176,7 @@ impl RecordLayer {
     /// an error is returned.
     pub(crate) fn decrypt_incoming(
         &mut self,
-        encr: OpaqueMessage,
+        encr: BorrowedOpaqueMessage,
     ) -> Result<Option<Decrypted>, Error> {
         if self.decrypt_state != DirectionState::Active {
             return Ok(Some(Decrypted {
@@ -196,7 +196,7 @@ impl RecordLayer {
         let conn_id = self.active_conn_id;
         let want_close_before_decrypt = self.seq_map.seq_num_map.get(&conn_id).unwrap().read_seq == SEQ_SOFT_LIMIT;
 
-        let encrypted_len = encr.payload.0.len();
+        let encrypted_len = encr.payload.len();
 
         /// prepare crypto context for the specified connection
         if !self.is_handshaking && conn_id != 0 {

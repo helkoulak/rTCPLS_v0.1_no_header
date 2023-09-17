@@ -159,6 +159,102 @@ impl OpaqueMessage {
     pub const MAX_WIRE_SIZE: usize = (Self::MAX_PAYLOAD + Self::HEADER_SIZE) as usize;
 }
 
+/// A TLS frame, named TLSPlaintext in the standard.
+///
+/// This type owns all memory for its interior parts except for the payload. It is used to read from I/O
+/// buffers as well as for decryption. It can be converted
+/// into a `Message` by decoding the payload.
+#[derive(Clone, Debug)]
+pub struct BorrowedOpaqueMessage<'a> {
+    pub typ: ContentType,
+    pub version: ProtocolVersion,
+    pub payload: &'a [u8],
+}
+
+impl<'a> BorrowedOpaqueMessage<'a> {
+    /// `MessageError` allows callers to distinguish between valid prefixes (might
+    /// become valid if we read more data) and invalid data.
+    pub fn read(r: &mut Reader) -> Result<(ContentType, ProtocolVersion, usize, u16), MessageError> {
+        let typ = ContentType::read(r).map_err(|_| MessageError::TooShortForHeader)?;
+        // Don't accept any new content-types.
+        if let ContentType::Unknown(_) = typ {
+            return Err(MessageError::InvalidContentType);
+        }
+
+        let version = ProtocolVersion::read(r).map_err(|_| MessageError::TooShortForHeader)?;
+        // Accept only versions 0x03XX for any XX.
+        match version {
+            ProtocolVersion::Unknown(ref v) if (v & 0xff00) != 0x0300 => {
+                return Err(MessageError::UnknownProtocolVersion);
+            }
+            _ => {}
+        };
+
+        let len = u16::read(r).map_err(|_| MessageError::TooShortForHeader)?;
+
+        // Reject undersize messages
+        //  implemented per section 5.1 of RFC8446 (TLSv1.3)
+        //              per section 6.2.1 of RFC5246 (TLSv1.2)
+        if typ != ContentType::ApplicationData && len == 0 {
+            return Err(MessageError::InvalidEmptyPayload);
+        }
+
+        // Reject oversize messages
+        if len >= Self::MAX_PAYLOAD {
+            return Err(MessageError::MessageTooLarge);
+        }
+
+        let start_offset = r.used();
+
+        let len  = match r.take(len as usize) {
+
+            Some(p) => len,
+            None => return Err(MessageError::TooShortForLength)
+        };
+
+
+        Ok((
+            typ,
+            version,
+            start_offset,
+            len,
+            ))
+    }
+
+   // pub fn encode(self) -> Vec<u8> {
+    //    let mut buf = Vec::new();
+    //  self.typ.encode(&mut buf);
+    //    self.version.encode(&mut buf);
+    //    (self.payload.0.len() as u16).encode(&mut buf);
+    //    self.payload.encode(&mut buf);
+    //    buf
+    //}
+
+    /// Force conversion into a plaintext message.
+    ///
+    /// This should only be used for messages that are known to be in plaintext. Otherwise, the
+    /// `OpaqueMessage` should be decrypted into a `PlainMessage` using a `MessageDecrypter`.
+    pub fn into_plain_message(self) -> PlainMessage {
+        PlainMessage {
+            version: self.version,
+            typ: self.typ,
+            payload: Payload(self.payload.to_vec()),
+        }
+    }
+
+    /// This is the maximum on-the-wire size of a TLSCiphertext.
+    /// That's 2^14 payload bytes, a header, and a 2KB allowance
+    /// for ciphertext overheads.
+    const MAX_PAYLOAD: u16 = 16384 + 2048;
+
+    /// Content type, version and size.
+    const HEADER_SIZE: u16 = 1 + 2 + 2;
+
+    /// Maximum on-wire message size.
+    pub const MAX_WIRE_SIZE: usize = (Self::MAX_PAYLOAD + Self::HEADER_SIZE) as usize;
+}
+
+
 impl From<Message> for PlainMessage {
     fn from(msg: Message) -> Self {
         let typ = msg.payload.content_type();

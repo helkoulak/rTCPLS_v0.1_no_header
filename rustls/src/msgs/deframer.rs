@@ -7,7 +7,7 @@ use super::message::PlainMessage;
 use crate::enums::{ContentType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerMisbehaved};
 use crate::msgs::codec;
-use crate::msgs::message::{MessageError, OpaqueMessage};
+use crate::msgs::message::{BorrowedOpaqueMessage, MessageError, OpaqueMessage};
 use crate::record_layer::{Decrypted, RecordLayer};
 
 /// This deframer works to reconstruct TLS messages from a stream of arbitrary-sized reads.
@@ -68,8 +68,12 @@ impl MessageDeframer {
             // contain a header, and that header has a length which falls within `buf`.
             // If so, deframe it and place the message onto the frames output queue.
             let mut rd = codec::Reader::init(&self.buf[start..self.used]);
-            let m = match OpaqueMessage::read(&mut rd) {
-                Ok(m) => m,
+            let m = match BorrowedOpaqueMessage::read(&mut rd) {
+                Ok((ct,ver, s, len)) => BorrowedOpaqueMessage {
+                    typ: ct,
+                    version: ver,
+                    payload: &self.buf[s..s + len as usize],
+                },
                 Err(msg_err) => {
                     let err_kind = match msg_err {
                         MessageError::TooShortForHeader | MessageError::TooShortForLength => {
@@ -92,12 +96,13 @@ impl MessageDeframer {
             let end = start + rd.used();
             if m.typ == ContentType::ChangeCipherSpec && self.joining_hs.is_none() {
                 // This is unencrypted. We check the contents later.
+                let plain = m.into_plain_message();
                 self.discard(end);
                 return Ok(Some(Deframed {
                     want_close_before_decrypt: false,
                     aligned: true,
                     trial_decryption_finished: false,
-                    message: m.into_plain_message(),
+                    message: plain,
                 }));
             }
 

@@ -31,6 +31,10 @@ impl Payload {
     pub fn read(r: &mut Reader) -> Self {
         Self(r.rest().to_vec())
     }
+
+    pub fn new_from_vec(bytes: Vec<u8>) -> Self{
+        Self(bytes)
+    }
 }
 
 impl Codec for key::Certificate {
