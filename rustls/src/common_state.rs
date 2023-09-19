@@ -119,6 +119,11 @@ impl CommonState {
         self.record_layer.set_sending_conn_id(conn_id);
     }
 
+    /// Gets mutable reference for receive buffer
+    pub fn recv_buffer_as_mut_ref(&mut self, conn_id: u32) -> &mut ChunkVecBuffer{
+        &mut self.stream_map.streams.get_mut(&conn_id).unwrap().received_plaintext
+    }
+
     /// Returns true if the connection is currently performing the TLS handshake.
     ///
     /// During this time plaintext written to the connection is buffered in memory. After

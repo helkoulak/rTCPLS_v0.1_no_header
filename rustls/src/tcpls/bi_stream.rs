@@ -20,7 +20,7 @@ pub struct BiStream {
     pub aead_initialized: bool,
 
     /// buffers the decryption of the received TLS records
-    pub(crate) received_plaintext: ChunkVecBuffer,
+    pub        received_plaintext: ChunkVecBuffer,
     /// buffers data to be sent if TLS handshake is still ongoing
     pub(crate) sendable_plaintext: ChunkVecBuffer,
     /// buffers encrypted TLS records that to be sent on the TCP socket
