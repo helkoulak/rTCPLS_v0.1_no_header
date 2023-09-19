@@ -156,23 +156,81 @@ impl TcplsSession {
                 .record_layer
                 .start_new_seq_space(conn_id);
         }
-
+        Ok(conn_id)
     }
 
+    pub fn stream_send_on_connection(
+        &mut self,
+        app_data: &[u8],
+        conn_id: u32,
+        limit: Option<usize>,
+    ) -> Result<usize, Error> {
+        let mut socket = &mut self
+            .tcp_connections
+            .get_mut(&conn_id)
+            .unwrap()
+            .socket;
 
-    /*pub fn stream_send_on_connection(&mut self, app_data: &[u8], length: u64, conn_id: u64) -> Result<u64, Error>{
-        let mut stream = self.tcp_connections.get_mut(&conn_id).unwrap().stream.as_mut().unwrap();
-        let mut max_bytes = min(length, stream.send.cap() as u64);
-        let buf = app_data[..max_bytes];
-        let mut done = 0;
+        let mut tls_conn = self.tls_conn.as_mut().unwrap();
 
-        while max_bytes > 0 {
-            let
-
-
+        match limit {
+            Some(l) => tls_conn
+                .stream_map
+                .streams
+                .get_mut(&conn_id)
+                .unwrap().sendable_tls.set_limit(Some(l)),
+            None => (),
         }
 
-    }*/
+        let mut max_send = tls_conn
+            .stream_map
+            .streams
+            .get_mut(&conn_id)
+            .unwrap().sendable_tls.apply_limit(app_data.len());
+        let buf = &app_data[..max_send];
+
+        let mut done = 0;
+        let mut left = buf.len();
+        while left > 0 {
+            // Buffer on send stream
+            let written = tls_conn.writer().write(&buf[done..done + left]).unwrap();
+            // Send on socket
+            tls_conn.write_tls(socket).unwrap();
+            done += written;
+            left -= written;
+        }
+
+        Ok(done)
+    }
+
+    pub fn recv_on_connection(
+        &mut self,
+        conn_id: u32,
+        socket: &mut TcpStream,
+        tls_conn: &mut Connection,
+        limit: Option<usize>,
+    ) -> Result<usize, io::Error> {
+
+
+        match limit {
+            Some(l) => tls_conn
+                .stream_map
+                .streams
+                .get_mut(&conn_id)
+                .unwrap().received_plaintext.set_limit(Some(l)),
+            None => (),
+        }
+
+
+
+            // Read some TLS data from socket.
+            tls_conn.read_tls(socket).expect("reading from socket failed");
+
+            // decrypt data found in socket buffer and store result in receive buffer.
+           tls_conn.process_new_packets().unwrap();
+
+        Ok(tls_conn.current_io_state().plaintext_bytes_to_read())
+    }
 }
 
 pub enum TlsConfig {
