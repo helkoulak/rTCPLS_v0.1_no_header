@@ -2,9 +2,10 @@
 extern crate serde_derive;
 
 use std::{fs, process};
-use std::fs::File;
+use std::fs::{File, remove_file};
 use std::io;
 use std::io::{BufReader, Read, Write};
+use std::iter::SkipWhile;
 use std::net::SocketAddr;
 use std::ops::{Deref, DerefMut};
 use std::str;
@@ -12,6 +13,8 @@ use std::sync::Arc;
 
 use docopt::Docopt;
 use env_logger::builder;
+use env_logger::fmt::Color::White;
+use ring::digest;
 
 use rustls::{client, OwnedTrustAnchor, RootCertStore, };
 use rustls::tcpls::{build_tls_client_config, lookup_address, TcplsSession};
@@ -51,15 +54,17 @@ impl TlsClient {
         }
 
         if ev.is_writable() && ! self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() {
-            let buf = [0x0F; 30];
-            let mut done = 0;
+
+           self.send_file();
+
+           /* let mut done = 0;
             let mut left = buf.len();
             while left > 0 {
               let written  =  self.tcpls_session.tls_conn.as_mut().unwrap().writer().write(& buf[done..done + left]).unwrap();
                 self.do_write();
                 done += written;
                 left -= written;
-            }
+            }*/
 
         }
 
@@ -181,6 +186,46 @@ impl TlsClient {
         self.closing
     }
 
+
+
+    fn send_file(&mut self) -> io::Result<()> {
+        // Specify the file path you want to hash
+        let file_path = "Cargo.toml"; // Replace with the actual file path
+
+        // Read the file into a byte vector
+        let mut file_contents = TlsClient::read_file_to_bytes(file_path)?;
+
+        // Calculate the hash of the file contents using SHA-256
+        let hash = TlsClient::calculate_sha256_hash(&file_contents);
+
+        // Print the hash as a hexadecimal string
+        println!("SHA-256 Hash: {:?}", hash);
+
+        // Append hash value to the serialized file to be sent to the peer
+        file_contents.extend(vec![0x0F, 0x0F, 0x0F, 0x0F]);
+        file_contents.extend(hash.as_ref());
+
+        // Print the hash as a hexadecimal string
+        println!("\n \n File bytes with hash are : {:?} \n \n with total length: {:?}", file_contents, file_contents.len());
+
+        self.tcpls_session.stream_send_on_connection(file_contents.as_ref(), 0, None);
+
+
+        Ok(())
+
+    }
+
+    fn read_file_to_bytes(file_path: &str) -> io::Result<Vec<u8>> {
+        let mut file = File::open(file_path)?;
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer)?;
+        Ok(buffer)
+    }
+
+    fn calculate_sha256_hash(data: &[u8]) -> digest::Digest {
+        let algorithm = &digest::SHA256;
+        digest::digest(algorithm, data)
+    }
 
    /* fn read_file_and_calculate_hash(file_path: &str) -> Result<(Vec<u8>, Digest), Error> {
         // Open the file

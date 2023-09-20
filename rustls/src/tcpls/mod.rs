@@ -1,30 +1,28 @@
 #![allow(missing_docs)]
 #![allow(unused_qualifications)]
 
-use std::{io, process, u32, vec};
 use std::arch::{asm, is_aarch64_feature_detected};
 use std::cmp::min;
 use std::collections::HashMap;
-use std::fmt::{self, Debug};
+use std::fmt::{self, Debug, Error};
 use std::fs;
-use std::io::{BufReader, Read};
+use std::io::{BufReader, Read, Write};
 use std::mem::size_of;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
+use std::{io, process, u32, vec};
 
 use mio::net::{TcpListener, TcpStream};
 use mio::Token;
 
 use octets::BufferError;
 
-use crate::{ALL_CIPHER_SUITES, ALL_VERSIONS, Certificate, cipher, ClientConfig, ClientConnection, Connection, ConnectionCommon, ContentType, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, Error, InvalidMessage, KeyLogFile, PrivateKey, RootCertStore, server, ServerConfig, ServerConnection, ServerName, SupportedCipherSuite, SupportedProtocolVersion, Ticketer, version};
 /// This module contains optional APIs for implementing TCPLS.
 use crate::cipher::{derive_connection_iv, Iv, MessageDecrypter, MessageEncrypter};
 use crate::client::ClientConnectionData;
 use crate::common_state::*;
 use crate::conn::ConnectionCore;
-use crate::Connection::Client;
 use crate::enums::ProtocolVersion;
 use crate::msgs::codec;
 use crate::msgs::handshake::{ClientExtension, ServerExtension};
@@ -33,8 +31,16 @@ use crate::server::ServerConnectionData;
 use crate::tcpls::bi_stream::BiStream;
 use crate::tcpls::frame::Frame;
 use crate::tcpls::network_address::AddressMap;
+use crate::vecbuf::ChunkVecBuffer;
 use crate::verify::{
     AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
+};
+use crate::Connection::Client;
+use crate::{
+    cipher, server, version, Certificate, ClientConfig, ClientConnection, Connection,
+    ConnectionCommon, ContentType, InvalidMessage, KeyLogFile, PrivateKey, RootCertStore,
+    ServerConfig, ServerConnection, ServerName, SupportedCipherSuite, SupportedProtocolVersion,
+    Ticketer, ALL_CIPHER_SUITES, ALL_VERSIONS, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS,
 };
 
 pub mod bi_stream;
@@ -86,7 +92,7 @@ impl TcplsSession {
                 .expect("Establishment of TLS session failed");
             let _ = self.tls_conn.insert(Connection::from(client_conn));
             let _ = self.tls_config.insert(TlsConfig::Client(config.clone()));
-        }else {
+        } else {
             self.tls_conn
                 .as_mut()
                 .unwrap()
@@ -123,14 +129,10 @@ impl TcplsSession {
     /// Open a new stream and assign it to specified TCP connection.
     /// Only one stream per connection is allowed to avoid HOL problem
     pub fn open_stream(&mut self, tcp_conn_id: u32) {
-       self.tls_conn.as_mut().unwrap().open_stream(tcp_conn_id);
+        self.tls_conn.as_mut().unwrap().open_stream(tcp_conn_id);
     }
 
-    pub fn server_accept_connection(
-        &mut self,
-        listener: TcpListener,
-        config: Arc<ServerConfig>,
-    ) {
+    pub fn server_accept_connection(&mut self, listener: &mut TcpListener, config: Arc<ServerConfig>) -> Result<u32,io::Error>{
         let (socket, remote_address) = listener
             .accept()
             .expect("encountered error while accepting connection");
@@ -140,11 +142,11 @@ impl TcplsSession {
         if conn_id == 0 {
             self.is_server = true;
 
-            let server_conn =
-                ServerConnection::new(config.clone()).expect("Establishing a TLS session has failed");
+            let server_conn = ServerConnection::new(config.clone())
+                .expect("Establishing a TLS session has failed");
             let _ = self.tls_conn.insert(Connection::from(server_conn));
             let _ = self.tls_config.insert(TlsConfig::from(config));
-        }else {
+        } else {
             self.tls_conn
                 .as_mut()
                 .unwrap()
@@ -209,9 +211,9 @@ impl TcplsSession {
         socket: &mut TcpStream,
         tls_conn: &mut Connection,
         limit: Option<usize>,
-    ) -> Result<usize, io::Error> {
+    ) -> Result<(usize, IoState), io::Error> {
 
-
+        // optionally set limit of receive buffer
         match limit {
             Some(l) => tls_conn
                 .stream_map
@@ -221,15 +223,25 @@ impl TcplsSession {
             None => (),
         }
 
+        let mut read;
+        // Read some TLS data.
+        match tls_conn.read_tls(socket) {
+            Err(err) => {
+                return Err(err);
+            }
+            Ok(0) => {
+                // EOF or socket is cleanly closed
+                return Ok((0, tls_conn.current_io_state()));
+            }
+            Ok(n) => {
+                // decrypt data found in socket buffer and store result in receive buffer.
+                tls_conn.process_new_packets().expect("Processing received TLS records failed");
+                read = n;
+            }
+        };
 
 
-            // Read some TLS data from socket.
-            tls_conn.read_tls(socket).expect("reading from socket failed");
-
-            // decrypt data found in socket buffer and store result in receive buffer.
-           tls_conn.process_new_packets().unwrap();
-
-        Ok(tls_conn.current_io_state().plaintext_bytes_to_read())
+        Ok((read, tls_conn.current_io_state()))
     }
 }
 
@@ -277,7 +289,6 @@ impl TcpConnection {
             state: TcplsConnectionState::CLOSED,
         }
     }
-
 }
 
 pub enum TcplsConnectionState {
@@ -559,14 +570,9 @@ pub fn server_create_listener(local_address: &str, port: u16) -> TcpListener {
     TcpListener::bind(addr).expect("cannot listen on port")
 }
 
-
-
 pub fn server_new_tls_connection(config: Arc<ServerConfig>) -> ServerConnection {
     ServerConnection::new(config).expect("Establishing a TLS session has failed")
 }
-
-
-
 
 // #[test]
 /*fn test_prep_crypto_context(){
