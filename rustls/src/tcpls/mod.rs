@@ -28,7 +28,7 @@ use crate::msgs::codec;
 use crate::msgs::handshake::{ClientExtension, ServerExtension};
 use crate::record_layer::RecordLayer;
 use crate::server::ServerConnectionData;
-use crate::tcpls::bi_stream::BiStream;
+use crate::tcpls::stream::Stream;
 use crate::tcpls::frame::Frame;
 use crate::tcpls::network_address::AddressMap;
 use crate::vecbuf::ChunkVecBuffer;
@@ -43,7 +43,7 @@ use crate::{
     Ticketer, ALL_CIPHER_SUITES, ALL_VERSIONS, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS,
 };
 
-pub mod bi_stream;
+pub mod stream;
 pub mod frame;
 pub mod network_address;
 pub mod ranges;
@@ -97,7 +97,7 @@ impl TcplsSession {
                 .as_mut()
                 .unwrap()
                 .stream_map
-                .open_stream(new_id);
+                .attach_stream(new_id);
             self.tls_conn
                 .as_mut()
                 .unwrap()
@@ -151,7 +151,7 @@ impl TcplsSession {
                 .as_mut()
                 .unwrap()
                 .stream_map
-                .open_stream(conn_id);
+                .attach_stream(conn_id);
             self.tls_conn
                 .as_mut()
                 .unwrap()
