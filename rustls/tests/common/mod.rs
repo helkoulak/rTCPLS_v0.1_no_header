@@ -410,11 +410,11 @@ pub fn do_handshake_until_error(
     while server.is_handshaking() || client.is_handshaking() {
         transfer(client, server);
         server
-            .process_new_packets()
+            .process_received()
             .map_err(ErrorFromPeer::Server)?;
         transfer(server, client);
         client
-            .process_new_packets()
+            .process_received()
             .map_err(ErrorFromPeer::Client)?;
     }
 
@@ -430,7 +430,7 @@ pub fn do_handshake_until_both_error(
             let mut errors = vec![server_err];
             transfer(server, client);
             let client_err = client
-                .process_new_packets()
+                .process_received()
                 .map_err(ErrorFromPeer::Client)
                 .expect_err("client didn't produce error after server error");
             errors.push(client_err);
@@ -441,7 +441,7 @@ pub fn do_handshake_until_both_error(
             let mut errors = vec![client_err];
             transfer(client, server);
             let server_err = server
-                .process_new_packets()
+                .process_received()
                 .map_err(ErrorFromPeer::Server)
                 .expect_err("server didn't produce error after client error");
             errors.push(server_err);

@@ -130,7 +130,7 @@ impl CommonState {
     /// [`Connection::process_new_packets()`] has been called, this might start to return `false`
     /// while the final handshake packets still need to be extracted from the connection's buffers.
     ///
-    /// [`Connection::process_new_packets()`]: crate::Connection::process_new_packets
+    /// [`Connection::process_new_packets()`]: crate::Connection::process_received
     pub fn is_handshaking(&self) -> bool {
         !(self.may_send_application_data && self.may_receive_application_data)
     }
@@ -424,7 +424,7 @@ impl CommonState {
     ///
     /// [`Connection::writer`]: crate::Connection::writer
     /// [`Connection::write_tls`]: crate::Connection::write_tls
-    /// [`Connection::process_new_packets`]: crate::Connection::process_new_packets
+    /// [`Connection::process_new_packets`]: crate::Connection::process_received
     pub fn set_buffer_limit(&mut self, limit: Option<usize>) {
         let conn_id= self.active_conn_id;
         self
@@ -703,7 +703,7 @@ impl CommonState {
 /// Values of this structure are returned from [`Connection::process_new_packets`]
 /// and tell the caller the current I/O state of the TLS connection.
 ///
-/// [`Connection::process_new_packets`]: crate::Connection::process_new_packets
+/// [`Connection::process_new_packets`]: crate::Connection::process_received
 #[derive(Debug, Eq, PartialEq)]
 pub struct IoState {
     tls_bytes_to_write: usize,

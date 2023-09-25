@@ -207,7 +207,7 @@
 //! loop {
 //!   if client.wants_read() && socket.ready_for_read() {
 //!     client.read_tls(&mut socket).unwrap();
-//!     client.process_new_packets().unwrap();
+//!     client.process_received().unwrap();
 //!
 //!     let mut plaintext = Vec::new();
 //!     client.reader().read_to_end(&mut plaintext).unwrap();
@@ -215,7 +215,7 @@
 //!   }
 //!
 //!   if client.wants_write() && socket.ready_for_write() {
-//!     client.write_tls(&mut socket).unwrap();
+//!     client.write_on_socket(&mut socket).unwrap();
 //!   }
 //!
 //!   socket.wait_for_something_to_happen();

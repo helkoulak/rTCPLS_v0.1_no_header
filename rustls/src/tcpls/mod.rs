@@ -28,7 +28,7 @@ use crate::msgs::codec;
 use crate::msgs::handshake::{ClientExtension, ServerExtension};
 use crate::record_layer::RecordLayer;
 use crate::server::ServerConnectionData;
-use crate::tcpls::stream::{DEFAULT_BUFFER_LIMIT, Stream, StreamMap};
+use crate::tcpls::stream::{RecvBufMap, DEFAULT_BUFFER_LIMIT, Stream, StreamMap};
 use crate::tcpls::frame::Frame;
 use crate::tcpls::network_address::AddressMap;
 use crate::vecbuf::ChunkVecBuffer;
@@ -191,6 +191,28 @@ impl TcplsSession {
         x: bool,
     ) -> Result<&mut stream::Stream, Error> {
         self.streams.get_or_create(id, self.is_server)
+    }
+
+
+    pub fn stream_recv<'a, 'b>(
+        &'a mut self, stream_id: u64, app_buffers: &'b mut RecvBufMap,
+    ) -> Result<(&'b [u8], usize, bool), Error> {
+
+        let mut tls_conn = self.tls_conn.as_mut().unwrap();
+
+        if tls_conn.is_handshaking() {
+            return  Err(Error::HandshakeNotComplete)
+        }
+
+
+        // The stream is ready: we have a reference to some contiguous data
+        let outbuf = app_buffers.get_mut(stream_id)?;
+
+        let read = tls_conn.process_received()
+
+
+
+        Ok((outbuf, read, fin))
     }
 
 

@@ -74,7 +74,7 @@ fn exercise_key_log_file_for_client() {
 
             do_handshake(&mut client, &mut server);
             transfer(&mut client, &mut server);
-            server.process_new_packets().unwrap();
+            server.process_received().unwrap();
         }
     })
 }
@@ -98,7 +98,7 @@ fn exercise_key_log_file_for_server() {
 
             do_handshake(&mut client, &mut server);
             transfer(&mut client, &mut server);
-            server.process_new_packets().unwrap();
+            server.process_received().unwrap();
         }
     })
 }

@@ -97,6 +97,9 @@ pub enum Error {
 
     /// The wrong stream id was indicated.
     BadStreamId,
+
+    /// Receive buffer not found for the given stream id
+    RecvBufNotFound,
 }
 
 /// A corrupt TLS message payload that resulted in an error.
@@ -442,6 +445,7 @@ impl fmt::Display for Error {
             Self::General(ref err) => write!(f, "unexpected error: {}", err),
             Self::Done => write!(f, "There is no more work to do"),
             Self::BadStreamId => write!(f, "The wrong stream id was indicated"),
+            Self::RecvBufNotFound => write!(f, "Receive buffer not found for the given stream id"),
         }
     }
 }

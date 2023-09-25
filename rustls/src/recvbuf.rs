@@ -3,25 +3,49 @@ use std::collections::VecDeque;
 use std::io;
 use std::io::Read;
 use crate::tcpls::stream;
-use crate::tcpls::stream::{RecvBuf, Stream};
+use crate::tcpls::stream::{DEFAULT_BUFFER_LIMIT, RecvBuf, Stream};
 
 /// This is the receive buffer of a stream
 pub struct RecvBuffer {
+    id: u64,
     data: Vec<u8>,
     /// where the next chunk will be appended
     offset: u64,
-    chuncks: VecDeque<crate::>,
+
+    /// indicates to which offset data within outbuf has already been marked consumed by the
+    /// application. V3 specific.
+    consumed: usize,
 }
 
 impl RecvBuffer {
-    pub(crate) fn new(limit: Option<usize>) -> Self {
-        Self {
-            data: Vec::with_capacity(match limit {
-                Some( l ) => l,
-                None => stream::DEFAULT_BUFFER_LIMIT,
-            }),
-            offset: 0,
+    pub fn new(stream_id: u64, capacity: Option<usize>) -> RecvBuffer {
+        if let Some(capacity) = capacity {
+            let mut appbuf = RecvBuffer {
+                id: stream_id,
+                data :vec![0; capacity],
+                ..Default::default()
+            };
+            // set_len is safe assuming
+            // 1) the data is initialized
+            // 2) the new len is <= capacity
+            unsafe { appbuf.data.set_len(capacity) };
+            appbuf
+        } else {
+            let mut appbuf = RecvBuffer {
+                id: stream_id,
+                data: vec![0; DEFAULT_BUFFER_LIMIT],
+                ..Default::default()
+            };
+            unsafe { appbuf.data.set_len(DEFAULT_BUFFER_LIMIT) };
+            appbuf
         }
+    }
+    pub fn get_mut(&mut self) -> &mut [u8] {
+        &mut self.data
+    }
+
+    pub fn get_mut_consumed(&mut self) -> &mut [u8] {
+        &mut self.data[self.consumed..]
     }
 
     pub  fn get_offset(&self) -> u64 {
@@ -62,21 +86,7 @@ impl RecvBuffer {
         }
     }
 
-    /// Read data out of this object, passing it `wr`
-    pub fn write_to(&mut self, wr: &mut dyn io::Write) -> io::Result<usize> {
-        if self.is_empty() {
-            return Ok(0);
-        }
 
-        let mut bufs = [io::IoSlice::new(&[]); 64];
-        for (iov, chunk) in bufs.iter_mut().zip(self.chunks.iter()) {
-            *iov = io::IoSlice::new(chunk);
-        }
-        let len = cmp::min(bufs.len(), self.chunks.len());
-        let used = wr.write_vectored(&bufs[..len])?;
-        self.consume(used);
-        Ok(used)
-    }
 }
 
 #[cfg(test)]

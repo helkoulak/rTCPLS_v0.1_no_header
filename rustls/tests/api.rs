@@ -270,7 +270,7 @@ fn buffered_client_data_sent() {
 
         do_handshake(&mut client, &mut server);
         transfer(&mut client, &mut server);
-        server.process_new_packets().unwrap();
+        server.process_received().unwrap();
 
         check_read(&mut server.reader(), b"hello");
     }
@@ -289,7 +289,7 @@ fn buffered_server_data_sent() {
 
         do_handshake(&mut client, &mut server);
         transfer(&mut server, &mut client);
-        client.process_new_packets().unwrap();
+        client.process_received().unwrap();
 
         check_read(&mut client.reader(), b"hello");
     }
@@ -322,9 +322,9 @@ fn buffered_both_data_sent() {
         do_handshake(&mut client, &mut server);
 
         transfer(&mut server, &mut client);
-        client.process_new_packets().unwrap();
+        client.process_received().unwrap();
         transfer(&mut client, &mut server);
-        server.process_new_packets().unwrap();
+        server.process_received().unwrap();
 
         check_read(&mut client.reader(), b"from-server!");
         check_read(&mut server.reader(), b"from-client!");
@@ -509,12 +509,12 @@ fn server_close_notify() {
         server.send_close_notify();
 
         transfer(&mut server, &mut client);
-        let io_state = client.process_new_packets().unwrap();
+        let io_state = client.process_received().unwrap();
         assert!(io_state.peer_has_closed());
         check_read_and_close(&mut client.reader(), b"from-server!");
 
         transfer(&mut client, &mut server);
-        server.process_new_packets().unwrap();
+        server.process_received().unwrap();
         check_read(&mut server.reader(), b"from-client!");
     }
 }
@@ -548,12 +548,12 @@ fn client_close_notify() {
         client.send_close_notify();
 
         transfer(&mut client, &mut server);
-        let io_state = server.process_new_packets().unwrap();
+        let io_state = server.process_received().unwrap();
         assert!(io_state.peer_has_closed());
         check_read_and_close(&mut server.reader(), b"from-client!");
 
         transfer(&mut server, &mut client);
-        client.process_new_packets().unwrap();
+        client.process_received().unwrap();
         check_read(&mut client.reader(), b"from-server!");
     }
 }
@@ -587,7 +587,7 @@ fn server_closes_uncleanly() {
 
         transfer(&mut server, &mut client);
         transfer_eof(&mut client);
-        let io_state = client.process_new_packets().unwrap();
+        let io_state = client.process_received().unwrap();
         assert!(!io_state.peer_has_closed());
         check_read(&mut client.reader(), b"from-server!");
 
@@ -596,7 +596,7 @@ fn server_closes_uncleanly() {
 
         // may still transmit pending frames
         transfer(&mut client, &mut server);
-        server.process_new_packets().unwrap();
+        server.process_received().unwrap();
         check_read(&mut server.reader(), b"from-client!");
     }
 }
@@ -630,7 +630,7 @@ fn client_closes_uncleanly() {
 
         transfer(&mut client, &mut server);
         transfer_eof(&mut server);
-        let io_state = server.process_new_packets().unwrap();
+        let io_state = server.process_received().unwrap();
         assert!(!io_state.peer_has_closed());
         check_read(&mut server.reader(), b"from-client!");
 
@@ -639,7 +639,7 @@ fn client_closes_uncleanly() {
 
         // may still transmit pending frames
         transfer(&mut server, &mut client);
-        client.process_new_packets().unwrap();
+        client.process_received().unwrap();
         check_read(&mut client.reader(), b"from-server!");
     }
 }
@@ -970,9 +970,9 @@ fn client_error_is_sticky() {
     client
         .read_tls(&mut b"\x16\x03\x03\x00\x08\x0f\x00\x00\x04junk".as_ref())
         .unwrap();
-    let mut err = client.process_new_packets();
+    let mut err = client.process_received();
     assert!(err.is_err());
-    err = client.process_new_packets();
+    err = client.process_received();
     assert!(err.is_err());
 }
 
@@ -982,9 +982,9 @@ fn server_error_is_sticky() {
     server
         .read_tls(&mut b"\x16\x03\x03\x00\x08\x0f\x00\x00\x04junk".as_ref())
         .unwrap();
-    let mut err = server.process_new_packets();
+    let mut err = server.process_received();
     assert!(err.is_err());
-    err = server.process_new_packets();
+    err = server.process_received();
     assert!(err.is_err());
 }
 
@@ -1037,7 +1037,7 @@ fn server_respects_buffer_limit_pre_handshake() {
 
     do_handshake(&mut client, &mut server);
     transfer(&mut server, &mut client);
-    client.process_new_packets().unwrap();
+    client.process_received().unwrap();
 
     check_read(&mut client.reader(), b"01234567890123456789012345678901");
 }
@@ -1061,7 +1061,7 @@ fn server_respects_buffer_limit_pre_handshake_with_vectored_write() {
 
     do_handshake(&mut client, &mut server);
     transfer(&mut server, &mut client);
-    client.process_new_packets().unwrap();
+    client.process_received().unwrap();
 
     check_read(&mut client.reader(), b"01234567890123456789012345678901");
 }
@@ -1090,7 +1090,7 @@ fn server_respects_buffer_limit_post_handshake() {
     );
 
     transfer(&mut server, &mut client);
-    client.process_new_packets().unwrap();
+    client.process_received().unwrap();
 
     check_read(&mut client.reader(), b"01234567890123456789012345");
 }
@@ -1118,7 +1118,7 @@ fn client_respects_buffer_limit_pre_handshake() {
 
     do_handshake(&mut client, &mut server);
     transfer(&mut client, &mut server);
-    server.process_new_packets().unwrap();
+    server.process_received().unwrap();
 
     check_read(&mut server.reader(), b"01234567890123456789012345678901");
 }
@@ -1142,7 +1142,7 @@ fn client_respects_buffer_limit_pre_handshake_with_vectored_write() {
 
     do_handshake(&mut client, &mut server);
     transfer(&mut client, &mut server);
-    server.process_new_packets().unwrap();
+    server.process_received().unwrap();
 
     check_read(&mut server.reader(), b"01234567890123456789012345678901");
 }
@@ -1170,7 +1170,7 @@ fn client_respects_buffer_limit_post_handshake() {
     );
 
     transfer(&mut client, &mut server);
-    server.process_new_packets().unwrap();
+    server.process_received().unwrap();
 
     check_read(&mut server.reader(), b"01234567890123456789012345");
 }
@@ -1288,7 +1288,7 @@ fn client_read_returns_wouldblock_when_no_data() {
 #[test]
 fn new_server_returns_initial_io_state() {
     let (_, mut server) = make_pair(KeyType::Rsa);
-    let io_state = server.process_new_packets().unwrap();
+    let io_state = server.process_received().unwrap();
     println!("IoState is Debug {:?}", io_state);
     assert_eq!(io_state.plaintext_bytes_to_read(), 0);
     assert!(!io_state.peer_has_closed());
@@ -1298,7 +1298,7 @@ fn new_server_returns_initial_io_state() {
 #[test]
 fn new_client_returns_initial_io_state() {
     let (mut client, _) = make_pair(KeyType::Rsa);
-    let io_state = client.process_new_packets().unwrap();
+    let io_state = client.process_received().unwrap();
     println!("IoState is Debug {:?}", io_state);
     assert_eq!(io_state.plaintext_bytes_to_read(), 0);
     assert!(!io_state.peer_has_closed());
@@ -1849,7 +1849,7 @@ fn server_exposes_offered_sni_even_if_resolver_fails() {
         assert_eq!(None, server.server_name());
         transfer(&mut client, &mut server);
         assert_eq!(
-            server.process_new_packets(),
+            server.process_received(),
             Err(Error::General(
                 "no server certificate chain resolved".to_string()
             ))
@@ -2083,7 +2083,7 @@ fn do_suite_test(
     assert!(server.is_handshaking());
 
     transfer(&mut client, &mut server);
-    server.process_new_packets().unwrap();
+    server.process_received().unwrap();
 
     assert!(client.is_handshaking());
     assert!(server.is_handshaking());
@@ -2093,15 +2093,15 @@ fn do_suite_test(
     assert_eq!(Some(expect_suite), server.negotiated_cipher_suite());
 
     transfer(&mut server, &mut client);
-    client.process_new_packets().unwrap();
+    client.process_received().unwrap();
 
     assert_eq!(Some(expect_suite), client.negotiated_cipher_suite());
     assert_eq!(Some(expect_suite), server.negotiated_cipher_suite());
 
     transfer(&mut client, &mut server);
-    server.process_new_packets().unwrap();
+    server.process_received().unwrap();
     transfer(&mut server, &mut client);
-    client.process_new_packets().unwrap();
+    client.process_received().unwrap();
 
     assert!(!client.is_handshaking());
     assert!(!server.is_handshaking());
@@ -2394,7 +2394,7 @@ fn vectored_write_for_server_appdata() {
         .unwrap();
     {
         let mut pipe = OtherSession::new(&mut client);
-        let wrlen = server.write_tls(&mut pipe).unwrap();
+        let wrlen = server.write_on_socket(&mut pipe).unwrap();
         assert_eq!(84, wrlen);
         assert_eq!(pipe.writevs, vec![vec![42, 42]]);
     }
@@ -2419,7 +2419,7 @@ fn vectored_write_for_client_appdata() {
         .unwrap();
     {
         let mut pipe = OtherSession::new(&mut server);
-        let wrlen = client.write_tls(&mut pipe).unwrap();
+        let wrlen = client.write_on_socket(&mut pipe).unwrap();
         assert_eq!(84, wrlen);
         assert_eq!(pipe.writevs, vec![vec![42, 42]]);
     }
@@ -2446,22 +2446,22 @@ fn vectored_write_for_server_handshake_with_half_rtt_data() {
         .unwrap();
 
     transfer(&mut client, &mut server);
-    server.process_new_packets().unwrap();
+    server.process_received().unwrap();
     {
         let mut pipe = OtherSession::new(&mut client);
-        let wrlen = server.write_tls(&mut pipe).unwrap();
+        let wrlen = server.write_on_socket(&mut pipe).unwrap();
         // don't assert exact sizes here, to avoid a brittle test
         assert!(wrlen > 4000); // its pretty big (contains cert chain)
         assert_eq!(pipe.writevs.len(), 1); // only one writev
         assert_eq!(pipe.writevs[0].len(), 8); // at least a server hello/ccs/cert/serverkx/0.5rtt data
     }
 
-    client.process_new_packets().unwrap();
+    client.process_received().unwrap();
     transfer(&mut client, &mut server);
-    server.process_new_packets().unwrap();
+    server.process_received().unwrap();
     {
         let mut pipe = OtherSession::new(&mut client);
-        let wrlen = server.write_tls(&mut pipe).unwrap();
+        let wrlen = server.write_on_socket(&mut pipe).unwrap();
         // 4 tickets
         assert_eq!(wrlen, 103 * 4);
         assert_eq!(pipe.writevs, vec![vec![103, 103, 103, 103]]);
@@ -2486,10 +2486,10 @@ fn check_half_rtt_does_not_work(server_config: ServerConfig) {
         .unwrap();
 
     transfer(&mut client, &mut server);
-    server.process_new_packets().unwrap();
+    server.process_received().unwrap();
     {
         let mut pipe = OtherSession::new(&mut client);
-        let wrlen = server.write_tls(&mut pipe).unwrap();
+        let wrlen = server.write_on_socket(&mut pipe).unwrap();
         // don't assert exact sizes here, to avoid a brittle test
         assert!(wrlen > 4000); // its pretty big (contains cert chain)
         assert_eq!(pipe.writevs.len(), 1); // only one writev
@@ -2497,16 +2497,16 @@ fn check_half_rtt_does_not_work(server_config: ServerConfig) {
     }
 
     // client second flight
-    client.process_new_packets().unwrap();
+    client.process_received().unwrap();
     transfer(&mut client, &mut server);
 
     // when client auth is enabled, we don't sent 0.5-rtt data, as we'd be sending
     // it to an unauthenticated peer. so it happens here, in the server's second
     // flight (42 and 32 are lengths of appdata sent above).
-    server.process_new_packets().unwrap();
+    server.process_received().unwrap();
     {
         let mut pipe = OtherSession::new(&mut client);
-        let wrlen = server.write_tls(&mut pipe).unwrap();
+        let wrlen = server.write_on_socket(&mut pipe).unwrap();
         assert_eq!(wrlen, 486);
         assert_eq!(pipe.writevs, vec![vec![103, 103, 103, 103, 42, 32]]);
     }
@@ -2544,7 +2544,7 @@ fn vectored_write_for_client_handshake() {
         .unwrap();
     {
         let mut pipe = OtherSession::new(&mut server);
-        let wrlen = client.write_tls(&mut pipe).unwrap();
+        let wrlen = client.write_on_socket(&mut pipe).unwrap();
         // don't assert exact sizes here, to avoid a brittle test
         assert!(wrlen > 200); // just the client hello
         assert_eq!(pipe.writevs.len(), 1); // only one writev
@@ -2552,11 +2552,11 @@ fn vectored_write_for_client_handshake() {
     }
 
     transfer(&mut server, &mut client);
-    client.process_new_packets().unwrap();
+    client.process_received().unwrap();
 
     {
         let mut pipe = OtherSession::new(&mut server);
-        let wrlen = client.write_tls(&mut pipe).unwrap();
+        let wrlen = client.write_on_socket(&mut pipe).unwrap();
         assert_eq!(wrlen, 154);
         // CCS, finished, then two application datas
         assert_eq!(pipe.writevs, vec![vec![6, 74, 42, 32]]);
@@ -2582,12 +2582,12 @@ fn vectored_write_with_slow_client() {
     {
         let mut pipe = OtherSession::new(&mut client);
         pipe.short_writes = true;
-        let wrlen = server.write_tls(&mut pipe).unwrap()
-            + server.write_tls(&mut pipe).unwrap()
-            + server.write_tls(&mut pipe).unwrap()
-            + server.write_tls(&mut pipe).unwrap()
-            + server.write_tls(&mut pipe).unwrap()
-            + server.write_tls(&mut pipe).unwrap();
+        let wrlen = server.write_on_socket(&mut pipe).unwrap()
+            + server.write_on_socket(&mut pipe).unwrap()
+            + server.write_on_socket(&mut pipe).unwrap()
+            + server.write_on_socket(&mut pipe).unwrap()
+            + server.write_on_socket(&mut pipe).unwrap()
+            + server.write_on_socket(&mut pipe).unwrap();
         assert_eq!(42, wrlen);
         assert_eq!(
             pipe.writevs,
@@ -3670,7 +3670,7 @@ fn test_client_does_not_offer_sha1() {
             assert!(client.wants_write());
             let mut buf = [0u8; 262144];
             let sz = client
-                .write_tls(&mut buf.as_mut())
+                .write_on_socket(&mut buf.as_mut())
                 .unwrap();
             let msg = OpaqueMessage::read(&mut Reader::init(&buf[..sz])).unwrap();
             let msg = Message::try_from(msg.into_plain_message()).unwrap();
@@ -3736,7 +3736,7 @@ fn test_client_sends_helloretryrequest() {
     // client sends hello
     {
         let mut pipe = OtherSession::new(&mut server);
-        let wrlen = client.write_tls(&mut pipe).unwrap();
+        let wrlen = client.write_on_socket(&mut pipe).unwrap();
         assert!(wrlen > 200);
         assert_eq!(pipe.writevs.len(), 1);
         assert!(pipe.writevs[0].len() == 1);
@@ -3745,7 +3745,7 @@ fn test_client_sends_helloretryrequest() {
     // server sends HRR
     {
         let mut pipe = OtherSession::new(&mut client);
-        let wrlen = server.write_tls(&mut pipe).unwrap();
+        let wrlen = server.write_on_socket(&mut pipe).unwrap();
         assert!(wrlen < 100); // just the hello retry request
         assert_eq!(pipe.writevs.len(), 1); // only one writev
         assert!(pipe.writevs[0].len() == 2); // hello retry request and CCS
@@ -3754,7 +3754,7 @@ fn test_client_sends_helloretryrequest() {
     // client sends fixed hello
     {
         let mut pipe = OtherSession::new(&mut server);
-        let wrlen = client.write_tls(&mut pipe).unwrap();
+        let wrlen = client.write_on_socket(&mut pipe).unwrap();
         assert!(wrlen > 200); // just the client hello retry
         assert_eq!(pipe.writevs.len(), 1); // only one writev
         assert!(pipe.writevs[0].len() == 2); // only a CCS & client hello retry
@@ -3763,7 +3763,7 @@ fn test_client_sends_helloretryrequest() {
     // server completes handshake
     {
         let mut pipe = OtherSession::new(&mut client);
-        let wrlen = server.write_tls(&mut pipe).unwrap();
+        let wrlen = server.write_on_socket(&mut pipe).unwrap();
         assert!(wrlen > 200);
         assert_eq!(pipe.writevs.len(), 1);
         assert!(pipe.writevs[0].len() == 5); // server hello / encrypted exts / cert / cert-verify / finished
@@ -3900,7 +3900,7 @@ fn test_tls13_client_resumption_does_not_reuse_tickets() {
     for _ in 0..5 {
         let (mut client, mut server) = make_pair_for_arc_configs(&client_config, &server_config);
         transfer(&mut client, &mut server);
-        server.process_new_packets().unwrap();
+        server.process_received().unwrap();
 
         let ops = shared_storage.ops_and_reset();
         assert!(matches!(ops[0], ClientStorageOp::TakeTls13Ticket(_, true)));
@@ -3909,7 +3909,7 @@ fn test_tls13_client_resumption_does_not_reuse_tickets() {
     // 6th subsequent handshake: cannot be resumed; we ran out of tickets
     let (mut client, mut server) = make_pair_for_arc_configs(&client_config, &server_config);
     transfer(&mut client, &mut server);
-    server.process_new_packets().unwrap();
+    server.process_received().unwrap();
 
     let ops = shared_storage.ops_and_reset();
     println!("last {:?}", ops);
@@ -3944,7 +3944,7 @@ fn test_client_mtu_reduction() {
         let mut collector = CollectWrites { writevs: vec![] };
 
         client
-            .write_tls(&mut collector)
+            .write_on_socket(&mut collector)
             .unwrap();
         assert_eq!(collector.writevs.len(), 1);
         collector.writevs[0].clone()
@@ -3979,10 +3979,10 @@ fn test_server_mtu_reduction() {
     let encryption_overhead = 20; // FIXME: see issue #991
 
     transfer(&mut client, &mut server);
-    server.process_new_packets().unwrap();
+    server.process_received().unwrap();
     {
         let mut pipe = OtherSession::new(&mut client);
-        server.write_tls(&mut pipe).unwrap();
+        server.write_on_socket(&mut pipe).unwrap();
 
         assert_eq!(pipe.writevs.len(), 1);
         assert!(pipe.writevs[0]
@@ -3990,19 +3990,19 @@ fn test_server_mtu_reduction() {
             .all(|x| *x <= 64 + encryption_overhead));
     }
 
-    client.process_new_packets().unwrap();
+    client.process_received().unwrap();
     transfer(&mut client, &mut server);
-    server.process_new_packets().unwrap();
+    server.process_received().unwrap();
     {
         let mut pipe = OtherSession::new(&mut client);
-        server.write_tls(&mut pipe).unwrap();
+        server.write_on_socket(&mut pipe).unwrap();
         assert_eq!(pipe.writevs.len(), 1);
         assert!(pipe.writevs[0]
             .iter()
             .all(|x| *x <= 64 + encryption_overhead));
     }
 
-    client.process_new_packets().unwrap();
+    client.process_received().unwrap();
     check_read(&mut client.reader(), &big_data);
 }
 
@@ -4151,7 +4151,7 @@ fn test_client_rejects_illegal_tls13_ccs() {
 
     let (mut client, mut server) = make_pair(KeyType::Rsa);
     transfer(&mut client, &mut server);
-    server.process_new_packets().unwrap();
+    server.process_received().unwrap();
 
     let (mut server, mut client) = (server.into(), client.into());
 
@@ -4241,7 +4241,7 @@ fn test_acceptor() {
     let client_config = Arc::new(make_client_config(KeyType::Ed25519));
     let mut client = ClientConnection::new(client_config, dns_name("localhost")).unwrap();
     let mut buf = Vec::new();
-    client.write_tls(&mut buf).unwrap();
+    client.write_on_socket(&mut buf).unwrap();
 
     let server_config = Arc::new(make_server_config(KeyType::Ed25519));
     let mut acceptor = Acceptor::default();
@@ -4545,7 +4545,7 @@ fn test_received_plaintext_backpressure() {
         .unwrap());
     let mut network_buf = Vec::with_capacity(32_768);
     let sent = dbg!(client
-        .write_tls(&mut network_buf)
+        .write_on_socket(&mut network_buf)
         .unwrap());
     let mut read = 0;
     while read < sent {
@@ -4558,7 +4558,7 @@ fn test_received_plaintext_backpressure() {
             break;
         }
     }
-    server.process_new_packets().unwrap();
+    server.process_received().unwrap();
 
     // Send two more bytes from client to server
     dbg!(client
@@ -4566,7 +4566,7 @@ fn test_received_plaintext_backpressure() {
         .write(&client_buf[..2])
         .unwrap());
     let sent = dbg!(client
-        .write_tls(&mut network_buf)
+        .write_on_socket(&mut network_buf)
         .unwrap());
 
     // Get an error because the received plaintext buffer is full

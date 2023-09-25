@@ -707,7 +707,7 @@ fn exec(opts: &Options, mut sess: Connection, count: usize) {
                 Err(err) => panic!("invalid read: {}", err),
             };
 
-            if let Err(err) = sess.process_new_packets() {
+            if let Err(err) = sess.process_received() {
                 flush(&mut sess, &mut conn); /* send any alerts before exiting */
                 handle_err(err);
             }

@@ -290,7 +290,7 @@ impl OpenConnection {
 
     fn try_plain_read(&mut self) {
         // Read and process all available plaintext.
-        if let Ok(io_state) = self.tls_conn.process_new_packets() {
+        if let Ok(io_state) = self.tls_conn.process_received() {
             if io_state.plaintext_bytes_to_read() > 0 {
                 let mut buf = Vec::new();
                 buf.resize(io_state.plaintext_bytes_to_read(), 0u8);

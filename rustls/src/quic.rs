@@ -333,7 +333,7 @@ impl<Data: SideData> ConnectionCommon<Data> {
         self.core
             .message_deframer
             .push(ProtocolVersion::TLSv1_3, plaintext)?;
-        self.core.process_new_packets()?;
+        self.core.process_received()?;
         Ok(())
     }
 
