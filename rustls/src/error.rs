@@ -94,6 +94,9 @@ pub enum Error {
 
     /// There is no more work to do.
     Done,
+
+    /// The wrong stream id was indicated.
+    BadStreamId,
 }
 
 /// A corrupt TLS message payload that resulted in an error.
@@ -438,6 +441,7 @@ impl fmt::Display for Error {
             }
             Self::General(ref err) => write!(f, "unexpected error: {}", err),
             Self::Done => write!(f, "There is no more work to do"),
+            Self::BadStreamId => write!(f, "The wrong stream id was indicated"),
         }
     }
 }

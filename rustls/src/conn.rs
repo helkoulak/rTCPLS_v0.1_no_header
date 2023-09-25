@@ -44,7 +44,7 @@ impl Connection {
             .streams
             .get_mut(&conn_id)
             .unwrap()
-            .sendable_tls.write_to(wr)
+            .send.write_to(wr)
     }
 
     /// Returns an object that allows reading plaintext.
@@ -333,7 +333,7 @@ impl<Data> ConnectionCommon<Data> {
                 .stream_map
                 .streams
                 .get_mut(&conn_id)
-                .unwrap().received_plaintext,
+                .unwrap().recv,
             /// Are we done? i.e., have we processed all received messages, and received a
             /// close_notify to indicate that no new messages will arrive?
             peer_cleanly_closed: common.has_received_close_notify
@@ -505,7 +505,7 @@ impl<Data> ConnectionCommon<Data> {
             .streams
             .get_mut(&conn_id)
             .unwrap()
-            .received_plaintext.is_full() {
+            .recv.is_full() {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
                 "received plaintext buffer full",
@@ -532,7 +532,7 @@ impl<Data> ConnectionCommon<Data> {
             .streams
             .get_mut(&conn_id)
             .unwrap()
-            .sendable_tls.write_to(wr)
+            .send.write_to(wr)
     }
 
     /// Derives key material from the agreed connection secrets.

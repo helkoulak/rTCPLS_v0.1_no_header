@@ -4,9 +4,9 @@
 use std::arch::{asm, is_aarch64_feature_detected};
 use std::cmp::min;
 use std::collections::HashMap;
-use std::fmt::{self, Debug, Error};
+use std::fmt::{self, Debug};
 use std::fs;
-use std::io::{BufReader, Read, Write};
+use std::io::{BufReader, Read, Seek, Write};
 use std::mem::size_of;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::ops::{Deref, DerefMut};
@@ -28,7 +28,7 @@ use crate::msgs::codec;
 use crate::msgs::handshake::{ClientExtension, ServerExtension};
 use crate::record_layer::RecordLayer;
 use crate::server::ServerConnectionData;
-use crate::tcpls::stream::Stream;
+use crate::tcpls::stream::{DEFAULT_BUFFER_LIMIT, Stream, StreamMap};
 use crate::tcpls::frame::Frame;
 use crate::tcpls::network_address::AddressMap;
 use crate::vecbuf::ChunkVecBuffer;
@@ -40,8 +40,7 @@ use crate::{
     cipher, server, version, Certificate, ClientConfig, ClientConnection, Connection,
     ConnectionCommon, ContentType, InvalidMessage, KeyLogFile, PrivateKey, RootCertStore,
     ServerConfig, ServerConnection, ServerName, SupportedCipherSuite, SupportedProtocolVersion,
-    Ticketer, ALL_CIPHER_SUITES, ALL_VERSIONS, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS,
-};
+    Ticketer, ALL_CIPHER_SUITES, ALL_VERSIONS, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, Error };
 
 pub mod stream;
 pub mod frame;
@@ -52,24 +51,28 @@ pub struct TcplsSession {
     pub tls_config: Option<TlsConfig>,
     pub tls_conn: Option<Connection>,
     pub tcp_connections: HashMap<u32, TcpConnection>,
+    pub streams: StreamMap,
     pub next_conn_id: u32,
     pub address_map: AddressMap,
     pub is_server: bool,
     pub is_closed: bool,
     pub tls_hs_completed: bool,
+    pub next_stream_id: u64,
 }
 
 impl TcplsSession {
-    pub fn new() -> Self {
+    pub fn new(is_server: bool) -> Self {
         Self {
             tls_config: None,
             tls_conn: None,
             tcp_connections: HashMap::new(),
+            streams: StreamMap::new(),
             next_conn_id: 0,
             address_map: AddressMap::new(),
-            is_server: false,
+            is_server,
             is_closed: false,
             tls_hs_completed: false,
+            next_stream_id: 0,
         }
     }
 
@@ -132,7 +135,7 @@ impl TcplsSession {
         self.tls_conn.as_mut().unwrap().open_stream(tcp_conn_id);
     }
 
-    pub fn server_accept_connection(&mut self, listener: &mut TcpListener, config: Arc<ServerConfig>) -> Result<u32,io::Error>{
+    pub fn server_accept_connection(&mut self, listener: &mut TcpListener, config: Arc<ServerConfig>) -> Result<u32, io::Error> {
         let (socket, remote_address) = listener
             .accept()
             .expect("encountered error while accepting connection");
@@ -161,88 +164,38 @@ impl TcplsSession {
         Ok(conn_id)
     }
 
-    pub fn stream_send_on_connection(
-        &mut self,
-        app_data: &[u8],
-        conn_id: u32,
-        limit: Option<usize>,
+    pub fn stream_send(
+        &mut self, stream_id: u64, buf: &[u8], fin: bool,
     ) -> Result<usize, Error> {
-        let mut socket = &mut self
-            .tcp_connections
-            .get_mut(&conn_id)
-            .unwrap()
-            .socket;
-
         let mut tls_conn = self.tls_conn.as_mut().unwrap();
 
-        match limit {
-            Some(l) => tls_conn
-                .stream_map
-                .streams
-                .get_mut(&conn_id)
-                .unwrap().sendable_tls.set_limit(Some(l)),
-            None => (),
+        if tls_conn.is_handshaking() {
+           return  Err(Error::HandshakeNotComplete)
         }
 
-        let mut max_send = tls_conn
-            .stream_map
-            .streams
-            .get_mut(&conn_id)
-            .unwrap().sendable_tls.apply_limit(app_data.len());
-        let buf = &app_data[..max_send];
+        // Get existing stream or create a new one.
+        let stream = self.get_or_create_stream(stream_id, true)?;
 
-        let mut done = 0;
-        let mut left = buf.len();
-        while left > 0 {
-            // Buffer on send stream
-            let written = tls_conn.writer().write(&buf[done..done + left]).unwrap();
-            // Send on socket
-            tls_conn.write_tls(socket).unwrap();
-            done += written;
-            left -= written;
-        }
+        let mut max_send = stream.send.apply_limit(buf.len());
+        let buf = &buf[..max_send];
 
-        Ok(done)
+        // Buffer on send stream
+        let buffered = tls_conn.writer().write(buf).unwrap();
+
+
+        Ok(buffered)
     }
 
-    pub fn recv_on_connection(
-        &mut self,
-        conn_id: u32,
-        socket: &mut TcpStream,
-        tls_conn: &mut Connection,
-        limit: Option<usize>,
-    ) -> Result<(usize, IoState), io::Error> {
-
-        // optionally set limit of receive buffer
-        match limit {
-            Some(l) => tls_conn
-                .stream_map
-                .streams
-                .get_mut(&conn_id)
-                .unwrap().received_plaintext.set_limit(Some(l)),
-            None => (),
-        }
-
-        let mut read;
-        // Read some TLS data.
-        match tls_conn.read_tls(socket) {
-            Err(err) => {
-                return Err(err);
-            }
-            Ok(0) => {
-                // EOF or socket is cleanly closed
-                return Ok((0, tls_conn.current_io_state()));
-            }
-            Ok(n) => {
-                // decrypt data found in socket buffer and store result in receive buffer.
-                tls_conn.process_new_packets().expect("Processing received TLS records failed");
-                read = n;
-            }
-        };
-
-
-        Ok((read, tls_conn.current_io_state()))
+    pub fn get_or_create_stream(
+        &mut self, id: u64,
+        x: bool,
+    ) -> Result<&mut stream::Stream, Error> {
+        self.streams.get_or_create(id, self.is_server)
     }
+
+
+
+
 }
 
 pub enum TlsConfig {

@@ -17,8 +17,8 @@ use crate::record_layer;
 #[cfg(feature = "secret_extraction")]
 use crate::suites::PartiallyExtractedSecrets;
 use crate::suites::SupportedCipherSuite;
-use crate::tcpls::bi_stream::StreamMap;
 use crate::tcpls::frame::{Frame, StreamFrameHeader};
+use crate::tcpls::stream::StreamMap;
 
 #[cfg(feature = "tls12")]
 use crate::tls12::ConnectionSecrets;
@@ -95,7 +95,7 @@ impl CommonState {
 
     /// open a stream for a new TCP CONNECTION
     pub fn open_stream(&mut self, id: u32){
-        self.stream_map.open_stream(id);
+        self.stream_map.attach_stream(id);
     }
 
 
@@ -109,7 +109,7 @@ impl CommonState {
             .streams
             .get(&conn_id)
             .unwrap()
-            .sendable_tls.is_empty()
+            .send.is_empty()
     }
 
 
@@ -121,7 +121,7 @@ impl CommonState {
 
     /// Gets mutable reference for receive buffer
     pub fn recv_buffer_as_mut_ref(&mut self, conn_id: u32) -> &mut ChunkVecBuffer{
-        &mut self.stream_map.streams.get_mut(&conn_id).unwrap().received_plaintext
+        &mut self.stream_map.streams.get_mut(&conn_id).unwrap().recv
     }
 
     /// Returns true if the connection is currently performing the TLS handshake.
@@ -278,14 +278,14 @@ impl CommonState {
             .streams
             .get_mut(&conn_id)
             .unwrap()
-            .sendable_tls.get_offset();
+            .send.get_offset();
         let len = match limit {
             Limit::Yes => self
                 .stream_map
                 .streams
                 .get_mut(&conn_id)
                 .unwrap()
-                .sendable_tls
+                .send
                 .apply_limit(payload.len()),
             Limit::No => payload.len(),
         };
@@ -438,7 +438,7 @@ impl CommonState {
             .streams
             .get_mut(&conn_id)
             .unwrap()
-            .sendable_tls.set_limit(limit);
+            .send.set_limit(limit);
     }
 
     /// Send any buffered plaintext.  Plaintext is buffered if
@@ -448,6 +448,12 @@ impl CommonState {
             return;
         }
         let conn_id= self.active_conn_id;
+        let  len = self
+            .stream_map
+            .streams
+            .get_mut(&conn_id)
+            .unwrap()
+            .send.len();
         while let Some(buf) = self
             .stream_map
             .streams
@@ -465,7 +471,7 @@ impl CommonState {
             .streams
             .get_mut(&conn_id)
             .unwrap()
-            .sendable_tls.append(m.encode());
+            .send.append(m.encode());
     }
 
     /// Send a raw TLS message, fragmenting it if needed.
@@ -508,7 +514,7 @@ impl CommonState {
             .streams
             .get_mut(&conn_id)
             .unwrap()
-            .received_plaintext.append(bytes.0);
+            .recv.append(bytes.0);
     }
 
     #[cfg(feature = "tls12")]
@@ -623,13 +629,13 @@ impl CommonState {
             .streams
             .get(&self.active_conn_id)
             .unwrap()
-            .received_plaintext.is_empty()
+            .recv.is_empty()
             && !self.has_received_close_notify
             && (self.may_send_application_data || self.stream_map
             .streams
             .get(&self.active_conn_id)
             .unwrap()
-            .sendable_tls.is_empty())
+            .send.is_empty())
     }
 
     pub(crate) fn current_io_state(&self) -> IoState {
@@ -639,13 +645,13 @@ impl CommonState {
                 .streams
                 .get(&self.active_conn_id)
                 .unwrap()
-                .sendable_tls.len(),
+                .send.len(),
             plaintext_bytes_to_read: self
                 .stream_map
                 .streams
                 .get(&self.active_conn_id)
                 .unwrap()
-                .received_plaintext.len(),
+                .recv.len(),
             peer_has_closed: self.has_received_close_notify,
         }
     }
@@ -689,7 +695,7 @@ impl CommonState {
                 .streams
                 .get_mut(&conn_id)
                 .unwrap()
-                .sendable_tls.append(message);
+                .send.append(message);
         }
     }
 }

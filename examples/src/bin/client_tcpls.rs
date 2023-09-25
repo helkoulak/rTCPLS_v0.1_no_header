@@ -55,16 +55,16 @@ impl TlsClient {
 
         if ev.is_writable() && ! self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() {
 
-           self.send_file();
+           // self.send_file();
 
-           /* let mut done = 0;
+            let mut done = 0;
             let mut left = buf.len();
             while left > 0 {
               let written  =  self.tcpls_session.tls_conn.as_mut().unwrap().writer().write(& buf[done..done + left]).unwrap();
                 self.do_write();
                 done += written;
                 left -= written;
-            }*/
+            }
 
         }
 
