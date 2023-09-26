@@ -1,48 +1,31 @@
 #![allow(missing_docs)]
 #![allow(unused_qualifications)]
 
-use std::arch::{asm, is_aarch64_feature_detected};
-use std::cmp::min;
+
+use std::{io, u32, vec};
 use std::collections::HashMap;
-use std::fmt::{self, Debug};
 use std::fs;
-use std::io::{BufReader, Read, Seek, Write};
-use std::mem::size_of;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
-use std::ops::{Deref, DerefMut};
+use std::io::{BufReader, Read};
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
-use std::{io, process, u32, vec};
 
 use mio::net::{TcpListener, TcpStream};
-use mio::Token;
 
-use octets::BufferError;
-
+use crate::{
+    ALL_CIPHER_SUITES, ALL_VERSIONS, Certificate, ClientConfig, ClientConnection, Connection, ContentType, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, Error,
+    KeyLogFile, PrivateKey, RootCertStore, server, ServerConfig,
+    ServerConnection, ServerName, SupportedCipherSuite, SupportedProtocolVersion, Ticketer, version};
 /// This module contains optional APIs for implementing TCPLS.
-use crate::cipher::{derive_connection_iv, Iv, MessageDecrypter, MessageEncrypter};
-use crate::client::ClientConnectionData;
-use crate::common_state::*;
-use crate::conn::ConnectionCore;
+
 use crate::enums::ProtocolVersion;
-use crate::msgs::codec;
-use crate::msgs::handshake::{ClientExtension, ServerExtension};
-use crate::record_layer::RecordLayer;
-use crate::server::ServerConnectionData;
-use crate::tcpls::stream::{RecvBufMap, DEFAULT_BUFFER_LIMIT, Stream, StreamMap};
-use crate::tcpls::frame::{Frame, MAX_TCPLS_FRAGMENT_LEN, StreamFrameHeader};
+use crate::msgs::base::Payload;
+use crate::msgs::message::PlainMessage;
+use crate::tcpls::frame::{MAX_TCPLS_FRAGMENT_LEN, StreamFrameHeader};
 use crate::tcpls::network_address::AddressMap;
-use crate::vecbuf::ChunkVecBuffer;
+use crate::tcpls::stream::{RecvBufMap, StreamMap};
 use crate::verify::{
     AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
 };
-use crate::Connection::Client;
-use crate::{
-    cipher, server, version, Certificate, ClientConfig, ClientConnection, Connection,
-    ConnectionCommon, ContentType, InvalidMessage, KeyLogFile, PrivateKey, RootCertStore,
-    ServerConfig, ServerConnection, ServerName, SupportedCipherSuite, SupportedProtocolVersion,
-    Ticketer, ALL_CIPHER_SUITES, ALL_VERSIONS, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, Error };
-use crate::msgs::base::Payload;
-use crate::msgs::message::PlainMessage;
 
 pub mod stream;
 pub mod frame;
