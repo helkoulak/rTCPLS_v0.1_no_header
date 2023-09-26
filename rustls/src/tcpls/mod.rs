@@ -29,7 +29,7 @@ use crate::msgs::handshake::{ClientExtension, ServerExtension};
 use crate::record_layer::RecordLayer;
 use crate::server::ServerConnectionData;
 use crate::tcpls::stream::{RecvBufMap, DEFAULT_BUFFER_LIMIT, Stream, StreamMap};
-use crate::tcpls::frame::Frame;
+use crate::tcpls::frame::{Frame, MAX_TCPLS_FRAGMENT_LEN, StreamFrameHeader};
 use crate::tcpls::network_address::AddressMap;
 use crate::vecbuf::ChunkVecBuffer;
 use crate::verify::{
@@ -41,6 +41,8 @@ use crate::{
     ConnectionCommon, ContentType, InvalidMessage, KeyLogFile, PrivateKey, RootCertStore,
     ServerConfig, ServerConnection, ServerName, SupportedCipherSuite, SupportedProtocolVersion,
     Ticketer, ALL_CIPHER_SUITES, ALL_VERSIONS, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, Error };
+use crate::msgs::base::Payload;
+use crate::msgs::message::PlainMessage;
 
 pub mod stream;
 pub mod frame;
@@ -165,7 +167,7 @@ impl TcplsSession {
     }
 
     pub fn stream_send(
-        &mut self, stream_id: u64, buf: &[u8], fin: bool,
+        &mut self, stream_id: u64, input: &[u8], fin: bool,
     ) -> Result<usize, Error> {
         let mut tls_conn = self.tls_conn.as_mut().unwrap();
 
@@ -176,14 +178,60 @@ impl TcplsSession {
         // Get existing stream or create a new one.
         let stream = self.get_or_create_stream(stream_id, true)?;
 
-        let mut max_send = stream.send.apply_limit(buf.len());
-        let buf = &buf[..max_send];
-
-        // Buffer on send stream
-        let buffered = tls_conn.writer().write(buf).unwrap();
+        // check if key update message should be sent
+        tls_conn.perhaps_write_key_update(Some(stream));
 
 
-        Ok(buffered)
+        let cap = stream.send.apply_limit(input.len());
+
+        let (buf, fin) = if cap < input.len() {
+            (&input[..cap], false)
+        } else {
+            (input, fin)
+        };
+
+
+        // Encapsulate data chunks with TCPLS stream frame header, encrypt each fragment then
+        // buffer it in send buffer
+
+        let iter = fragment_slice_owned(
+            ContentType::ApplicationData,
+            ProtocolVersion::TLSv1_2,
+            buf,
+        );
+
+        for mut m in iter {
+            let mut header = StreamFrameHeader{
+                length: m.payload.0.len() as u64,
+                offset: stream.send.get_offset(),
+                stream_id,
+                fin: match fin { true => 1, false => 0, },
+            };
+            let header_len = header.get_header_length();
+            m.payload.0.extend_from_slice(vec![0; header_len].as_slice());
+            let mut octets = octets::OctetsMut::with_slice_at_offset(&mut m.payload.0, m.payload.0.len());
+            header.encode_stream_header(&mut octets).expect("encoding stream header failed");
+
+
+            // Close connection once we start to run out of
+            // sequence space.
+            if tls_conn
+                .record_layer
+                .wants_close_before_encrypt()
+            {
+                tls_conn.send_close_notify();
+            }
+
+            // Refuse to wrap counter at all costs.
+            if tls_conn.record_layer.encrypt_exhausted() {
+                return Err(Error::EncryptError);
+            }
+
+            let em = tls_conn.record_layer.encrypt_outgoing_owned(m);
+            stream.send.append(em.encode());
+        }
+
+        Ok(cap)
     }
 
     pub fn get_or_create_stream(
@@ -274,6 +322,21 @@ pub enum TcplsConnectionState {
     CONNECTING,
     CONNECTED, // Handshake completed.
     JOINED,
+}
+
+/// Returns an iterator of PlainMessage objects from the input slice
+fn fragment_slice_owned(
+    typ: ContentType,
+    version: ProtocolVersion,
+    payload: & [u8],
+) -> impl Iterator<Item = PlainMessage> {
+    payload
+        .chunks(MAX_TCPLS_FRAGMENT_LEN)
+        .map(move |c| PlainMessage {
+            typ,
+            version,
+            payload: Payload(c.to_vec()),
+        })
 }
 
 pub fn lookup_address(host: &str, port: u16) -> SocketAddr {

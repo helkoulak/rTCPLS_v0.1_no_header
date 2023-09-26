@@ -1,11 +1,14 @@
 #![allow(missing_docs)]
 
 use std::collections::HashMap;
+use std::vec;
 use crate::error::Error;
 use crate::msgs::codec;
 use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, OpaqueMessage, PlainMessage};
 
 use ring::{aead, hkdf};
+use crate::{ContentType, ProtocolVersion};
+use crate::msgs::base::Payload;
 
 
 /// Objects with this trait can decrypt TLS messages.
@@ -19,6 +22,7 @@ pub trait MessageDecrypter: Send + Sync {
 /// Objects with this trait can encrypt TLS messages.
 pub(crate) trait MessageEncrypter: Send + Sync {
     fn encrypt(&self, m: BorrowedPlainMessage, seq: u64, connection_id: u32) -> Result<OpaqueMessage, Error>;
+    fn encrypt_owned(&self, msg: PlainMessage, seq: u64, conn_id: u32) -> Result<OpaqueMessage, Error>;
     fn derive_enc_connection_iv(&mut self, conn_id: u32);
 }
 
@@ -109,6 +113,10 @@ struct InvalidMessageEncrypter {}
 impl MessageEncrypter for InvalidMessageEncrypter {
     fn encrypt(&self, _m: BorrowedPlainMessage, _seq: u64, conn_id: u32) -> Result<OpaqueMessage, Error> {
         Err(Error::EncryptError)
+    }
+
+    fn encrypt_owned(&self, msg: PlainMessage, seq: u64, conn_id: u32) -> Result<OpaqueMessage, Error> {
+        todo!()
     }
 
     fn derive_enc_connection_iv(&mut self, conn_id: u32) {

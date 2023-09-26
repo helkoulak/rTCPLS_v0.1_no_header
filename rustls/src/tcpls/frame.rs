@@ -5,6 +5,8 @@ use crate::{Error, InvalidMessage};
 /// This is the maximum overhead for a stream frame for a single TLS record.
 pub const TCPLS_STREAM_FRAME_MAX_OVERHEAD: usize = 15;
 
+pub const MAX_TCPLS_FRAGMENT_LEN: usize = 16384 - TCPLS_STREAM_FRAME_MAX_OVERHEAD;
+
 /*/// Payload max length for a TCPLS stream frame
 pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize =
     crate::msgs::fragmenter::MAX_FRAGMENT_LEN - STREAM_FRAME_MAX_OVERHEAD;*/
@@ -251,10 +253,10 @@ fn parse_stream_change_frame(b: &mut octets::Octets) -> octets::Result<Frame> {
 }
 
 pub struct StreamFrameHeader {
-    length: u64,
-    offset: u64,
-    stream_id: u64,
-    fin: u8,
+    pub length: u64,
+    pub offset: u64,
+    pub stream_id: u64,
+    pub fin: u8,
 }
 
 impl StreamFrameHeader {

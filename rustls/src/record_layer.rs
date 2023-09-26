@@ -240,6 +240,25 @@ impl RecordLayer {
             .unwrap()
     }
 
+    /// Encrypt a TLS message with owned payload.
+    ///
+    /// `plain` is a TLS message we'd like to send.  This function
+    /// panics if the requisite keying material hasn't been established yet.
+    pub(crate) fn encrypt_outgoing_owned(&mut self, plain: PlainMessage) -> OpaqueMessage {
+        debug_assert!(self.encrypt_state == DirectionState::Active);
+        assert!(!self.encrypt_exhausted());
+        let conn_id = self.active_conn_id;
+        let seq = self.seq_map.seq_num_map.get(&conn_id).unwrap().write_seq;
+        self.seq_map.seq_num_map.get_mut(&conn_id).unwrap().write_seq += 1;
+        /// prepare crypto context for the specified connection
+        if !self.is_handshaking && conn_id != 0 {
+            self.message_encrypter.derive_enc_connection_iv(conn_id);
+        }
+        self.message_encrypter
+            .encrypt_owned(plain, seq, conn_id)
+            .unwrap()
+    }
+
 }
 
     /// The sequence number space for an open tcp connection

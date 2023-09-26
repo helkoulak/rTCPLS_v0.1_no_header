@@ -1,4 +1,3 @@
-use std::arch::asm;
 use std::collections::HashMap;
 use crate::cipher::{make_nonce, Iv, MessageDecrypter, MessageEncrypter, derive_connection_iv};
 use crate::enums::ContentType;
@@ -147,25 +146,9 @@ const TLS13_AAD_SIZE: usize = 1 + 2 + 2;
 
 impl MessageEncrypter for Tls13MessageEncrypter {
     fn encrypt(&self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32) -> Result<OpaqueMessage, Error> {
-        let mut payload;
         let mut total_len = msg.payload.len() + 1 + self.enc_key.algorithm().tag_len();
-        match msg.typ {
-            ContentType::ApplicationData => {
-                let header_len = msg.stream_header.as_ref().unwrap().get_header_length();
-                total_len += header_len;
-                payload = Vec::with_capacity(total_len);
-                payload.extend_from_slice(msg.payload);
-                payload.extend_from_slice(vec![0; header_len].as_slice());
-                let mut octets = octets::OctetsMut::with_slice_at_offset(&mut payload, msg.payload.len());
-                msg.stream_header.unwrap().encode_stream_header(&mut octets).expect("encoding stream header failed");
-
-            }
-            _ => {
-                payload = Vec::with_capacity(total_len);
-                payload.extend_from_slice(msg.payload);
-            }
-        }
-
+        let mut payload = Vec::with_capacity(total_len);
+        payload.extend_from_slice(msg.payload);
         msg.typ.encode(&mut payload);
 
         let nonce = make_nonce(self.iv.get(&conn_id).unwrap(), seq);
@@ -179,6 +162,26 @@ impl MessageEncrypter for Tls13MessageEncrypter {
             typ: ContentType::ApplicationData,
             version: ProtocolVersion::TLSv1_2,
             payload: Payload::new(payload),
+        })
+    }
+
+    fn encrypt_owned(&self, msg: PlainMessage, seq: u64, conn_id: u32) -> Result<OpaqueMessage, Error> {
+        let mut total_len = msg.payload.0.len() + 1 + self.enc_key.algorithm().tag_len();
+        let mut m = msg;
+        m.payload.0.extend_from_slice(vec![0; total_len].as_slice());
+        msg.typ.encode(&mut m.payload.0);
+
+        let nonce = make_nonce(self.iv.get(&conn_id).unwrap(), seq);
+        let aad = make_tls13_aad(total_len);
+
+        self.enc_key
+            .seal_in_place_append_tag(nonce, aad, &mut m.payload.0)
+            .map_err(|_| Error::General("encrypt failed".to_string()))?;
+
+        Ok(OpaqueMessage {
+            typ: ContentType::ApplicationData,
+            version: ProtocolVersion::TLSv1_2,
+            payload: Payload::new(m.payload.0),
         })
     }
 

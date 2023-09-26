@@ -1,7 +1,7 @@
 use crate::cipher::Iv;
 use crate::enums::{AlertDescription, ContentType, HandshakeType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerMisbehaved};
-use crate::key;
+use crate::{key, Stream, stream, tcpls};
 #[cfg(feature = "logging")]
 use crate::log::{debug, error, warn};
 use crate::msgs::alert::AlertMessagePayload;
@@ -688,14 +688,12 @@ impl CommonState {
         );
     }
 
-    pub(crate) fn perhaps_write_key_update(&mut self) {
+    pub(crate) fn perhaps_write_key_update(&mut self, stream: Option<&mut tcpls::stream::Stream>) {
         if let Some(message) = self.queued_key_update_message.take() {
-            let conn_id = self.active_conn_id;
-            self.stream_map
-                .streams
-                .get_mut(&conn_id)
-                .unwrap()
-                .send.append(message);
+            match stream {
+                Some(s) => s.send.append(message),
+                None => self.send.append(message),
+            }
         }
     }
 }
