@@ -5,7 +5,7 @@
 use std::{io, u32, vec};
 use std::collections::HashMap;
 use std::fs;
-use std::io::{BufReader, Read};
+use std::io::{BufReader, Read, Write};
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 
@@ -19,6 +19,7 @@ use crate::{
 
 use crate::enums::ProtocolVersion;
 use crate::msgs::base::Payload;
+use crate::msgs::codec;
 use crate::msgs::message::PlainMessage;
 use crate::tcpls::frame::{MAX_TCPLS_FRAGMENT_LEN, StreamFrameHeader};
 use crate::tcpls::network_address::AddressMap;
@@ -81,11 +82,7 @@ impl TcplsSession {
             let _ = self.tls_conn.insert(Connection::from(client_conn));
             let _ = self.tls_config.insert(TlsConfig::Client(config.clone()));
         } else {
-            self.tls_conn
-                .as_mut()
-                .unwrap()
-                .stream_map
-                .attach_stream(new_id);
+
             self.tls_conn
                 .as_mut()
                 .unwrap()
@@ -135,11 +132,7 @@ impl TcplsSession {
             let _ = self.tls_conn.insert(Connection::from(server_conn));
             let _ = self.tls_config.insert(TlsConfig::from(config));
         } else {
-            self.tls_conn
-                .as_mut()
-                .unwrap()
-                .stream_map
-                .attach_stream(conn_id);
+
             self.tls_conn
                 .as_mut()
                 .unwrap()
@@ -351,11 +344,11 @@ pub enum TcplsConnectionState {
 }
 
 /// Returns an iterator of PlainMessage objects from the input slice
-fn fragment_slice_owned(
+fn fragment_slice_owned<'a>(
     typ: ContentType,
     version: ProtocolVersion,
-    payload: & [u8],
-) -> impl Iterator<Item = PlainMessage> {
+    payload: &'a [u8],
+) -> impl Iterator<Item=PlainMessage> + 'a {
     payload
         .chunks(MAX_TCPLS_FRAGMENT_LEN)
         .map(move |c| PlainMessage {
