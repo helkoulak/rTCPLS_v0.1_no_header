@@ -298,7 +298,7 @@ impl TcpConnection {
     pub fn new(socket: TcpStream, id: u32) -> Self {
         Self {
             connection_id: id,
-            socket: socket,
+            socket,
             local_address_id: 0,
             remote_address_id: 0,
             nbr_bytes_received: 0,
