@@ -100,6 +100,9 @@ pub enum Error {
 
     /// Receive buffer not found for the given stream id
     RecvBufNotFound,
+
+    /// The provided buffer is too short.
+    BufferTooShort,
 }
 
 /// A corrupt TLS message payload that resulted in an error.
@@ -446,6 +449,8 @@ impl fmt::Display for Error {
             Self::Done => write!(f, "There is no more work to do"),
             Self::BadStreamId => write!(f, "The wrong stream id was indicated"),
             Self::RecvBufNotFound => write!(f, "Receive buffer not found for the given stream id"),
+            Self::BufferTooShort => write!(f, "The provided buffer is too short."),
+
         }
     }
 }
