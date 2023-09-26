@@ -142,6 +142,13 @@ impl ChunkVecBuffer {
         }
     }
 
+    pub fn consume_chunk(&mut self, mut used: usize, chunk: Vec<u8>) {
+        let mut buf = chunk;
+        if used < buf.len() {
+            self.chunks.push_front(buf.split_off(used));
+        }
+    }
+
     /// Read data out of this object, passing it `wr`
     pub fn write_to(&mut self, wr: &mut dyn io::Write) -> io::Result<usize> {
         if self.is_empty() {
