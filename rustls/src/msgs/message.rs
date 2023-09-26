@@ -295,6 +295,56 @@ impl PlainMessage {
             payload: &self.payload.0,
         }
     }
+
+    pub fn to_vec(self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        self.typ.encode(&mut buf);
+        self.version.encode(&mut buf);
+        (self.payload.0.len() as u16).encode(&mut buf);
+        self.payload.encode(&mut buf);
+        buf
+    }
+    pub fn read(r: &mut Reader) -> Result<Self, MessageError> {
+        let typ = ContentType::read(r).map_err(|_| MessageError::TooShortForHeader)?;
+        // Don't accept any new content-types.
+        if let ContentType::Unknown(_) = typ {
+            return Err(MessageError::InvalidContentType);
+        }
+
+        let version = ProtocolVersion::read(r).map_err(|_| MessageError::TooShortForHeader)?;
+        // Accept only versions 0x03XX for any XX.
+        match version {
+            ProtocolVersion::Unknown(ref v) if (v & 0xff00) != 0x0300 => {
+                return Err(MessageError::UnknownProtocolVersion);
+            }
+            _ => {}
+        };
+
+        let len = u16::read(r).map_err(|_| MessageError::TooShortForHeader)?;
+
+        // Reject undersize messages
+        //  implemented per section 5.1 of RFC8446 (TLSv1.3)
+        //              per section 6.2.1 of RFC5246 (TLSv1.2)
+        if typ != ContentType::ApplicationData && len == 0 {
+            return Err(MessageError::InvalidEmptyPayload);
+        }
+
+        // Reject oversize messages
+        if len >= MAX_PAYLOAD {
+            return Err(MessageError::MessageTooLarge);
+        }
+
+        let mut sub = r
+            .sub(len as usize)
+            .map_err(|_| MessageError::TooShortForLength)?;
+        let payload = Payload::read(&mut sub);
+
+        Ok(Self {
+            typ,
+            version,
+            payload,
+        })
+    }
 }
 
 /// A message with decoded payload
