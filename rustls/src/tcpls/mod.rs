@@ -198,6 +198,7 @@ impl TcplsSession {
         // Encapsulate data chunks with TCPLS stream frame header, encrypt each fragment then
         // buffer it in send buffer
 
+        let mut buffered = 0;
         let iter = fragment_slice_owned(
             ContentType::ApplicationData,
             ProtocolVersion::TLSv1_2,
@@ -232,10 +233,17 @@ impl TcplsSession {
             }
 
             let em = tls_conn.record_layer.encrypt_outgoing_owned(m);
-            stream.send.append(em.encode());
+            buffered += match stream.send.append(em.encode()) {
+                Ok(v) => v,
+
+                Err(e) => {
+                    self.streams.remove_writable(stream_id);
+                    return Err(e);
+                },
+            };
         }
 
-        Ok(cap)
+        Ok(buffered)
     }
 
     pub fn get_or_create_stream(
