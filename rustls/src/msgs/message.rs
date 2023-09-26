@@ -9,6 +9,17 @@ use crate::msgs::enums::AlertLevel;
 use crate::msgs::handshake::HandshakeMessagePayload;
 use crate::tcpls::frame::{Frame, StreamFrameHeader};
 
+/// This is the maximum on-the-wire size of a TLSCiphertext.
+/// That's 2^14 payload bytes, a header, and a 2KB allowance
+/// for ciphertext overheads.
+pub(crate) const MAX_PAYLOAD: u16 = 16384 + 2048;
+
+/// Content type, version and size.
+pub(crate) const HEADER_SIZE: u16 = 1 + 2 + 2;
+
+/// Maximum on-wire message size.
+pub const MAX_WIRE_SIZE: usize = (MAX_PAYLOAD + HEADER_SIZE) as usize;
+
 #[derive(Debug)]
 pub enum MessagePayload {
     Alert(AlertMessagePayload),
@@ -110,7 +121,7 @@ impl OpaqueMessage {
         }
 
         // Reject oversize messages
-        if len >= Self::MAX_PAYLOAD {
+        if len >= MAX_PAYLOAD {
             return Err(MessageError::MessageTooLarge);
         }
 
@@ -147,16 +158,7 @@ impl OpaqueMessage {
         }
     }
 
-    /// This is the maximum on-the-wire size of a TLSCiphertext.
-    /// That's 2^14 payload bytes, a header, and a 2KB allowance
-    /// for ciphertext overheads.
-    const MAX_PAYLOAD: u16 = 16384 + 2048;
 
-    /// Content type, version and size.
-    const HEADER_SIZE: u16 = 1 + 2 + 2;
-
-    /// Maximum on-wire message size.
-    pub const MAX_WIRE_SIZE: usize = (Self::MAX_PAYLOAD + Self::HEADER_SIZE) as usize;
 }
 
 /// A TLS frame, named TLSPlaintext in the standard.
@@ -200,7 +202,7 @@ impl<'a> BorrowedOpaqueMessage<'a> {
         }
 
         // Reject oversize messages
-        if len >= Self::MAX_PAYLOAD {
+        if len >= MAX_PAYLOAD {
             return Err(MessageError::MessageTooLarge);
         }
 
@@ -242,16 +244,7 @@ impl<'a> BorrowedOpaqueMessage<'a> {
         }
     }
 
-    /// This is the maximum on-the-wire size of a TLSCiphertext.
-    /// That's 2^14 payload bytes, a header, and a 2KB allowance
-    /// for ciphertext overheads.
-    const MAX_PAYLOAD: u16 = 16384 + 2048;
 
-    /// Content type, version and size.
-    const HEADER_SIZE: u16 = 1 + 2 + 2;
-
-    /// Maximum on-wire message size.
-    pub const MAX_WIRE_SIZE: usize = (Self::MAX_PAYLOAD + Self::HEADER_SIZE) as usize;
 }
 
 
