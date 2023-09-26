@@ -205,7 +205,7 @@ impl TcplsSession {
                 length: m.payload.0.len() as u64,
                 offset: stream.send.get_offset(),
                 stream_id,
-                fin: match fin { true => 1, false => 0, },
+                fin: if m.payload.0.len() < MAX_TCPLS_FRAGMENT_LEN {match fin { true => 1, false => 0, }} else { 0 }, // consider fin at the last fragment
             };
             let header_len = header.get_header_length();
             m.payload.0.extend_from_slice(vec![0; header_len].as_slice());
