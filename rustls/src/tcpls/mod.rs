@@ -221,7 +221,7 @@ impl TcplsSession {
 
                 Err(e) => {
                     self.streams.remove_writable(stream_id);
-                    return Err(e);
+                    return Err(Error::General("could not append chunk".into()));
                 },
             };
         }
