@@ -161,10 +161,6 @@ impl TcplsSession {
         // Get existing stream or create a new one.
         let stream = self.get_or_create_stream(stream_id, true)?;
 
-        // check if key update message should be sent
-        tls_conn.perhaps_write_key_update(Some(stream));
-
-
         let cap = stream.send.apply_limit(input.len());
 
         if cap == 0 && !input.is_empty(){
@@ -200,30 +196,8 @@ impl TcplsSession {
             let mut octets = octets::OctetsMut::with_slice_at_offset(&mut m.payload.0, m.payload.0.len());
             header.encode_stream_header(&mut octets).expect("encoding stream header failed");
 
+            buffered += stream.send.append(m.to_vec());
 
-            // Close connection once we start to run out of
-            // sequence space.
-            if tls_conn
-                .record_layer
-                .wants_close_before_encrypt()
-            {
-                tls_conn.send_close_notify();
-            }
-
-            // Refuse to wrap counter at all costs.
-            if tls_conn.record_layer.encrypt_exhausted() {
-                return Err(Error::EncryptError);
-            }
-
-            let em = tls_conn.record_layer.encrypt_outgoing_owned(m);
-            buffered += match stream.send.append(em.encode()) {
-                Ok(v) => v,
-
-                Err(e) => {
-                    self.streams.remove_writable(stream_id);
-                    return Err(Error::General("could not append chunk".into()));
-                },
-            };
         }
 
         Ok(buffered)
@@ -236,6 +210,63 @@ impl TcplsSession {
         self.streams.get_or_create(id, self.is_server)
     }
 
+    pub fn send_on_connection(&mut self, stream_id: u64, conn_id: u32) -> Result<usize, Error> {
+        let mut tls_conn = self.tls_conn.as_mut().unwrap();
+        let socket = &mut self.tcp_connections.get_mut(&conn_id).unwrap().socket;
+
+        if tls_conn.is_handshaking() {
+            return  Err(Error::HandshakeNotComplete)
+        }
+
+        // Get existing stream or create a new one.
+        let stream = self.get_or_create_stream(stream_id, true)?;
+
+        if stream.send.is_empty() {
+
+            return Ok(0)
+        }
+
+        // set active connection to decide suitable crypto context and record seq space
+        tls_conn.set_sending_connection_id(conn_id);
+
+        // check if key update message should be sent
+        tls_conn.perhaps_write_key_update(Some(stream));
+
+        // Close connection once we start to run out of
+        // sequence space.
+        if tls_conn
+            .record_layer
+            .wants_close_before_encrypt()
+        {
+            tls_conn.send_close_notify();
+        }
+
+        // Refuse to wrap counter at all costs.
+        if tls_conn.record_layer.encrypt_exhausted() {
+            return Err(Error::EncryptError);
+        }
+
+        let mut len = stream.send.len();
+        let mut sent = 0;
+        let mut done = 0;
+        while len > 0 {
+
+            let chunk = stream.send.pop().unwrap();
+            let mut rd = codec::Reader::init(&chunk);
+            let m = PlainMessage::read(&mut rd).unwrap();
+
+            let em = tls_conn.record_layer.encrypt_outgoing_owned(m);
+
+            sent = socket.write(&em.encode()).unwrap();
+            stream.send.consume_chunk(sent, chunk);
+            len -= sent;
+            done += sent;
+
+        }
+
+        Ok(done)
+
+    }
 
     pub fn stream_recv<'a, 'b>(
         &'a mut self, stream_id: u64, app_buffers: &'b mut RecvBufMap,
