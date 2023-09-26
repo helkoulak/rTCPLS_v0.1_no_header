@@ -184,6 +184,10 @@ impl TcplsSession {
 
         let cap = stream.send.apply_limit(input.len());
 
+        if cap == 0 && !input.is_empty(){
+            return Err(Error::Done)
+        }
+
         let (buf, fin) = if cap < input.len() {
             (&input[..cap], false)
         } else {
