@@ -111,12 +111,6 @@ impl TcplsSession {
         new_id
     }
 
-    /// Open a new stream and assign it to specified TCP connection.
-    /// Only one stream per connection is allowed to avoid HOL problem
-    pub fn open_stream(&mut self, tcp_conn_id: u32) {
-        self.tls_conn.as_mut().unwrap().open_stream(tcp_conn_id);
-    }
-
     pub fn server_accept_connection(&mut self, listener: &mut TcpListener, config: Arc<ServerConfig>) -> Result<u32, io::Error> {
         let (socket, remote_address) = listener
             .accept()
