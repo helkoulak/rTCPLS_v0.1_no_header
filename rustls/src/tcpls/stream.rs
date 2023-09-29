@@ -66,10 +66,7 @@ impl Stream {
         }
     }
 
-    /// Returns true if the stream has data to read.
-    pub fn is_readable(&self) -> bool {
-        !self.recv.is_empty()
-    }
+
 
     /// Returns true if the stream has enough capacity to be
     /// written to, and is not finished.
