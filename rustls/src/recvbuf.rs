@@ -19,6 +19,7 @@ pub struct RecvBuffer {
 }
 
 impl RecvBuffer {
+    /// create a new instance of RecvBuffer
     pub fn new(stream_id: u64, capacity: Option<usize>) -> RecvBuffer {
         if let Some(capacity) = capacity {
             let mut appbuf = RecvBuffer {
@@ -75,7 +76,7 @@ impl RecvBuffer {
 
     }
 
-    pub fn consume(&mut self, mut used: usize) {
+   /* pub fn consume(&mut self, mut used: usize) {
         while let Some(mut buf) = self.chunks.pop_front() {
             if used < buf.len() {
                 self.chunks
@@ -85,7 +86,7 @@ impl RecvBuffer {
                 used -= buf.len();
             }
         }
-    }
+    }*/
 
 
 }
