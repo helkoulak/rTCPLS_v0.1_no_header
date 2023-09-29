@@ -6,8 +6,8 @@ use super::codec::Codec;
 use super::message::PlainMessage;
 use crate::enums::{ContentType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerMisbehaved};
-use crate::msgs::codec;
-use crate::msgs::message::{BorrowedOpaqueMessage, MessageError, OpaqueMessage};
+use crate::msgs::{codec, message};
+use crate::msgs::message::{BorrowedOpaqueMessage, Message, MessageError, OpaqueMessage};
 use crate::record_layer::{Decrypted, RecordLayer};
 
 /// This deframer works to reconstruct TLS messages from a stream of arbitrary-sized reads.
@@ -303,7 +303,7 @@ impl MessageDeframer {
         // At this point, the buffer resizing logic below should reduce the buffer size.
         let allow_max = match self.joining_hs {
             Some(_) => MAX_HANDSHAKE_SIZE as usize,
-            None => OpaqueMessage::MAX_WIRE_SIZE,
+            None => message::MAX_WIRE_SIZE,
         };
 
         if self.used >= allow_max {
