@@ -161,6 +161,13 @@ pub struct StreamMap {
     /// a `StreamIter` of streams without having to iterate over the full list
     /// of streams.
     pub writable: StreamIdHashSet,
+
+    /// Set of streams that were completed and garbage collected.
+    ///
+    /// Instead of keeping the full stream state forever, we collect completed
+    /// streams to save memory, but we still need to keep track of previously
+    /// created streams, to prevent peers from re-creating them.
+    collected: StreamIdHashSet,
 }
 
 impl StreamMap {
@@ -258,37 +265,33 @@ impl StreamMap {
     /// Adds the stream ID to the flushable streams set.
     ///
     /// If the stream was already in the list, this does nothing.
-    pub fn insert_flushable(&mut self, stream_id: u64) {
-        self.flushable.insert(stream_id);
-    }
+    pub fn insert_flushable(&mut self, stream_id: u64) { self.flushable.insert(stream_id); }
 
     /// Removes the stream ID from the flushable streams set.
-    pub fn remove_flushable(&mut self, stream_id: u64) {
-        self.flushable.remove(&stream_id);
-    }
+    pub fn remove_flushable(&mut self, stream_id: u64) { self.flushable.remove(&stream_id); }
+
+    /// Adds the stream ID to the collected streams set.
+    ///
+    /// If the stream was already in the list, this does nothing.
+    pub fn insert_collected(&mut self, stream_id: u64) { self.collected.insert(stream_id); }
+
+    /// Removes the stream ID from the collected streams set.
+    pub fn remove_collected(&mut self, stream_id: u64) { self.collected.remove(&stream_id); }
 
 
     /// Creates an iterator over streams that have outstanding data to read.
     pub fn readable(&self) -> StreamIter {
-        StreamIter {
-            streams: self.readable.iter().map(|s| s.id).collect(),
-            index: 0,
-        }
+        StreamIter::from(&self.readable)
     }
 
     /// Creates an iterator over streams that can be written to.
-    pub fn writable(&self) -> StreamIter {
-        StreamIter {
-            streams: self.writable.iter().map(|s| s.id).collect(),
-            index: 0,
-        }
-    }
+    pub fn writable(&self) -> StreamIter { StreamIter::from(&self.writable) }
 
+    /// Creates an iterator over streams that have been collected.
+    pub fn collected(&self) -> StreamIter { StreamIter::from(&self.collected) }
 
-    /*    /// Returns true if the stream has been collected.
-    pub fn is_collected(&self, stream_id: u64) -> bool {
-        self.collected.contains(&stream_id)
-    }*/
+        /// Returns true if the stream has been collected.
+    pub fn is_collected(&self, stream_id: u64) -> bool { self.collected.contains(&stream_id) }
 
     /// Returns true if there are any streams that have data to write.
     pub fn has_flushable(&self) -> bool {
