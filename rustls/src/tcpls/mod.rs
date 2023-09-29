@@ -245,9 +245,14 @@ impl TcplsSession {
             let mut rd = codec::Reader::init(&chunk);
             let m = PlainMessage::read(&mut rd).unwrap();
 
-            let em = tls_conn.record_layer.encrypt_outgoing_owned(m);
+            let em = tls_conn
+                .record_layer.
+                encrypt_outgoing_owned(m);
 
-            sent = socket.write(&em.encode()).unwrap();
+            sent = self.tcp_connections
+                .get_mut(&conn_id)
+                .unwrap()
+                .socket.write(&em.encode()).unwrap();
             stream.send.consume_chunk(sent, chunk);
             len -= sent;
             done += sent;
