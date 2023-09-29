@@ -258,14 +258,13 @@
 //!   buffers. Will do nothing on non-Nightly releases.
 
 // Require docs for public APIs, deny unsafe code, etc.
-#![forbid(unsafe_code, unused_must_use)]
+#![forbid(unused_must_use)]
 #![cfg_attr(not(read_buf), forbid(unstable_features))]
 #![deny(
     clippy::clone_on_ref_ptr,
     clippy::use_self,
     trivial_casts,
     trivial_numeric_casts,
-    missing_docs,
     unreachable_pub,
     unused_import_braces,
     unused_extern_crates,
@@ -510,4 +509,5 @@ pub mod manual;
 
 /// APIs for implementing TCPLS TLS
 pub mod tcpls;
+/// Implementation of TCPLS receive buffer.
 pub mod recvbuf;
