@@ -3,9 +3,10 @@ use std::collections::VecDeque;
 use std::io;
 use std::io::Read;
 use crate::tcpls::stream;
-use crate::tcpls::stream::{DEFAULT_BUFFER_LIMIT, RecvBuf, Stream};
+use crate::tcpls::stream::{DEFAULT_BUFFER_LIMIT, Stream};
 
 /// This is the receive buffer of a stream
+#[derive(Default)]
 pub struct RecvBuffer {
     id: u64,
     data: Vec<u8>,
