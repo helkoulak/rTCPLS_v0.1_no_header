@@ -178,8 +178,9 @@ impl TcplsSession {
                 fin: if m.payload.0.len() < MAX_TCPLS_FRAGMENT_LEN {match fin { true => 1, false => 0, }} else { 0 }, // consider fin at the last fragment
             };
             let header_len = header.get_header_length();
+            let payload_len = m.payload.0.len();
             m.payload.0.extend_from_slice(vec![0; header_len].as_slice());
-            let mut octets = octets::OctetsMut::with_slice_at_offset(&mut m.payload.0, m.payload.0.len());
+            let mut octets = octets::OctetsMut::with_slice_at_offset(&mut m.payload.0, payload_len);
             header.encode_stream_header(&mut octets).expect("encoding stream header failed");
 
             buffered += stream.send.append(m.to_vec());
