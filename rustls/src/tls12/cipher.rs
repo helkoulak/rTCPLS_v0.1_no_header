@@ -168,6 +168,10 @@ impl MessageEncrypter for GcmMessageEncrypter {
         })
     }
 
+    fn encrypt_owned(&self, msg: PlainMessage, seq: u64, conn_id: u32) -> Result<OpaqueMessage, Error> {
+        todo!()
+    }
+
     fn derive_enc_connection_iv(&mut self, conn_id: u32) {
         todo!()
     }
@@ -244,6 +248,10 @@ impl MessageEncrypter for ChaCha20Poly1305MessageEncrypter {
             version: msg.version,
             payload: Payload::new(buf),
         })
+    }
+
+    fn encrypt_owned(&self, msg: PlainMessage, seq: u64, conn_id: u32) -> Result<OpaqueMessage, Error> {
+        todo!()
     }
 
     fn derive_enc_connection_iv(&mut self, conn_id: u32) {
