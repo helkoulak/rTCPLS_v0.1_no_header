@@ -28,6 +28,7 @@
 use std::{cmp, time};
 use std::collections::{BinaryHeap, BTreeMap, hash_map, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+use smallvec::SmallVec;
 use crate::Error;
 use crate::recvbuf::RecvBuffer;
 use crate::vecbuf::ChunkVecBuffer;
@@ -369,27 +370,61 @@ impl RecvBufMap {
             },
             _ => Ok(0),
         }
-    }
+    }*/
 
-    pub(crate) fn is_consumed(&self, stream_id: u64) -> bool {
+    /*pub(crate) fn is_consumed(&self, stream_id: u64) -> bool {
         match self.buffers.get(&stream_id) {
             Some(v) => {
                 v.is_consumed()
             }
             _ => true,
         }
-    }
+    }*/
 
-    pub fn collect(&mut self, stream_id: u64) {
+   /* pub fn collect(&mut self, stream_id: u64) {
         if let Some(mut buf) = self.buffers.remove(&stream_id) {
             if self.recycled_buffers.len() < self.recycled_buffers.capacity() {
                 buf.clear();
                 self.recycled_buffers.push_back(buf);
             }
         }
-    }
+    }*/
 
 }
 
+/// An iterator over TCPLS streams.
+#[derive(Default)]
+pub struct StreamIter {
+    streams: SmallVec<[u64; 8]>,
+    index: usize,
+}
+
+impl StreamIter {
+    #[inline]
+    fn from(streams: &StreamIdHashSet) -> Self {
+        StreamIter {
+            streams: streams.iter().copied().collect(),
+            index: 0,
+        }
+    }
+}
+
+impl Iterator for StreamIter {
+    type Item = u64;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        let v = self.streams.get(self.index)?;
+        self.index += 1;
+        Some(*v)
+    }
+}
+
+impl ExactSizeIterator for StreamIter {
+    #[inline]
+    fn len(&self) -> usize {
+        self.streams.len() - self.index
+    }
+}
 
 
