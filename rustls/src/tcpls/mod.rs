@@ -208,7 +208,7 @@ impl TcplsSession {
         // Get existing stream or create a new one.
         let stream = match self.streams.get_mut(stream_id) {
             Some(stream) => stream,
-            None => return Err(Error::BadStreamId),
+            None => return Err(Error::RecvBufNotFound),
         };
 
         if stream.send.is_empty() {
