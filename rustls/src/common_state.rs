@@ -114,10 +114,10 @@ impl CommonState {
         self.record_layer.set_sending_conn_id(conn_id);
     }
 
-    /// Gets mutable reference for receive buffer
+    /*/// Gets mutable reference for receive buffer
     pub fn recv_buffer_as_mut_ref(&mut self, conn_id: u32) -> &mut ChunkVecBuffer{
         &mut self.stream_map.streams.get_mut(&conn_id).unwrap().recv
-    }
+    }*/
 
     /// Returns true if the connection is currently performing the TLS handshake.
     ///
@@ -216,7 +216,7 @@ impl CommonState {
     /// If internal buffers are too small, this function will not accept
     /// all the data.
     pub(crate) fn send_some_plaintext(&mut self, data: &[u8]) -> usize {
-        self.perhaps_write_key_update();
+        self.perhaps_write_key_update(None);
         self.send_plain(data, Limit::Yes)
     }
 
