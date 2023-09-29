@@ -139,9 +139,8 @@ impl TcplsSession {
     pub fn stream_send(
         &mut self, stream_id: u64, input: &[u8], fin: bool,
     ) -> Result<usize, Error> {
-        let mut tls_conn = self.tls_conn.as_mut().unwrap();
 
-        if tls_conn.is_handshaking() {
+        if self.tls_conn.as_mut().unwrap().is_handshaking() {
            return  Err(Error::HandshakeNotComplete)
         }
 
