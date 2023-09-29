@@ -169,7 +169,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         let mut total_len = msg.payload.0.len() + 1 + self.enc_key.algorithm().tag_len();
         let mut m = msg;
         m.payload.0.extend_from_slice(vec![0; total_len].as_slice());
-        msg.typ.encode(&mut m.payload.0);
+        m.typ.encode(&mut m.payload.0);
 
         let nonce = make_nonce(self.iv.get(&conn_id).unwrap(), seq);
         let aad = make_tls13_aad(total_len);
