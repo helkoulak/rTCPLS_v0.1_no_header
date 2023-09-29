@@ -95,7 +95,7 @@ pub enum Error {
     /// There is no more work to do.
     Done,
 
-    /// The wrong stream id was indicated.
+    /// The stream for the corresponding id does not exist.
     BadStreamId,
 
     /// Receive buffer not found for the given stream id
@@ -447,7 +447,7 @@ impl fmt::Display for Error {
             }
             Self::General(ref err) => write!(f, "unexpected error: {}", err),
             Self::Done => write!(f, "There is no more work to do"),
-            Self::BadStreamId => write!(f, "The wrong stream id was indicated"),
+            Self::BadStreamId => write!(f, "The stream for the corresponding id does not exist"),
             Self::RecvBufNotFound => write!(f, "Receive buffer not found for the given stream id"),
             Self::BufferTooShort => write!(f, "The provided buffer is too short."),
 
