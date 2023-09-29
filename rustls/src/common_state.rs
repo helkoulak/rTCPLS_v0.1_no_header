@@ -280,17 +280,7 @@ impl CommonState {
             ProtocolVersion::TLSv1_2,
             &payload[..len],
         );
-        for mut m in iter {
-            let _ = m.stream_header.insert(
-                StreamFrameHeader::new(
-                    m.payload.len() as u64,
-                    offset,
-                    conn_id as u64,
-                    0
-                )
-            );
-
-
+        for m in iter {
             self.send_single_fragment(m);
         }
 
