@@ -198,15 +198,18 @@ impl TcplsSession {
     }
 
     pub fn send_on_connection(&mut self, stream_id: u64, conn_id: u32) -> Result<usize, Error> {
-        let mut tls_conn = self.tls_conn.as_mut().unwrap();
-        let socket = &mut self.tcp_connections.get_mut(&conn_id).unwrap().socket;
+
+        let tls_conn = self.tls_conn.as_mut().unwrap();
 
         if tls_conn.is_handshaking() {
             return  Err(Error::HandshakeNotComplete)
         }
 
         // Get existing stream or create a new one.
-        let stream = self.get_or_create_stream(stream_id, true)?;
+        let stream = match self.streams.get_mut(stream_id) {
+            Some(stream) => stream,
+            None => return Err(Error::BadStreamId),
+        };
 
         if stream.send.is_empty() {
 
