@@ -201,20 +201,20 @@ impl StreamMap {
     /// count limits. If one of these limits is violated, the `StreamLimit`
     /// error is returned.
     pub fn get_or_create(
-        &mut self, id: u64, is_server: bool,
+        &mut self, stream_id: u64, is_server: bool,
     ) -> Result<&mut Stream, Error> {
-        let (stream, is_new_and_writable) = match self.streams.entry(id) {
+        let (stream, is_new_and_writable) = match self.streams.entry(stream_id) {
             hash_map::Entry::Vacant(v) => {
                 // Stream has already been closed and garbage collected.
-                if self.collected.contains(&id) {
+                if self.collected.contains(&stream_id) {
                     return Err(Error::Done);
                 }
 
-                if is_server != (stream_id & 0x1) {
+                if  (stream_id & 0x1) == (is_server as u64){
                     return Err(Error::BadStreamId);
                 }
 
-                let s = Stream::new(id);
+                let s = Stream::new(stream_id);
 
                 let is_writable = s.is_writable();
 
@@ -226,7 +226,7 @@ impl StreamMap {
 
 
         if is_new_and_writable {
-            self.writable.insert(id);
+            self.writable.insert(stream_id);
         }
 
         Ok(stream)
@@ -346,7 +346,7 @@ impl RecvBufMap {
             .get_mut_consumed())
     }
 
-    pub(crate) fn read_mut(&mut self, stream_id: u64, stream: &mut Stream) -> Result<&mut [u8], Error> {
+    /*pub(crate) fn read_mut(&mut self, stream_id: u64, stream: &mut Stream) -> Result<&mut [u8], Error> {
         let buf = match self.buffers.entry(stream_id) {
             hash_map::Entry::Vacant(_v) => {
                 return Err(Error::RecvBufNotFound);
@@ -354,9 +354,9 @@ impl RecvBufMap {
             hash_map::Entry::Occupied(v) => v.into_mut().read_mut(&mut stream.recv)?,
         };
         Ok(buf)
-    }
+    }*/
 
-    pub(crate) fn has_consumed(&mut self, stream_id: u64, stream: Option<&Stream>, consumed: usize) -> Result<usize, Error>{
+    /*pub(crate) fn has_consumed(&mut self, stream_id: u64, stream: Option<&Stream>, consumed: usize) -> Result<usize, Error>{
         match self.buffers.entry(stream_id) {
             hash_map::Entry::Occupied(v) => {
                 // Registers how much the app has read on this stream buffer. If we don't
