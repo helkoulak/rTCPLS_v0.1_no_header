@@ -263,7 +263,7 @@ impl TcplsSession {
 
     }
 
-    pub fn stream_recv<'a, 'b>(
+   /* pub fn stream_recv<'a, 'b>(
         &'a mut self, stream_id: u64, app_buffers: &'b mut RecvBufMap,
     ) -> Result<(&'b [u8], usize, bool), Error> {
 
@@ -282,7 +282,7 @@ impl TcplsSession {
 
 
         Ok((outbuf, read, fin))
-    }
+    }*/
 
 
 
