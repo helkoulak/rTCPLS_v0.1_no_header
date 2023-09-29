@@ -43,7 +43,10 @@ pub struct CommonState {
     pub(crate) peer_certificates: Option<Vec<key::Certificate>>,
     message_fragmenter: MessageFragmenter,
 
-    pub(crate) stream_map: StreamMap,
+    pub(crate) received_plaintext: ChunkVecBuffer,
+    sendable_plaintext: ChunkVecBuffer,
+    pub(crate) sendable_tls: ChunkVecBuffer,
+
     /// id of currently used tcp connection
     pub active_conn_id: u32,
 
@@ -76,12 +79,10 @@ impl CommonState {
             received_middlebox_ccs: 0,
             peer_certificates: None,
             message_fragmenter: MessageFragmenter::default(),
-            /*received_plaintext: ChunkVecBuffer::new(Some(DEFAULT_RECEIVED_PLAINTEXT_LIMIT)),
+            received_plaintext: ChunkVecBuffer::new(Some(DEFAULT_RECEIVED_PLAINTEXT_LIMIT)),
             sendable_plaintext: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
-            sendable_tls: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),*/
+            sendable_tls: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
 
-
-            stream_map: StreamMap::build_stream_map(),
             active_conn_id: 0,
             queued_key_update_message: None,
 
@@ -93,23 +94,17 @@ impl CommonState {
         }
     }
 
-    /// open a stream for a new TCP CONNECTION
+   /* /// open a stream for a new TCP CONNECTION
     pub fn open_stream(&mut self, id: u32){
         self.stream_map.attach_stream(id);
-    }
+    }*/
 
 
     /// Returns true if the caller should call [`Connection::write_tls`] as soon as possible.
     ///
     /// [`Connection::write_tls`]: crate::Connection::write_tls
     pub fn wants_write(&self) -> bool {
-        let conn_id = self.record_layer.active_conn_id;
-        !self
-            .stream_map
-            .streams
-            .get(&conn_id)
-            .unwrap()
-            .send.is_empty()
+        !self.sendable_tls.is_empty()
     }
 
 
@@ -272,20 +267,10 @@ impl CommonState {
         // but we're respecting it for plaintext data -- so we'll
         // be out by whatever the cipher+record overhead is.  That's a
         // constant and predictable amount, so it's not a terrible issue.
-        let conn_id = self.active_conn_id;
-        let offset = self
-            .stream_map
-            .streams
-            .get_mut(&conn_id)
-            .unwrap()
-            .send.get_offset();
+
         let len = match limit {
             Limit::Yes => self
-                .stream_map
-                .streams
-                .get_mut(&conn_id)
-                .unwrap()
-                .send
+                .sendable_tls
                 .apply_limit(payload.len()),
             Limit::No => payload.len(),
         };
@@ -341,20 +326,11 @@ impl CommonState {
         if !self.may_send_application_data {
             // If we haven't completed handshaking, buffer
             // plaintext to send once we do.
-            let conn_id = self.active_conn_id;
             let len = match limit {
                 Limit::Yes => self
-                    .stream_map
-                    .streams
-                    .get_mut(&conn_id)
-                    .unwrap()
                     .sendable_plaintext
                     .append_limited_copy(data),
                 Limit::No => self
-                    .stream_map
-                    .streams
-                    .get_mut(&conn_id)
-                    .unwrap()
                     .sendable_plaintext
                     .append(data.to_vec()),
             };
@@ -426,19 +402,8 @@ impl CommonState {
     /// [`Connection::write_tls`]: crate::Connection::write_tls
     /// [`Connection::process_new_packets`]: crate::Connection::process_received
     pub fn set_buffer_limit(&mut self, limit: Option<usize>) {
-        let conn_id= self.active_conn_id;
-        self
-            .stream_map
-            .streams
-            .get_mut(&conn_id)
-            .unwrap()
-            .sendable_plaintext.set_limit(limit);
-        self
-            .stream_map
-            .streams
-            .get_mut(&conn_id)
-            .unwrap()
-            .send.set_limit(limit);
+        self.sendable_plaintext.set_limit(limit);
+        self.sendable_tls.set_limit(limit);
     }
 
     /// Send any buffered plaintext.  Plaintext is buffered if
@@ -447,31 +412,15 @@ impl CommonState {
         if !self.may_send_application_data {
             return;
         }
-        let conn_id= self.active_conn_id;
-        let  len = self
-            .stream_map
-            .streams
-            .get_mut(&conn_id)
-            .unwrap()
-            .send.len();
-        while let Some(buf) = self
-            .stream_map
-            .streams
-            .get_mut(&conn_id)
-            .unwrap()
-            .sendable_plaintext.pop() {
+
+        while let Some(buf) = self.sendable_plaintext.pop() {
             self.send_plain(&buf, Limit::No);
         }
     }
 
     // Put m into sendable_tls for writing.
     fn queue_tls_message(&mut self, m: OpaqueMessage) {
-        let conn_id = self.active_conn_id;
-        self.stream_map
-            .streams
-            .get_mut(&conn_id)
-            .unwrap()
-            .send.append(m.encode());
+        self.sendable_tls.append(m.encode());
     }
 
     /// Send a raw TLS message, fragmenting it if needed.
@@ -509,12 +458,7 @@ impl CommonState {
     }
 
     pub(crate) fn take_received_plaintext(&mut self, bytes: Payload) {
-        let conn_id = self.active_conn_id;
-        self.stream_map
-            .streams
-            .get_mut(&conn_id)
-            .unwrap()
-            .recv.append(bytes.0);
+        self.received_plaintext.append(bytes.0);
     }
 
     #[cfg(feature = "tls12")]
@@ -625,33 +569,15 @@ impl CommonState {
         //
         // In the handshake case we don't have readable plaintext before the handshake has
         // completed, but also don't want to read if we still have sendable tls.
-        self.stream_map
-            .streams
-            .get(&self.active_conn_id)
-            .unwrap()
-            .recv.is_empty()
+        self.received_plaintext.is_empty()
             && !self.has_received_close_notify
-            && (self.may_send_application_data || self.stream_map
-            .streams
-            .get(&self.active_conn_id)
-            .unwrap()
-            .send.is_empty())
+            && (self.may_send_application_data || self.sendable_tls.is_empty())
     }
 
     pub(crate) fn current_io_state(&self) -> IoState {
         IoState {
-            tls_bytes_to_write: self
-                .stream_map
-                .streams
-                .get(&self.active_conn_id)
-                .unwrap()
-                .send.len(),
-            plaintext_bytes_to_read: self
-                .stream_map
-                .streams
-                .get(&self.active_conn_id)
-                .unwrap()
-                .recv.len(),
+            tls_bytes_to_write: self.sendable_tls.len(),
+            plaintext_bytes_to_read: self.received_plaintext.len(),
             peer_has_closed: self.has_received_close_notify,
         }
     }
@@ -692,8 +618,8 @@ impl CommonState {
         if let Some(message) = self.queued_key_update_message.take() {
             match stream {
                 Some(s) => s.send.append(message),
-                None => self.send.append(message),
-            }
+                None => self.sendable_tls.append(message),
+            };
         }
     }
 }

@@ -39,12 +39,7 @@ impl Connection {
     ///
     /// See [`ConnectionCommon::write_tls()`] for more information.
     pub fn write_tls(&mut self, wr: &mut dyn io::Write) -> Result<usize, io::Error> {
-        let conn_id = self.active_conn_id;
-        self.stream_map
-            .streams
-            .get_mut(&conn_id)
-            .unwrap()
-            .send.write_to(wr)
+        self.sendable_tls.write_to(wr)
     }
 
     /// Returns an object that allows reading plaintext.
@@ -326,16 +321,11 @@ pub struct ConnectionCommon<Data> {
 impl<Data> ConnectionCommon<Data> {
     /// Returns an object that allows reading plaintext.
     pub fn reader(&mut self) -> Reader {
-        let conn_id = self.active_conn_id;
         let common = &mut self.core.common_state;
         Reader {
-            received_plaintext: &mut common
-                .stream_map
-                .streams
-                .get_mut(&conn_id)
-                .unwrap().recv,
-            /// Are we done? i.e., have we processed all received messages, and received a
-            /// close_notify to indicate that no new messages will arrive?
+            received_plaintext: &mut common.received_plaintext,
+            // Are we done? i.e., have we processed all received messages, and received a
+            // close_notify to indicate that no new messages will arrive?
             peer_cleanly_closed: common.has_received_close_notify
                 && !self.core.message_deframer.has_pending(),
             has_seen_eof: common.has_seen_eof,
@@ -500,12 +490,7 @@ impl<Data> ConnectionCommon<Data> {
     /// [`process_new_packets()`]: ConnectionCommon::process_new_packets
     /// [`reader()`]: ConnectionCommon::reader
     pub fn read_tls(&mut self, rd: &mut dyn io::Read) -> Result<usize, io::Error> {
-        let conn_id = self.active_conn_id;
-        if self.stream_map
-            .streams
-            .get_mut(&conn_id)
-            .unwrap()
-            .recv.is_full() {
+        if self.received_plaintext.is_full() {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
                 "received plaintext buffer full",
@@ -527,12 +512,7 @@ impl<Data> ConnectionCommon<Data> {
     /// After this function returns, the connection buffer may not yet be fully flushed. The
     /// [`CommonState::wants_write`] function can be used to check if the output buffer is empty.
     pub fn write_tls(&mut self, wr: &mut dyn io::Write) -> Result<usize, io::Error> {
-        let conn_id = self.active_conn_id;
-        self.stream_map
-            .streams
-            .get_mut(&conn_id)
-            .unwrap()
-            .send.write_to(wr)
+        self.sendable_tls.write_to(wr)
     }
 
     /// Derives key material from the agreed connection secrets.
