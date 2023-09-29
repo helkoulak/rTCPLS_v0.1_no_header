@@ -263,8 +263,18 @@ impl TcplsSession {
 
     }
 
-   /* pub fn stream_recv<'a, 'b>(
-        &'a mut self, stream_id: u64, app_buffers: &'b mut RecvBufMap,
+    /// Receive data on specified TCP socket
+    pub fn recv_on_connection(&mut self, conn_id: u32) -> Result<usize, io::Error> {
+        let mut socket = &mut self.tcp_connections
+            .get_mut(&conn_id)
+            .unwrap()
+            .socket;
+        self.tls_conn.as_mut().unwrap().read_tls(socket)
+
+    }
+
+    pub fn stream_recv<'a, 'b>(
+        &'a mut self, conn_id: u64, recv_id: u64, app_buffers: &'b mut RecvBufMap,
     ) -> Result<(&'b [u8], usize, bool), Error> {
 
         let mut tls_conn = self.tls_conn.as_mut().unwrap();
