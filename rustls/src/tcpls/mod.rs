@@ -5,8 +5,9 @@
 use std::{io, u32, vec};
 use std::collections::HashMap;
 use std::fs;
-use std::io::{BufReader, Read, Write};
+use std::io::{BufReader, Bytes, Read, Write};
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::slice::Chunks;
 use std::sync::Arc;
 
 use mio::net::{TcpListener, TcpStream};
@@ -20,7 +21,10 @@ use crate::{
 use crate::enums::ProtocolVersion;
 use crate::msgs::base::Payload;
 use crate::msgs::codec;
-use crate::msgs::message::PlainMessage;
+use crate::msgs::codec::{Codec, put_u16};
+use crate::msgs::fragmenter::PACKET_OVERHEAD;
+use crate::msgs::message::{BorrowedPlainMessage, PlainMessage};
+use crate::ProtocolVersion::TLSv1_2;
 use crate::tcpls::frame::{MAX_TCPLS_FRAGMENT_LEN, StreamFrameHeader};
 use crate::tcpls::network_address::AddressMap;
 use crate::tcpls::stream::{RecvBufMap, StreamMap};
@@ -160,30 +164,35 @@ impl TcplsSession {
         };
 
 
-        // Encapsulate data chunks with TCPLS stream frame header, encrypt each fragment then
+        // Encapsulate data chunks with TCPLS stream frame header,
         // buffer it in send buffer
 
         let mut buffered = 0;
-        let iter = fragment_slice_owned(
-            ContentType::ApplicationData,
-            ProtocolVersion::TLSv1_2,
-            buf,
-        );
+        let chunks = fragment_slice_internal(buf);
 
-        for mut m in iter {
+        for mut chunk in chunks {
+
             let mut header = StreamFrameHeader{
-                length: m.payload.0.len() as u64,
+                length: chunk.len() as u64,
                 offset: stream.send.get_offset(),
                 stream_id,
-                fin: if m.payload.0.len() < MAX_TCPLS_FRAGMENT_LEN {match fin { true => 1, false => 0, }} else { 0 }, // consider fin at the last fragment
+                // consider fin at the last fragment
+                //TODO: fix logic about flag fin
+                fin: if chunk.len() < MAX_TCPLS_FRAGMENT_LEN {
+                    match fin { true => 1, false => 0, }
+                } else { 0 },
             };
-            let header_len = header.get_header_length();
-            let payload_len = m.payload.0.len();
-            m.payload.0.extend_from_slice(vec![0; header_len].as_slice());
-            let mut octets = octets::OctetsMut::with_slice_at_offset(&mut m.payload.0, payload_len);
+            let mut record= vec![0; PACKET_OVERHEAD + chunk.len() + header.get_header_length()];
+            record[0] = 0x17; // ApplicationData
+            put_u16(0x0303 as u16, &mut record[1..3]); // TLSv1_2
+
+            let mut octets = octets::OctetsMut::with_slice_at_offset(&mut record, PACKET_OVERHEAD);
+
+            octets.put_bytes(chunk)?;
+
             header.encode_stream_header(&mut octets).expect("encoding stream header failed");
 
-            buffered += stream.send.append(m.to_vec());
+            buffered += stream.send.append(record);
 
         }
 
@@ -356,18 +365,8 @@ pub enum TcplsConnectionState {
 }
 
 /// Returns an iterator of PlainMessage objects from the input slice
-fn fragment_slice_owned<'a>(
-    typ: ContentType,
-    version: ProtocolVersion,
-    payload: &'a [u8],
-) -> impl Iterator<Item=PlainMessage> + 'a {
-    payload
-        .chunks(MAX_TCPLS_FRAGMENT_LEN)
-        .map(move |c| PlainMessage {
-            typ,
-            version,
-            payload: Payload(c.to_vec()),
-        })
+fn fragment_slice_internal(payload: &[u8]) -> Chunks<u8> {
+    payload.chunks(MAX_TCPLS_FRAGMENT_LEN)
 }
 
 pub fn lookup_address(host: &str, port: u16) -> SocketAddr {
