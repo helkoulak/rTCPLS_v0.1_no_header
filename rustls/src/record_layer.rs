@@ -193,12 +193,14 @@ impl RecordLayer {
         //
         // Note that there's no reason to refuse to decrypt: the security
         // failure has already happened.
-        let conn_id = self.active_conn_id;
+
         let want_close_before_decrypt = self.seq_map.seq_num_map.get(&conn_id).unwrap().read_seq == SEQ_SOFT_LIMIT;
 
+        let conn_id = self.active_conn_id;
         let encrypted_len = encr.payload.len();
 
         /// prepare crypto context for the specified connection
+        /// if IV already exists for the specified connection, the function does nothing
         if !self.is_handshaking && conn_id != 0 {
             self.message_decrypter.derive_dec_connection_iv(conn_id);
         }
