@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{BufReader, Bytes, Read, Write};
 use std::net::{SocketAddr, ToSocketAddrs};
-use std::slice::Chunks;
+use std::slice::{Chunks, ChunksExact};
 use std::sync::Arc;
 
 use mio::net::{TcpListener, TcpStream};
@@ -151,6 +151,9 @@ impl TcplsSession {
         // Get existing stream or create a new one.
         let stream = self.get_or_create_stream(stream_id, true)?;
 
+        // we're respecting limit for plaintext data -- so we'll
+        // be out by whatever the cipher+record overhead is.  That's a
+        // constant and predictable amount, so it's not a terrible issue.
         let cap = stream.send.apply_limit(input.len());
 
         if cap == 0 && !input.is_empty(){
@@ -168,31 +171,34 @@ impl TcplsSession {
         // buffer it in send buffer
 
         let mut buffered = 0;
-        let chunks = fragment_slice_internal(buf);
+        let chunks = buf.chunks(MAX_TCPLS_FRAGMENT_LEN);
 
         for mut chunk in chunks {
 
+            let chunk_len = chunk.len();
             let mut header = StreamFrameHeader{
-                length: chunk.len() as u64,
+                length: chunk_len as u64,
                 offset: stream.send.get_offset(),
                 stream_id,
                 // consider fin at the last fragment
-                //TODO: fix logic about flag fin
-                fin: if chunk.len() < MAX_TCPLS_FRAGMENT_LEN {
+                fin: if chunk_len < MAX_TCPLS_FRAGMENT_LEN {
                     match fin { true => 1, false => 0, }
                 } else { 0 },
             };
-            let mut record= vec![0; PACKET_OVERHEAD + chunk.len() + header.get_header_length()];
-            record[0] = 0x17; // ApplicationData
-            put_u16(0x0303 as u16, &mut record[1..3]); // TLSv1_2
 
-            let mut octets = octets::OctetsMut::with_slice_at_offset(&mut record, PACKET_OVERHEAD);
+            let mut record= vec![0; chunk_len + header.get_header_length() + 1];
+
+
+            let mut octets = octets::OctetsMut::with_slice_at_offset(&mut record, 0);
 
             octets.put_bytes(chunk)?;
 
             header.encode_stream_header(&mut octets).expect("encoding stream header failed");
 
-            buffered += stream.send.append(record);
+           octets.put_u8(0x17)?; // ContentType::ApplicationData
+
+            stream.send.append(record);
+            buffered += chunk_len;
 
         }
 
@@ -251,17 +257,15 @@ impl TcplsSession {
         while len > 0 {
 
             let chunk = stream.send.pop().unwrap();
-            let mut rd = codec::Reader::init(&chunk);
-            let m = PlainMessage::read(&mut rd).unwrap();
 
             let em = tls_conn
                 .record_layer.
-                encrypt_outgoing_owned(m);
+                encrypt_outgoing_owned(chunk.as_slice());
 
             sent = self.tcp_connections
                 .get_mut(&conn_id)
                 .unwrap()
-                .socket.write(&em.encode()).unwrap();
+                .socket.write(em.as_slice()).unwrap();
             stream.send.consume_chunk(sent, chunk);
             len -= sent;
             done += sent;
@@ -292,16 +296,18 @@ impl TcplsSession {
             return  Err(Error::HandshakeNotComplete)
         }
 
+        if tls_conn.m
+
 
         // The stream is ready: we have a reference to some contiguous data
-        let outbuf = app_buffers.get_mut(stream_id)?;
+        let outbuf = app_buffers.get_mut(recv_id)?;
 
-        let read = tls_conn.process_received()
+        let read = tls_conn.process_new_packets();
 
 
 
         Ok((outbuf, read, fin))
-    }*/
+    }
 
 
 
@@ -364,10 +370,7 @@ pub enum TcplsConnectionState {
     JOINED,
 }
 
-/// Returns an iterator of PlainMessage objects from the input slice
-fn fragment_slice_internal(payload: &[u8]) -> Chunks<u8> {
-    payload.chunks(MAX_TCPLS_FRAGMENT_LEN)
-}
+
 
 pub fn lookup_address(host: &str, port: u16) -> SocketAddr {
     let mut addrs = (host, port).to_socket_addrs().unwrap(); // resolves hostname and return an itr
