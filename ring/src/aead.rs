@@ -410,6 +410,26 @@ fn seal_in_place_separate_tag_(
     ))
 }
 
+
+#[inline]
+fn seal_in_output_separate_tag_(
+    key: &UnboundKey,
+    nonce: Nonce,
+    aad: Aad<&[u8]>,
+    in_out: & [u8],
+    output: &mut [u8],
+) -> Result<Tag, error::Unspecified> {
+    check_per_nonce_max_bytes(key.algorithm, in_out.len())?;
+    Ok((key.algorithm.seal_output)(
+        &key.inner,
+        nonce,
+        aad,
+        in_out,
+        output,
+        key.cpu_features,
+    ))
+}
+
 /// The additionally authenticated data (AAD) for an opening or sealing
 /// operation. This data is authenticated but is **not** encrypted.
 ///
@@ -611,6 +631,22 @@ impl LessSafeKey {
             .map(|tag| in_out.extend(tag.as_ref()))
     }
 
+    #[inline]
+    pub fn seal_in_output_append_tag<A, InOut>(
+        &self,
+        nonce: Nonce,
+        aad: Aad<A>,
+        in_out: & [u8],
+        output: &mut InOut,
+    ) -> Result<(), error::Unspecified>
+        where
+            A: AsRef<[u8]>,
+            InOut: AsMut<[u8]> + for<'in_out> Extend<&'in_out u8>,
+    {
+        self.seal_in_output_separate_tag(nonce, aad, in_out, output.as_mut())
+            .map(|tag| output.extend(tag.as_ref()))
+    }
+
     /// Like `SealingKey::seal_in_place_separate_tag()`, except it accepts an
     /// arbitrary nonce.
     ///
@@ -626,6 +662,20 @@ impl LessSafeKey {
         A: AsRef<[u8]>,
     {
         seal_in_place_separate_tag_(&self.key, nonce, Aad::from(aad.as_ref()), in_out)
+    }
+
+    #[inline]
+    pub fn seal_in_output_separate_tag<A>(
+        &self,
+        nonce: Nonce,
+        aad: Aad<A>,
+        in_out: & [u8],
+        output: &mut [u8],
+    ) -> Result<Tag, error::Unspecified>
+        where
+            A: AsRef<[u8]>,
+    {
+        seal_in_output_separate_tag_(&self.key, nonce, Aad::from(aad.as_ref()), in_out, output)
     }
 
     /// The key's AEAD algorithm.
@@ -652,6 +702,15 @@ pub struct Algorithm {
         nonce: Nonce,
         aad: Aad<&[u8]>,
         in_out: &mut [u8],
+        cpu_features: cpu::Features,
+    ) -> Tag,
+
+    seal_output: fn(
+        key: &KeyInner,
+        nonce: Nonce,
+        aad: Aad<&[u8]>,
+        in_out: & [u8],
+        output: &mut [u8],
         cpu_features: cpu::Features,
     ) -> Tag,
     open: fn(

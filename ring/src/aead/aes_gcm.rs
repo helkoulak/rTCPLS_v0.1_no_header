@@ -23,6 +23,7 @@ pub static AES_128_GCM: aead::Algorithm = aead::Algorithm {
     key_len: 16,
     init: init_128,
     seal: aes_gcm_seal,
+    seal_output: aes_gcm_seal_output,
     open: aes_gcm_open,
     open_output: aes_gcm_open_output,
     id: aead::AlgorithmID::AES_128_GCM,
@@ -35,6 +36,7 @@ pub static AES_256_GCM: aead::Algorithm = aead::Algorithm {
     key_len: 32,
     init: init_256,
     seal: aes_gcm_seal,
+    seal_output: aes_gcm_seal_output,
     open: aes_gcm_open,
     open_output: aes_gcm_open_output,
     id: aead::AlgorithmID::AES_256_GCM,
@@ -75,6 +77,17 @@ fn aes_gcm_seal(
     cpu_features: cpu::Features,
 ) -> Tag {
     aead(key, nonce, aad, in_out, Direction::Sealing, cpu_features)
+}
+
+fn aes_gcm_seal_output(
+    key: &aead::KeyInner,
+    nonce: Nonce,
+    aad: Aad<&[u8]>,
+    in_out: & [u8],
+    output: &mut [u8],
+    cpu_features: cpu::Features,
+) -> Tag {
+    aead_output(key, nonce, aad, in_out, output, Direction::Sealing, cpu_features)
 }
 
 fn aes_gcm_open(
@@ -284,7 +297,7 @@ fn aead_output(
             );
 
             if let Direction::Sealing = direction {
-                gcm_ctx.update_blocks(&input_remaining[output..][..chunk_len]);
+                gcm_ctx.update_blocks(&out_remaining[output..][..chunk_len]);
             }
 
             output += chunk_len;
