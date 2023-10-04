@@ -22,7 +22,7 @@ pub trait MessageDecrypter: Send + Sync {
 /// Objects with this trait can encrypt TLS messages.
 pub(crate) trait MessageEncrypter: Send + Sync {
     fn encrypt(&self, m: BorrowedPlainMessage, seq: u64, connection_id: u32) -> Result<OpaqueMessage, Error>;
-    fn encrypt_owned(&self, msg: PlainMessage, seq: u64, conn_id: u32) -> Result<OpaqueMessage, Error>;
+    fn encrypt_owned(&self, msg: &[u8], seq: u64, conn_id: u32) -> Result<Vec<u8>, Error>;
     fn derive_enc_connection_iv(&mut self, conn_id: u32);
 }
 
