@@ -165,24 +165,29 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         })
     }
 
-    fn encrypt_owned(&self, msg: PlainMessage, seq: u64, conn_id: u32) -> Result<OpaqueMessage, Error> {
-        let mut total_len = msg.payload.0.len() + 1 + self.enc_key.algorithm().tag_len();
-        let mut m = msg;
-        m.payload.0.extend_from_slice(vec![0; total_len].as_slice());
-        m.typ.encode(&mut m.payload.0);
+    fn encrypt_owned(&self, msg: &[u8], seq: u64, conn_id: u32) -> Result<Vec<u8>, Error> {
+        let total_len = PACKET_OVERHEAD + msg.len() + self.enc_key.algorithm().tag_len();
+        let paylaod_len = total_len - PACKET_OVERHEAD;
+        let mut record = vec![0; total_len];
+        // Encode TLS record overhead
+        // ApplicationData
+        record[0] = 0x17;
+        // TLSv1_2
+        record[1] = ((0x0303 as u16 >> 8) & 0xFF) as u8;
+        record[2] = (0x0303 as u16 & 0xFF) as u8;
+        // payload length
+        record[3] = ((paylaod_len as u16 >> 8) & 0xFF) as u8;
+        record[4] = (paylaod_len as u16 & 0xFF) as u8;
 
         let nonce = make_nonce(self.iv.get(&conn_id).unwrap(), seq);
         let aad = make_tls13_aad(total_len);
 
+
         self.enc_key
-            .seal_in_place_append_tag(nonce, aad, &mut m.payload.0)
+            .seal_in_output_append_tag(nonce, aad, msg, &mut record[PACKET_OVERHEAD..])
             .map_err(|_| Error::General("encrypt failed".to_string()))?;
 
-        Ok(OpaqueMessage {
-            typ: ContentType::ApplicationData,
-            version: ProtocolVersion::TLSv1_2,
-            payload: Payload::new(m.payload.0),
-        })
+        Ok(record)
     }
 
     fn derive_enc_connection_iv(&mut self, conn_id: u32) {
