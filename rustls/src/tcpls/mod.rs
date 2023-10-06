@@ -172,16 +172,18 @@ impl TcplsSession {
 
         let mut buffered = 0;
         let chunks = buf.chunks(MAX_TCPLS_FRAGMENT_LEN);
+        let mut number_of_chunks = chunks.len();
 
         for mut chunk in chunks {
-
+            
+            number_of_chunks -= 1;
             let chunk_len = chunk.len();
             let mut header = StreamFrameHeader{
                 length: chunk_len as u64,
                 offset: stream.send.get_offset(),
                 stream_id,
                 // consider fin at the last fragment
-                fin: if chunk_len < MAX_TCPLS_FRAGMENT_LEN {
+                fin: if number_of_chunks == 0 {
                     match fin { true => 1, false => 0, }
                 } else { 0 },
             };
