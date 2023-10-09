@@ -98,8 +98,8 @@ pub enum Error {
     /// Bad stream id if stream is local and even for client or not odd for server.
     BadStreamId,
 
-    /// Receive buffer not found for the given stream id
-    RecvBufNotFound,
+    /// buffer not found for the given stream id
+    BufNotFound,
 
     /// The provided buffer is too short.
     BufferTooShort,
@@ -448,7 +448,7 @@ impl fmt::Display for Error {
             Self::General(ref err) => write!(f, "unexpected error: {}", err),
             Self::Done => write!(f, "There is no more work to do"),
             Self::BadStreamId => write!(f, "Bad stream id if stream is local and even for client or not odd for server"),
-            Self::RecvBufNotFound => write!(f, "Receive buffer not found for the given stream id"),
+            Self::BufNotFound => write!(f, "Buffer not found for the given stream id"),
             Self::BufferTooShort => write!(f, "The provided buffer is too short."),
 
         }

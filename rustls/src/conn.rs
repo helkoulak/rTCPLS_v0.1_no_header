@@ -14,6 +14,7 @@ use std::fmt::Debug;
 use std::io;
 use std::mem;
 use std::ops::{Deref, DerefMut};
+use crate::tcpls;
 
 /// A client or server connection.
 #[derive(Debug)]
@@ -62,6 +63,15 @@ impl Connection {
     ///
     /// See [`ConnectionCommon::process_new_packets()`] for more information.
     pub fn process_new_packets(&mut self) -> Result<IoState, Error> {
+        match self {
+            Self::Client(conn) => conn.process_new_packets(),
+            Self::Server(conn) => conn.process_new_packets(),
+        }
+    }
+
+    /// Processes any new packets read by a previous call to [`tcpls::TcplsSession::recv_on_connection`].
+
+    pub fn process_received_zc(&mut self, app_buf: &mut [u8]) -> Result<IoState, Error> {
         match self {
             Self::Client(conn) => conn.process_new_packets(),
             Self::Server(conn) => conn.process_new_packets(),
@@ -467,6 +477,11 @@ impl<Data> ConnectionCommon<Data> {
     /// [`process_new_packets`]: Connection::process_new_packets
     #[inline]
     pub fn process_new_packets(&mut self) -> Result<IoState, Error> {
+        self.core.process_new_packets()
+    }
+
+    #[inline]
+    pub fn process_received_zc(&mut self, app_buf: &mut [u8]) -> Result<IoState, Error> {
         self.core.process_new_packets()
     }
 

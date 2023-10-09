@@ -1,3 +1,4 @@
+use std::cmp::min;
 use std::io;
 use std::ops::Range;
 
@@ -7,7 +8,7 @@ use super::message::PlainMessage;
 use crate::enums::{ContentType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerMisbehaved};
 use crate::msgs::{codec, message};
-use crate::msgs::message::{BorrowedOpaqueMessage, Message, MessageError, OpaqueMessage};
+use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, Message, MessageError, OpaqueMessage};
 use crate::record_layer::{Decrypted, RecordLayer};
 
 /// This deframer works to reconstruct TLS messages from a stream of arbitrary-sized reads.
@@ -190,6 +191,61 @@ impl MessageDeframer {
         }))
     }
 
+    pub fn pop_zc(&mut self, record_layer: &mut RecordLayer, app_buf: &mut [u8]) -> Result<Option<&[u8]>, Error> {
+        if let Some(last_err) = self.last_error.clone() {
+            return Err(last_err);
+        } else if self.used == 0 {
+            return Ok(None);
+        }
+
+        let start = 0;
+
+            // Does our `buf` contain a full message?  It does if it is big enough to
+            // contain a header, and that header has a length which falls within `buf`.
+            // If so, deframe it and place the message onto the frames output queue.
+            let mut rd = codec::Reader::init(&self.buf[start..self.used]);
+            let m = match BorrowedOpaqueMessage::read(&mut rd) {
+                Ok((ct,ver, s, len)) => BorrowedOpaqueMessage {
+                    typ: ct,
+                    version: ver,
+                    payload: &self.buf[s..s + len as usize],
+                },
+                Err(msg_err) => {
+                    let err_kind = match msg_err {
+                        MessageError::TooShortForHeader | MessageError::TooShortForLength => {
+                            return Ok(None)
+                        }
+                        MessageError::InvalidEmptyPayload => InvalidMessage::InvalidEmptyPayload,
+                        MessageError::MessageTooLarge => InvalidMessage::MessageTooLarge,
+                        MessageError::InvalidContentType => InvalidMessage::InvalidContentType,
+                        MessageError::UnknownProtocolVersion => {
+                            InvalidMessage::UnknownProtocolVersion
+                        }
+                    };
+
+                    return Err(self.set_err(err_kind));
+                }
+            };
+
+            let buf_len = min(app_buf.len(), m.payload.len());
+
+            let payload = m.payload[..buf_len];
+            let end = start + rd.used();
+
+
+            // Decrypt the encrypted message (if necessary).
+            let msg = match record_layer.decrypt_incoming_zc(m.payload, app_buf) {
+                Ok(Some(decrypted)) => decrypted,
+
+                Ok(None) => {
+                    self.discard(end);
+                }
+                Err(e) => return Err(e),
+            };
+
+
+    }
+
     /// Fuses this deframer's error and returns the set value.
     ///
     /// Any future calls to `pop` will return `err` again.
@@ -292,6 +348,10 @@ impl MessageDeframer {
         Ok(new_bytes)
     }
 
+    pub fn bytes_to_read(& self) -> usize {
+        self.used
+    }
+
     /// Resize the internal `buf` if necessary for reading more bytes.
     fn prepare_read(&mut self) -> Result<(), &'static str> {
         // We allow a maximum of 64k of buffered data for handshake messages only. Enforce this
@@ -334,7 +394,7 @@ impl MessageDeframer {
     }
 
     /// Discard `taken` bytes from the start of our buffer.
-    fn discard(&mut self, taken: usize) {
+    pub fn discard(&mut self, taken: usize) {
         #[allow(clippy::comparison_chain)]
         if taken < self.used {
             /* Before:

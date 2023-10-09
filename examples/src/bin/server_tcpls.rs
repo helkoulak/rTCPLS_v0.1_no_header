@@ -175,7 +175,7 @@ impl OpenConnection {
             tls_conn,
             back,
             sent_http_response: false,
-            tcpls_session: TcplsSession::new(),
+            tcpls_session: TcplsSession::new(true),
             buffer: Vec::new(),
         }
     }

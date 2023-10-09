@@ -168,7 +168,7 @@ impl MessageEncrypter for GcmMessageEncrypter {
         })
     }
 
-    fn encrypt_owned(&self, msg: PlainMessage, seq: u64, conn_id: u32) -> Result<OpaqueMessage, Error> {
+    fn encrypt_zc(&self, msg: PlainMessage, seq: u64, conn_id: u32) -> Result<OpaqueMessage, Error> {
         todo!()
     }
 
@@ -250,7 +250,7 @@ impl MessageEncrypter for ChaCha20Poly1305MessageEncrypter {
         })
     }
 
-    fn encrypt_owned(&self, msg: PlainMessage, seq: u64, conn_id: u32) -> Result<OpaqueMessage, Error> {
+    fn encrypt_zc(&self, msg: PlainMessage, seq: u64, conn_id: u32) -> Result<OpaqueMessage, Error> {
         todo!()
     }
 

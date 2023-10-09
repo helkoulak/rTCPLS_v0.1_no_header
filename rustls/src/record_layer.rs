@@ -223,6 +223,47 @@ impl RecordLayer {
         }
     }
 
+    /// Decrypt a TLS message.
+    ///
+    /// `encr` is a decoded message allegedly received from the peer.
+    /// If it can be decrypted, its decryption is returned.  Otherwise,
+    /// an error is returned.
+    pub(crate) fn decrypt_incoming_zc(
+        &mut self,
+        encr: & [u8],
+        app_data: &mut [u8]
+    ) -> Result<Option<usize>, Error> {
+        if self.decrypt_state != DirectionState::Active {
+            return Err(Error::DecryptError)
+        }
+
+        //TODO: need to check how to utilize this flag
+      /*  let want_close_before_decrypt = self.seq_map.seq_num_map.get(&conn_id).unwrap().read_seq == SEQ_SOFT_LIMIT;*/
+
+        let conn_id = self.active_conn_id;
+        let encrypted_len = encr.payload.len();
+
+        /// prepare crypto context for the specified connection
+        /// if IV already exists for the specified connection, the function does nothing
+        if !self.is_handshaking && conn_id != 0 {
+            self.message_decrypter.derive_dec_connection_iv(conn_id);
+        }
+        match self
+            .message_decrypter
+            .decrypt_zc(encr, self.seq_map.seq_num_map.get(&conn_id).unwrap().read_seq, conn_id, app_data)
+        {
+            Ok(bytes_decrypted) => {
+                self.seq_map.seq_num_map.get_mut(&conn_id).unwrap().read_seq += 1;
+                Ok(Some(bytes_decrypted))
+            },
+            Err(Error::DecryptError) if self.doing_trial_decryption(encrypted_len) => {
+                trace!("Dropping undecryptable message after aborted early_data");
+                Ok(None)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
     /// Encrypt a TLS message.
     ///
     /// `plain` is a TLS message we'd like to send.  This function
@@ -257,7 +298,7 @@ impl RecordLayer {
             self.message_encrypter.derive_enc_connection_iv(conn_id);
         }
         self.message_encrypter
-            .encrypt_owned(plain, seq, conn_id)
+            .encrypt_zc(plain, seq, conn_id)
             .unwrap()
     }
 

@@ -7,8 +7,9 @@ use crate::msgs::codec;
 use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, OpaqueMessage, PlainMessage};
 
 use ring::{aead, hkdf};
-use crate::{ContentType, ProtocolVersion};
+use crate::{ContentType, PeerMisbehaved, ProtocolVersion};
 use crate::msgs::base::Payload;
+use crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
 
 
 /// Objects with this trait can decrypt TLS messages.
@@ -16,13 +17,14 @@ pub trait MessageDecrypter: Send + Sync {
     /// Perform the decryption over the concerned TLS message.
 
     fn decrypt(&self, m: BorrowedOpaqueMessage, seq: u64, connection_id: u32) -> Result<PlainMessage, Error>;
+    fn decrypt_zc(&self, msg: & [u8], seq: u64, conn_id: u32, output: &mut [u8]) -> Result<usize, Error>;
     fn derive_dec_connection_iv(&mut self, conn_id: u32);
 }
 
 /// Objects with this trait can encrypt TLS messages.
 pub(crate) trait MessageEncrypter: Send + Sync {
     fn encrypt(&self, m: BorrowedPlainMessage, seq: u64, connection_id: u32) -> Result<OpaqueMessage, Error>;
-    fn encrypt_owned(&self, msg: &[u8], seq: u64, conn_id: u32) -> Result<Vec<u8>, Error>;
+    fn encrypt_zc(&self, msg: &[u8], seq: u64, conn_id: u32) -> Result<Vec<u8>, Error>;
     fn derive_enc_connection_iv(&mut self, conn_id: u32);
 }
 
@@ -115,7 +117,7 @@ impl MessageEncrypter for InvalidMessageEncrypter {
         Err(Error::EncryptError)
     }
 
-    fn encrypt_owned(&self, msg: PlainMessage, seq: u64, conn_id: u32) -> Result<OpaqueMessage, Error> {
+    fn encrypt_zc(&self, msg: PlainMessage, seq: u64, conn_id: u32) -> Result<OpaqueMessage, Error> {
         todo!()
     }
 
