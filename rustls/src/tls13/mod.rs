@@ -6,7 +6,7 @@ use crate::error::{Error, PeerMisbehaved};
 use crate::msgs::base::Payload;
 use crate::msgs::codec::{Codec, put_u16};
 use crate::msgs::fragmenter::{MAX_FRAGMENT_LEN, PACKET_OVERHEAD};
-use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, OpaqueMessage, PlainMessage};
+use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, DecryptedMessage, OpaqueMessage, PlainMessage};
 use crate::suites::{BulkAlgorithm, CipherSuiteCommon, SupportedCipherSuite};
 
 use ring::aead;
@@ -212,7 +212,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
 }
 
 impl MessageDecrypter for Tls13MessageDecrypter {
-    fn decrypt(&self, mut msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32) -> Result<PlainMessage, Error> {
+    fn decrypt(&self, mut msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, app_buf: Option<&mut Vec<u8>>) -> Result<DecryptedMessage, Error> {
         let payload = msg.payload;
         if payload.len() < self.dec_key.algorithm().tag_len() {
             return Err(Error::DecryptError);
@@ -220,14 +220,26 @@ impl MessageDecrypter for Tls13MessageDecrypter {
 
         let nonce = make_nonce(self.iv.get(&conn_id).unwrap(), seq);
         let aad = make_tls13_aad(payload.len());
-         let mut output= vec![0; payload.len()];
+
+        let mut output= match app_buf {
+            Some(buf) => {
+                if buf.len() < payload.len() {
+                    return Err(Error::BufferTooShort);
+                }
+                buf
+            },
+            None => &mut vec![0; payload.len()],
+        };
+
 
 
         let plain_len = self
             .dec_key
-            .open_in_output(nonce, aad, payload,  &mut output)
+            .open_in_output(nonce, aad, payload,   output)
             .map_err(|_| Error::DecryptError)?
             .len();
+
+
 
         output.truncate(plain_len);
 
@@ -235,7 +247,8 @@ impl MessageDecrypter for Tls13MessageDecrypter {
             return Err(Error::PeerSentOversizedRecord);
         }
 
-        msg.typ = unpad_tls13(&mut output);
+
+        msg.typ = unpad_tls13(output);
 
         if msg.typ == ContentType::Unknown(0) {
             return Err(PeerMisbehaved::IllegalTlsInnerPlaintext.into());
@@ -246,11 +259,23 @@ impl MessageDecrypter for Tls13MessageDecrypter {
         }
 
         msg.version = ProtocolVersion::TLSv1_3;
-        Ok(PlainMessage{
-            typ: msg.typ,
-            version: msg.version,
-            payload: Payload(output),
-        })
+
+        let decrypted = match app_buf {
+            Some(b) => {
+                DecryptedMessage::BorrowedPlainMessage(BorrowedPlainMessage{
+                    typ: msg.typ,
+                    version: msg.version,
+                    payload: output,
+                })
+            },
+            None => DecryptedMessage::PlainMessage(PlainMessage{
+                typ: msg.typ,
+                version: msg.version,
+                payload: Payload::new(output),
+            })
+        };
+
+        Ok(decrypted)
     }
 
 

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::vec;
 use crate::error::Error;
 use crate::msgs::codec;
-use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, OpaqueMessage, PlainMessage};
+use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, DecryptedMessage, OpaqueMessage, PlainMessage};
 
 use ring::{aead, hkdf};
 use crate::{ContentType, PeerMisbehaved, ProtocolVersion};
@@ -16,7 +16,7 @@ use crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
 pub trait MessageDecrypter: Send + Sync {
     /// Perform the decryption over the concerned TLS message.
 
-    fn decrypt(&self, m: BorrowedOpaqueMessage, seq: u64, connection_id: u32) -> Result<PlainMessage, Error>;
+    fn decrypt(&self, m: BorrowedOpaqueMessage, seq: u64, connection_id: u32, app_buf: Option<&mut Vec<u8>>) -> Result<DecryptedMessage, Error>;
     fn decrypt_zc(&self, msg: & [u8], seq: u64, conn_id: u32, output: &mut [u8]) -> Result<usize, Error>;
     fn derive_dec_connection_iv(&mut self, conn_id: u32);
 }

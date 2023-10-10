@@ -268,6 +268,23 @@ impl From<Message> for PlainMessage {
     }
 }
 
+impl From<DecryptedMessage> for PlainMessage {
+    fn from(dec: DecryptedMessage) -> Self {
+        let plain = match dec {
+            DecryptedMessage::PlainMessage(p) => p,
+            DecryptedMessage::BorrowedPlainMessage(p) => {
+                PlainMessage{
+                    typ: p.typ,
+                    version: p.version,
+                    payload: Payload(p.payload.to_vec())
+
+                }
+            },
+        };
+    }
+}
+
+
 /// A decrypted TLS frame
 ///
 /// This type owns all memory for its interior parts. It can be decrypted from an OpaqueMessage
@@ -429,4 +446,30 @@ pub enum MessageError {
     MessageTooLarge,
     InvalidContentType,
     UnknownProtocolVersion,
+}
+#[derive(Debug)]
+pub enum DecryptedMessage<'a> {
+    PlainMessage(PlainMessage),
+    BorrowedPlainMessage(BorrowedPlainMessage<'a>),
+}
+
+impl DecryptedMessage {
+    pub fn get_msg_type(&self) -> ContentType {
+        match self {
+            DecryptedMessage::PlainMessage(p) => p.typ,
+            DecryptedMessage::BorrowedPlainMessage(b) => b.typ,
+        }
+    }
+}
+
+impl From<PlainMessage> for DecryptedMessage {
+    fn from(p: PlainMessage) -> Self {
+        Self::PlainMessage(p)
+    }
+}
+
+impl From<BorrowedPlainMessage> for DecryptedMessage {
+    fn from(b: BorrowedPlainMessage) -> Self {
+        Self::BorrowedPlainMessage(b)
+    }
 }

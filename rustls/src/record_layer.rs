@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use crate::cipher::{Iv, MessageDecrypter, MessageEncrypter};
 use crate::error::Error;
-use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, OpaqueMessage, PlainMessage};
+use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, DecryptedMessage, OpaqueMessage, PlainMessage};
 
 #[cfg(feature = "logging")]
 use crate::log::trace;
@@ -177,11 +177,12 @@ impl RecordLayer {
     pub(crate) fn decrypt_incoming(
         &mut self,
         encr: BorrowedOpaqueMessage,
+        app_buf: Option<&mut Vec<u8>>
     ) -> Result<Option<Decrypted>, Error> {
         if self.decrypt_state != DirectionState::Active {
             return Ok(Some(Decrypted {
                 want_close_before_decrypt: false,
-                plaintext: encr.into_plain_message(),
+                plaintext: DecryptedMessage::PlainMessage(encr.into_plain_message()),
             }));
         }
 
@@ -206,7 +207,7 @@ impl RecordLayer {
         }
         match self
             .message_decrypter
-            .decrypt(encr, self.seq_map.seq_num_map.get(&conn_id).unwrap().read_seq, conn_id)
+            .decrypt(encr, self.seq_map.seq_num_map.get(&conn_id).unwrap().read_seq, conn_id, app_buf)
         {
             Ok(plaintext) => {
                 self.seq_map.seq_num_map.get_mut(&conn_id).unwrap().read_seq += 1;
@@ -349,9 +350,9 @@ impl RecordLayer {
 
 /// Result of decryption.
 #[derive(Debug)]
-pub struct Decrypted {
+pub struct Decrypted<'a> {
     /// Whether the peer appears to be getting close to encrypting too many messages with this key.
     pub want_close_before_decrypt: bool,
     /// The decrypted message.
-    pub plaintext: PlainMessage,
+    pub plaintext: DecryptedMessage<'a>,
 }

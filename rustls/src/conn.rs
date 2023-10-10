@@ -5,7 +5,7 @@ use crate::error::{Error, PeerMisbehaved};
 use crate::log::trace;
 use crate::msgs::deframer::{Deframed, MessageDeframer};
 use crate::msgs::handshake::Random;
-use crate::msgs::message::{Message, MessagePayload, PlainMessage};
+use crate::msgs::message::{DecryptedMessage, Message, MessagePayload, PlainMessage};
 #[cfg(feature = "secret_extraction")]
 use crate::suites::{ExtractedSecrets, PartiallyExtractedSecrets};
 use crate::vecbuf::ChunkVecBuffer;
@@ -441,7 +441,7 @@ impl<Data> ConnectionCommon<Data> {
     pub(crate) fn first_handshake_message(&mut self) -> Result<Option<Message>, Error> {
         match self
             .core
-            .deframe()?
+            .deframe(None)?
             .map(Message::try_from)
         {
             Some(Ok(msg)) => Ok(Some(msg)),
@@ -621,7 +621,7 @@ impl<Data> ConnectionCore<Data> {
         }
     }
 
-    pub(crate) fn process_new_packets(&mut self) -> Result<IoState, Error> {
+    pub(crate) fn process_new_packets(&mut self, app_buf: Option<&mut Vec<u8>>) -> Result<IoState, Error> {
         let mut state = match mem::replace(&mut self.state, Err(Error::HandshakeNotComplete)) {
             Ok(state) => state,
             Err(e) => {
@@ -630,8 +630,8 @@ impl<Data> ConnectionCore<Data> {
             }
         };
 
-        while let Some(msg) = self.deframe()? {
-            match self.process_msg(msg, state) {
+        while let Some(msg) = self.deframe(app_buf)? {
+            match self.process_msg(PlainMessage::from(msg), state) {
                 Ok(new) => state = new,
                 Err(e) => {
                     self.state = Err(e.clone());
@@ -645,10 +645,10 @@ impl<Data> ConnectionCore<Data> {
     }
 
     /// Pull a message out of the deframer and send any messages that need to be sent as a result.
-    fn deframe(&mut self) -> Result<Option<PlainMessage>, Error> {
+    fn deframe(&mut self, app_buf: Option<&mut Vec<u8>>) -> Result<Option<DecryptedMessage>, Error> {
         match self
             .message_deframer
-            .pop(&mut self.common_state.record_layer)
+            .pop(&mut self.common_state.record_layer, app_buf)
         {
             Ok(Some(Deframed {
                 want_close_before_decrypt,

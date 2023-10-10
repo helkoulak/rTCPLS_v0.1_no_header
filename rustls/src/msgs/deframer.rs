@@ -8,7 +8,7 @@ use super::message::PlainMessage;
 use crate::enums::{ContentType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerMisbehaved};
 use crate::msgs::{codec, message};
-use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, Message, MessageError, OpaqueMessage};
+use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, DecryptedMessage, Message, MessageError, OpaqueMessage};
 use crate::record_layer::{Decrypted, RecordLayer};
 
 /// This deframer works to reconstruct TLS messages from a stream of arbitrary-sized reads.
@@ -40,7 +40,7 @@ impl MessageDeframer {
     /// Returns an `Error` if the deframer failed to parse some message contents or if decryption
     /// failed, `Ok(None)` if no full message is buffered or if trial decryption failed, and
     /// `Ok(Some(_))` if a valid message was found and decrypted successfully.
-    pub fn pop(&mut self, record_layer: &mut RecordLayer) -> Result<Option<Deframed>, Error> {
+    pub fn pop(&mut self, record_layer: &mut RecordLayer, app_buf: Option<&mut Vec<u8>>) -> Result<Option<Deframed>, Error> {
         if let Some(last_err) = self.last_error.clone() {
             return Err(last_err);
         } else if self.used == 0 {
@@ -103,12 +103,12 @@ impl MessageDeframer {
                     want_close_before_decrypt: false,
                     aligned: true,
                     trial_decryption_finished: false,
-                    message: plain,
+                    message: DecryptedMessage::from(plain),
                 }));
             }
 
             // Decrypt the encrypted message (if necessary).
-            let msg = match record_layer.decrypt_incoming(m) {
+            let msg = match record_layer.decrypt_incoming(m, app_buf) {
                 Ok(Some(decrypted)) => {
                     let Decrypted {
                         want_close_before_decrypt,
@@ -187,7 +187,7 @@ impl MessageDeframer {
             want_close_before_decrypt: false,
             aligned: self.joining_hs.is_none(),
             trial_decryption_finished: true,
-            message,
+             message: DecryptedMessage::from(message),
         }))
     }
 
@@ -471,11 +471,11 @@ fn payload_size(buf: &[u8]) -> Result<Option<usize>, Error> {
 }
 
 #[derive(Debug)]
-pub struct Deframed {
+pub struct Deframed<'a> {
     pub want_close_before_decrypt: bool,
     pub aligned: bool,
     pub trial_decryption_finished: bool,
-    pub message: PlainMessage,
+    pub message: DecryptedMessage<'a>,
 }
 
 #[derive(Debug)]
@@ -495,7 +495,7 @@ const READ_SIZE: usize = 4096;
 #[cfg(test)]
 mod tests {
     use super::MessageDeframer;
-    use crate::msgs::message::{Message, OpaqueMessage};
+    use crate::msgs::message::{Message, OpaqueMessage, PlainMessage};
     use crate::record_layer::RecordLayer;
     use crate::{ContentType, Error, InvalidMessage};
 
@@ -579,15 +579,15 @@ mod tests {
     }
 
     fn pop_first(d: &mut MessageDeframer, rl: &mut RecordLayer) {
-        let m = d.pop(rl).unwrap().unwrap().message;
+        let m = d.pop(rl, None).unwrap().unwrap().message;
         assert_eq!(m.typ, ContentType::Handshake);
-        Message::try_from(m).unwrap();
+        Message::try_from(PlainMessage::from(m)).unwrap();
     }
 
     fn pop_second(d: &mut MessageDeframer, rl: &mut RecordLayer) {
-        let m = d.pop(rl).unwrap().unwrap().message;
+        let m = d.pop(rl, None).unwrap().unwrap().message;
         assert_eq!(m.typ, ContentType::Alert);
-        Message::try_from(m).unwrap();
+        Message::try_from(PlainMessage::from(m)).unwrap();
     }
 
     #[test]
@@ -705,7 +705,7 @@ mod tests {
 
         let mut rl = RecordLayer::new();
         assert_eq!(
-            d.pop(&mut rl).unwrap_err(),
+            d.pop(&mut rl, None).unwrap_err(),
             Error::InvalidMessage(InvalidMessage::InvalidContentType)
         );
     }
@@ -720,7 +720,7 @@ mod tests {
 
         let mut rl = RecordLayer::new();
         assert_eq!(
-            d.pop(&mut rl).unwrap_err(),
+            d.pop(&mut rl, None).unwrap_err(),
             Error::InvalidMessage(InvalidMessage::UnknownProtocolVersion)
         );
     }
@@ -735,7 +735,7 @@ mod tests {
 
         let mut rl = RecordLayer::new();
         assert_eq!(
-            d.pop(&mut rl).unwrap_err(),
+            d.pop(&mut rl, None).unwrap_err(),
             Error::InvalidMessage(InvalidMessage::MessageTooLarge)
         );
     }
@@ -749,7 +749,7 @@ mod tests {
         );
 
         let mut rl = RecordLayer::new();
-        let m = d.pop(&mut rl).unwrap().unwrap().message;
+        let m = d.pop(&mut rl, None).unwrap().unwrap().message;
         assert_eq!(m.typ, ContentType::ApplicationData);
         assert_eq!(m.payload.0.len(), 0);
         assert!(!d.has_pending());
@@ -766,12 +766,12 @@ mod tests {
 
         let mut rl = RecordLayer::new();
         assert_eq!(
-            d.pop(&mut rl).unwrap_err(),
+            d.pop(&mut rl, None).unwrap_err(),
             Error::InvalidMessage(InvalidMessage::InvalidEmptyPayload)
         );
         // CorruptMessage has been fused
         assert_eq!(
-            d.pop(&mut rl).unwrap_err(),
+            d.pop(&mut rl, None).unwrap_err(),
             Error::InvalidMessage(InvalidMessage::InvalidEmptyPayload)
         );
     }
