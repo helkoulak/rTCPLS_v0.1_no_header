@@ -632,19 +632,25 @@ impl LessSafeKey {
     }
 
     #[inline]
-    pub fn seal_in_output_append_tag<A, InOut>(
+    pub fn seal_in_output_append_tag<'in_out, A>(
         &self,
         nonce: Nonce,
         aad: Aad<A>,
-        in_out: & [u8],
-        output: &mut InOut,
+        input: &'in_out [u8],
+        output: &'in_out mut [u8],
+        offset: usize,
     ) -> Result<(), error::Unspecified>
         where
             A: AsRef<[u8]>,
-            InOut: AsMut<[u8]> + for<'in_out> Extend<&'in_out u8>,
     {
-        self.seal_in_output_separate_tag(nonce, aad, in_out, output.as_mut())
-            .map(|tag| output.extend(tag.as_ref()))
+        let tag = self.seal_in_output_separate_tag(nonce, aad, input, &mut output[offset..]).unwrap();
+        let mut i = 0;
+        // append tag to output
+        for b in &mut output[(offset + input.len())..] {
+            *b = tag.0[i];
+            i += 1;
+        }
+        Ok(())
     }
 
     /// Like `SealingKey::seal_in_place_separate_tag()`, except it accepts an
@@ -665,12 +671,12 @@ impl LessSafeKey {
     }
 
     #[inline]
-    pub fn seal_in_output_separate_tag<A>(
+    pub fn seal_in_output_separate_tag<'in_out, A>(
         &self,
         nonce: Nonce,
         aad: Aad<A>,
-        in_out: & [u8],
-        output: &mut [u8],
+        in_out: &'in_out [u8],
+        output: &'in_out mut [u8],
     ) -> Result<Tag, error::Unspecified>
         where
             A: AsRef<[u8]>,
