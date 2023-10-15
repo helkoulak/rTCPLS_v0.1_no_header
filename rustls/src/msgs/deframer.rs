@@ -8,8 +8,9 @@ use super::message::PlainMessage;
 use crate::enums::{ContentType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerMisbehaved};
 use crate::msgs::{codec, message};
-use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, DecryptedMessage, Message, MessageError, OpaqueMessage};
+use crate::msgs::message::{BorrowedOpaqueMessage, MessageError};
 use crate::record_layer::{Decrypted, RecordLayer};
+use crate::recvbuf::RecvBuffer;
 
 /// This deframer works to reconstruct TLS messages from a stream of arbitrary-sized reads.
 ///
@@ -40,7 +41,7 @@ impl MessageDeframer {
     /// Returns an `Error` if the deframer failed to parse some message contents or if decryption
     /// failed, `Ok(None)` if no full message is buffered or if trial decryption failed, and
     /// `Ok(Some(_))` if a valid message was found and decrypted successfully.
-    pub fn pop(&mut self, record_layer: &mut RecordLayer, app_buf: Option<&mut Vec<u8>>) -> Result<Option<Deframed>, Error> {
+    pub fn pop(&mut self, record_layer: &mut RecordLayer, recv_buf: &mut RecvBuffer) -> Result<Option<Deframed>, Error> {
         if let Some(last_err) = self.last_error.clone() {
             return Err(last_err);
         } else if self.used == 0 {
@@ -103,12 +104,12 @@ impl MessageDeframer {
                     want_close_before_decrypt: false,
                     aligned: true,
                     trial_decryption_finished: false,
-                    message: DecryptedMessage::from(plain),
+                    message: plain,
                 }));
             }
 
             // Decrypt the encrypted message (if necessary).
-            let msg = match record_layer.decrypt_incoming(m, app_buf) {
+            let msg = match record_layer.decrypt_incoming_zc(m, recv_buf) {
                 Ok(Some(decrypted)) => {
                     let Decrypted {
                         want_close_before_decrypt,
@@ -187,11 +188,11 @@ impl MessageDeframer {
             want_close_before_decrypt: false,
             aligned: self.joining_hs.is_none(),
             trial_decryption_finished: true,
-             message: DecryptedMessage::from(message),
+             message,
         }))
     }
 
-    pub fn pop_zc(&mut self, record_layer: &mut RecordLayer, app_buf: &mut [u8]) -> Result<Option<&[u8]>, Error> {
+    /*pub fn process_new_zc(&mut self, record_layer: &mut RecordLayer, app_buf: &mut RecvBuffer) -> Result<Option<(usize, bool)>, Error> {
         if let Some(last_err) = self.last_error.clone() {
             return Err(last_err);
         } else if self.used == 0 {
@@ -226,25 +227,21 @@ impl MessageDeframer {
                     return Err(self.set_err(err_kind));
                 }
             };
+        // Decrypt the encrypted message.
+        match record_layer.decrypt_incoming_zc(m, app_buf) {
+            Ok(Some((decrypted, wants_close_before_decrypt))) => {
+                self.discard(start + rd.used());
+                Ok(Some((decrypted, wants_close_before_decrypt)))
+            }
 
-            let buf_len = min(app_buf.len(), m.payload.len());
+            Ok(None) => {
+                self.discard(start + rd.used());
+                return Ok(None)
+            }
+            Err(e) => return Err(e),
+        }
 
-            let payload = m.payload[..buf_len];
-            let end = start + rd.used();
-
-
-            // Decrypt the encrypted message (if necessary).
-            let msg = match record_layer.decrypt_incoming_zc(m.payload, app_buf) {
-                Ok(Some(decrypted)) => decrypted,
-
-                Ok(None) => {
-                    self.discard(end);
-                }
-                Err(e) => return Err(e),
-            };
-
-
-    }
+    }*/
 
     /// Fuses this deframer's error and returns the set value.
     ///
@@ -471,11 +468,11 @@ fn payload_size(buf: &[u8]) -> Result<Option<usize>, Error> {
 }
 
 #[derive(Debug)]
-pub struct Deframed<'a> {
+pub struct Deframed {
     pub want_close_before_decrypt: bool,
     pub aligned: bool,
     pub trial_decryption_finished: bool,
-    pub message: DecryptedMessage<'a>,
+    pub message: PlainMessage,
 }
 
 #[derive(Debug)]

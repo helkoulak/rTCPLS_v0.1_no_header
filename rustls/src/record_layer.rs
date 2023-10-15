@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use crate::cipher::{Iv, MessageDecrypter, MessageEncrypter};
 use crate::error::Error;
-use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, DecryptedMessage, OpaqueMessage, PlainMessage};
+use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, OpaqueMessage, PlainMessage};
 
 #[cfg(feature = "logging")]
 use crate::log::trace;
+use crate::recvbuf::RecvBuffer;
 
 static SEQ_SOFT_LIMIT: u64 = 0xffff_ffff_ffff_0000u64;
 static SEQ_HARD_LIMIT: u64 = 0xffff_ffff_ffff_fffeu64;
@@ -177,12 +178,11 @@ impl RecordLayer {
     pub(crate) fn decrypt_incoming(
         &mut self,
         encr: BorrowedOpaqueMessage,
-        app_buf: Option<&mut Vec<u8>>
     ) -> Result<Option<Decrypted>, Error> {
         if self.decrypt_state != DirectionState::Active {
             return Ok(Some(Decrypted {
                 want_close_before_decrypt: false,
-                plaintext: DecryptedMessage::PlainMessage(encr.into_plain_message()),
+                plaintext: encr.into_plain_message(),
             }));
         }
 
@@ -195,9 +195,10 @@ impl RecordLayer {
         // Note that there's no reason to refuse to decrypt: the security
         // failure has already happened.
 
+        let conn_id = self.active_conn_id;
         let want_close_before_decrypt = self.seq_map.seq_num_map.get(&conn_id).unwrap().read_seq == SEQ_SOFT_LIMIT;
 
-        let conn_id = self.active_conn_id;
+
         let encrypted_len = encr.payload.len();
 
         /// prepare crypto context for the specified connection
@@ -207,7 +208,7 @@ impl RecordLayer {
         }
         match self
             .message_decrypter
-            .decrypt(encr, self.seq_map.seq_num_map.get(&conn_id).unwrap().read_seq, conn_id, app_buf)
+            .decrypt(encr, self.seq_map.seq_num_map.get(&conn_id).unwrap().read_seq, conn_id)
         {
             Ok(plaintext) => {
                 self.seq_map.seq_num_map.get_mut(&conn_id).unwrap().read_seq += 1;
@@ -231,17 +232,29 @@ impl RecordLayer {
     /// an error is returned.
     pub(crate) fn decrypt_incoming_zc(
         &mut self,
-        encr: & [u8],
-        app_data: &mut [u8]
-    ) -> Result<Option<usize>, Error> {
+        encr: BorrowedOpaqueMessage,
+        recv_buf: &mut RecvBuffer,
+    ) -> Result<Option<Decrypted>, Error> {
         if self.decrypt_state != DirectionState::Active {
-            return Err(Error::DecryptError)
+            return Ok(Some(Decrypted {
+                want_close_before_decrypt: false,
+                plaintext: encr.into_plain_message(),
+            }));
         }
 
-        //TODO: need to check how to utilize this flag
-      /*  let want_close_before_decrypt = self.seq_map.seq_num_map.get(&conn_id).unwrap().read_seq == SEQ_SOFT_LIMIT;*/
+        // Set to `true` if the peer appears to getting close to encrypting
+        // too many messages with this key.
+        //
+        // Perhaps if we send an alert well before their counter wraps, a
+        // buggy peer won't make a terrible mistake here?
+        //
+        // Note that there's no reason to refuse to decrypt: the security
+        // failure has already happened.
 
         let conn_id = self.active_conn_id;
+        let want_close_before_decrypt = self.seq_map.seq_num_map.get(&conn_id).unwrap().read_seq == SEQ_SOFT_LIMIT;
+
+
         let encrypted_len = encr.payload.len();
 
         /// prepare crypto context for the specified connection
@@ -251,12 +264,15 @@ impl RecordLayer {
         }
         match self
             .message_decrypter
-            .decrypt_zc(encr, self.seq_map.seq_num_map.get(&conn_id).unwrap().read_seq, conn_id, app_data)
+            .decrypt_zc(encr, self.seq_map.seq_num_map.get(&conn_id).unwrap().read_seq, conn_id, recv_buf)
         {
-            Ok(bytes_decrypted) => {
+            Ok(plaintext) => {
                 self.seq_map.seq_num_map.get_mut(&conn_id).unwrap().read_seq += 1;
-                Ok(Some(bytes_decrypted))
-            },
+                Ok(Some(Decrypted {
+                    want_close_before_decrypt,
+                    plaintext,
+                }))
+            }
             Err(Error::DecryptError) if self.doing_trial_decryption(encrypted_len) => {
                 trace!("Dropping undecryptable message after aborted early_data");
                 Ok(None)
@@ -284,11 +300,8 @@ impl RecordLayer {
             .unwrap()
     }
 
-    /// Encrypt a TLS message with owned payload.
-    ///
-    /// `plain` is a TLS message we'd like to send.  This function
-    /// panics if the requisite keying material hasn't been established yet.
-    pub(crate) fn encrypt_outgoing_owned(&mut self, plain: &[u8]) -> Vec<u8> {
+
+    pub(crate) fn encrypt_outgoing_zc(&mut self, plain: &[u8]) -> Vec<u8> {
         debug_assert!(self.encrypt_state == DirectionState::Active);
         assert!(!self.encrypt_exhausted());
         let conn_id = self.active_conn_id;
@@ -350,9 +363,10 @@ impl RecordLayer {
 
 /// Result of decryption.
 #[derive(Debug)]
-pub struct Decrypted<'a> {
+pub struct Decrypted {
     /// Whether the peer appears to be getting close to encrypting too many messages with this key.
     pub want_close_before_decrypt: bool,
     /// The decrypted message.
-    pub plaintext: DecryptedMessage<'a>,
+    pub plaintext: PlainMessage,
 }
+

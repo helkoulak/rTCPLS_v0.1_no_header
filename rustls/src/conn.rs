@@ -5,7 +5,7 @@ use crate::error::{Error, PeerMisbehaved};
 use crate::log::trace;
 use crate::msgs::deframer::{Deframed, MessageDeframer};
 use crate::msgs::handshake::Random;
-use crate::msgs::message::{DecryptedMessage, Message, MessagePayload, PlainMessage};
+use crate::msgs::message::{Message, MessagePayload, PlainMessage};
 #[cfg(feature = "secret_extraction")]
 use crate::suites::{ExtractedSecrets, PartiallyExtractedSecrets};
 use crate::vecbuf::ChunkVecBuffer;
@@ -14,7 +14,9 @@ use std::fmt::Debug;
 use std::io;
 use std::mem;
 use std::ops::{Deref, DerefMut};
+use crate::recvbuf::RecvBuffer;
 use crate::tcpls;
+use crate::tcpls::frame::StreamFrameHeader;
 
 /// A client or server connection.
 #[derive(Debug)]
@@ -62,21 +64,16 @@ impl Connection {
     /// Processes any new packets read by a previous call to [`Connection::read_tls`].
     ///
     /// See [`ConnectionCommon::process_new_packets()`] for more information.
-    pub fn process_new_packets(&mut self) -> Result<IoState, Error> {
+    pub fn process_new_packets(&mut self, recv_buf: &mut RecvBuffer) -> Result<IoState, Error> {
         match self {
-            Self::Client(conn) => conn.process_new_packets(),
-            Self::Server(conn) => conn.process_new_packets(),
+            Self::Client(conn) => conn.process_new_packets(recv_buf),
+            Self::Server(conn) => conn.process_new_packets(recv_buf),
         }
     }
 
     /// Processes any new packets read by a previous call to [`tcpls::TcplsSession::recv_on_connection`].
 
-    pub fn process_received_zc(&mut self, app_buf: &mut [u8]) -> Result<IoState, Error> {
-        match self {
-            Self::Client(conn) => conn.process_new_packets(),
-            Self::Server(conn) => conn.process_new_packets(),
-        }
-    }
+
 
     /// Derives key material from the agreed connection secrets.
     ///
@@ -381,6 +378,7 @@ impl<Data> ConnectionCommon<Data> {
         Self: Sized,
         T: io::Read + io::Write,
     {
+        let mut recv_buf = RecvBuffer::new(999, None);
         let until_handshaked = self.is_handshaking();
         let mut eof = false;
         let mut wrlen = 0;
@@ -413,7 +411,7 @@ impl<Data> ConnectionCommon<Data> {
                 }
             }
 
-            match self.process_new_packets() {
+            match self.process_new_packets(&mut recv_buf) {
                 Ok(_) => {}
                 Err(e) => {
                     // In case we have an alert to send describing this error,
@@ -438,11 +436,11 @@ impl<Data> ConnectionCommon<Data> {
     ///
     /// This is a shortcut to the `process_new_packets()` -> `process_msg()` ->
     /// `process_handshake_messages()` path, specialized for the first handshake message.
-    pub(crate) fn first_handshake_message(&mut self) -> Result<Option<Message>, Error> {
+    pub(crate) fn first_handshake_message(&mut self, recv_buf: &mut RecvBuffer) -> Result<Option<Message>, Error> {
         match self
             .core
-            .deframe(None)?
-            .map(Message::try_from)
+            .deframe(recv_buf)?
+            .map(|m|  Message::try_from(m))
         {
             Some(Ok(msg)) => Ok(Some(msg)),
             Some(Err(err)) => {
@@ -476,14 +474,10 @@ impl<Data> ConnectionCommon<Data> {
     /// [`read_tls`]: Connection::read_tls
     /// [`process_new_packets`]: Connection::process_new_packets
     #[inline]
-    pub fn process_new_packets(&mut self) -> Result<IoState, Error> {
-        self.core.process_new_packets()
+    pub fn process_new_packets(&mut self, recv_buf: &mut RecvBuffer) -> Result<IoState, Error> {
+        self.core.process_new_packets(recv_buf)
     }
 
-    #[inline]
-    pub fn process_received_zc(&mut self, app_buf: &mut [u8]) -> Result<IoState, Error> {
-        self.core.process_new_packets()
-    }
 
     /// Read TLS content from `rd` into the internal buffer.
     ///
@@ -621,7 +615,7 @@ impl<Data> ConnectionCore<Data> {
         }
     }
 
-    pub(crate) fn process_new_packets(&mut self, app_buf: Option<&mut Vec<u8>>) -> Result<IoState, Error> {
+    pub(crate) fn process_new_packets(&mut self, recv_buf: &mut RecvBuffer) -> Result<IoState, Error> {
         let mut state = match mem::replace(&mut self.state, Err(Error::HandshakeNotComplete)) {
             Ok(state) => state,
             Err(e) => {
@@ -630,8 +624,12 @@ impl<Data> ConnectionCore<Data> {
             }
         };
 
-        while let Some(msg) = self.deframe(app_buf)? {
-            match self.process_msg(PlainMessage::from(msg), state) {
+        while let Some(msg) = self.deframe(recv_buf)? {
+            if msg.typ == ContentType::ApplicationData {
+                self.process_tcpls_payload(recv_buf);
+                continue;
+            }
+            match self.process_msg(msg, state) {
                 Ok(new) => state = new,
                 Err(e) => {
                     self.state = Err(e.clone());
@@ -645,10 +643,10 @@ impl<Data> ConnectionCore<Data> {
     }
 
     /// Pull a message out of the deframer and send any messages that need to be sent as a result.
-    fn deframe(&mut self, app_buf: Option<&mut Vec<u8>>) -> Result<Option<DecryptedMessage>, Error> {
+    fn deframe(&mut self, recv_buf: &mut RecvBuffer) -> Result<Option<PlainMessage>, Error> {
         match self
             .message_deframer
-            .pop(&mut self.common_state.record_layer, app_buf)
+            .pop(&mut self.common_state.record_layer, recv_buf)
         {
             Ok(Some(Deframed {
                 want_close_before_decrypt,
@@ -745,6 +743,14 @@ impl<Data> ConnectionCore<Data> {
 
         self.common_state
             .process_main_protocol(msg, state, &mut self.data)
+    }
+
+    fn process_tcpls_payload(&mut self, recv_buf: &mut RecvBuffer) {
+        let offset = recv_buf.get_offset();
+        let mut b = octets::Octets::with_slice_at_offset(recv_buf.get_mut(), offset);
+        let header_len = StreamFrameHeader::get_header_size_reverse(&mut b);
+        recv_buf.truncate_processed(header_len);
+
     }
 
     pub(crate) fn export_keying_material<T: AsMut<[u8]>>(

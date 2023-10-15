@@ -23,6 +23,7 @@ use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::{fmt, io};
+use crate::recvbuf::RecvBuffer;
 
 /// A trait for the ability to store server session data.
 ///
@@ -583,6 +584,8 @@ impl Acceptor {
     ///
     /// Returns `Err(err)` if an error occurred. Do not call this function again.
     pub fn accept(&mut self) -> Result<Option<Accepted>, Error> {
+
+        let mut recv_buf = RecvBuffer::new(999, None);
         let mut connection = match self.inner.take() {
             Some(conn) => conn,
             None => {
@@ -590,7 +593,7 @@ impl Acceptor {
             }
         };
 
-        let message = match connection.first_handshake_message()? {
+        let message = match connection.first_handshake_message(&mut recv_buf)? {
             Some(msg) => msg,
             None => {
                 self.inner = Some(connection);

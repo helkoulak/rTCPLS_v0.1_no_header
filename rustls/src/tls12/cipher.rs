@@ -8,6 +8,7 @@ use crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
 use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, OpaqueMessage, PlainMessage};
 
 use ring::aead;
+use crate::recvbuf::RecvBuffer;
 
 const TLS12_AAD_SIZE: usize = 8 + 1 + 2 + 2;
 
@@ -141,6 +142,10 @@ impl MessageDecrypter for GcmMessageDecrypter {
         Ok(msg.into_plain_message())
     }
 
+    fn decrypt_zc(&self, msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, output: &mut RecvBuffer) -> Result<PlainMessage, Error> {
+        todo!()
+    }
+
     fn derive_dec_connection_iv(&mut self, conn_id: u32) {
         todo!()
     }
@@ -168,7 +173,7 @@ impl MessageEncrypter for GcmMessageEncrypter {
         })
     }
 
-    fn encrypt_zc(&self, msg: PlainMessage, seq: u64, conn_id: u32) -> Result<OpaqueMessage, Error> {
+    fn encrypt_zc(&self, msg: &[u8], seq: u64, conn_id: u32) -> Result<Vec<u8>, Error> {
         todo!()
     }
 
@@ -225,6 +230,10 @@ impl MessageDecrypter for ChaCha20Poly1305MessageDecrypter {
         Ok(msg.into_plain_message())
     }
 
+    fn decrypt_zc(&self, msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, output: &mut RecvBuffer) -> Result<PlainMessage, Error> {
+        todo!()
+    }
+
     fn derive_dec_connection_iv(&mut self, conn_id: u32) {
         todo!()
     }
@@ -250,7 +259,7 @@ impl MessageEncrypter for ChaCha20Poly1305MessageEncrypter {
         })
     }
 
-    fn encrypt_zc(&self, msg: PlainMessage, seq: u64, conn_id: u32) -> Result<OpaqueMessage, Error> {
+    fn encrypt_zc(&self, msg: &[u8], seq: u64, conn_id: u32) -> Result<Vec<u8>, Error> {
         todo!()
     }
 

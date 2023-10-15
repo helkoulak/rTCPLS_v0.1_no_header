@@ -6,7 +6,7 @@ use crate::error::{Error, PeerMisbehaved};
 use crate::msgs::base::Payload;
 use crate::msgs::codec::{Codec, put_u16};
 use crate::msgs::fragmenter::{MAX_FRAGMENT_LEN, PACKET_OVERHEAD};
-use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, DecryptedMessage, OpaqueMessage, PlainMessage};
+use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, OpaqueMessage, PlainMessage};
 use crate::suites::{BulkAlgorithm, CipherSuiteCommon, SupportedCipherSuite};
 
 use ring::aead;
@@ -14,6 +14,7 @@ use ring::aead;
 use std::fmt;
 use std::io::Read;
 use octets::Octets;
+use crate::recvbuf::RecvBuffer;
 use crate::tcpls::frame::{TCPLS_STREAM_FRAME_MAX_OVERHEAD, StreamFrameHeader};
 
 pub(crate) mod key_schedule;
@@ -133,13 +134,17 @@ fn unpad_tls13(v: &mut Vec<u8>) -> ContentType {
     }
 }
 
-fn unpad_tls13_from_slice(v: &mut [u8]) -> ContentType {
+fn unpad_tls13_from_slice(v: &mut [u8]) -> (ContentType, usize) {
     let mut last = v.len() - 1;
     loop {
         match v[last] {
             0 => last -= 1,
-            content_type => return ContentType::from(content_type),
-            _ => return ContentType::Unknown(0),
+            content_type => {
+                let typ = ContentType::from(content_type);
+                v[last] = 0x00;
+                return (typ, last)
+            },
+            _ => return (ContentType::Unknown(0), last),
         }
     }
 }
@@ -186,8 +191,8 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         // ApplicationData
         record[0] = 0x17;
         // TLSv1_2
-        record[1] = ((0x0303 as u16 >> 8) & 0xFF) as u8;
-        record[2] = (0x0303 as u16 & 0xFF) as u8;
+        record[1] = ((0x0303 >> 8) & 0xFF) as u8;
+        record[2] = (0x0303 & 0xFF) as u8;
         // payload length
         record[3] = ((payload_len as u16 >> 8) & 0xFF) as u8;
         record[4] = (payload_len as u16 & 0xFF) as u8;
@@ -195,9 +200,8 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         let nonce = make_nonce(self.iv.get(&conn_id).unwrap(), seq);
         let aad = make_tls13_aad(total_len);
 
-
         self.enc_key
-            .seal_in_output_append_tag(nonce, aad, msg, &mut record[PACKET_OVERHEAD..])
+            .seal_in_output_append_tag(nonce, aad, msg, &mut record, PACKET_OVERHEAD)
             .map_err(|_| Error::General("encrypt failed".to_string()))?;
 
         Ok(record)
@@ -212,7 +216,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
 }
 
 impl MessageDecrypter for Tls13MessageDecrypter {
-    fn decrypt(&self, mut msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, app_buf: Option<&mut Vec<u8>>) -> Result<DecryptedMessage, Error> {
+    fn decrypt(&self, mut msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32) -> Result<PlainMessage, Error> {
         let payload = msg.payload;
         if payload.len() < self.dec_key.algorithm().tag_len() {
             return Err(Error::DecryptError);
@@ -221,17 +225,7 @@ impl MessageDecrypter for Tls13MessageDecrypter {
         let nonce = make_nonce(self.iv.get(&conn_id).unwrap(), seq);
         let aad = make_tls13_aad(payload.len());
 
-        let mut output= match app_buf {
-            Some(buf) => {
-                if buf.len() < payload.len() {
-                    return Err(Error::BufferTooShort);
-                }
-                buf
-            },
-            None => &mut vec![0; payload.len()],
-        };
-
-
+        let mut output = &mut vec![0; payload.len()];
 
         let plain_len = self
             .dec_key
@@ -241,12 +235,12 @@ impl MessageDecrypter for Tls13MessageDecrypter {
 
 
 
-        output.truncate(plain_len);
+       output.truncate(plain_len);
+
 
         if output.len() > MAX_FRAGMENT_LEN  + 1 {
             return Err(Error::PeerSentOversizedRecord);
         }
-
 
         msg.typ = unpad_tls13(output);
 
@@ -260,27 +254,16 @@ impl MessageDecrypter for Tls13MessageDecrypter {
 
         msg.version = ProtocolVersion::TLSv1_3;
 
-        let decrypted = match app_buf {
-            Some(b) => {
-                DecryptedMessage::BorrowedPlainMessage(BorrowedPlainMessage{
-                    typ: msg.typ,
-                    version: msg.version,
-                    payload: output,
-                })
-            },
-            None => DecryptedMessage::PlainMessage(PlainMessage{
-                typ: msg.typ,
-                version: msg.version,
-                payload: Payload::new(output),
-            })
-        };
-
-        Ok(decrypted)
+        Ok(PlainMessage{
+            typ: msg.typ,
+            version: msg.version,
+            payload: Payload::new(output.as_slice()),
+        })
     }
 
 
-    fn decrypt_zc(&self, mut msg: & [u8], seq: u64, conn_id: u32, output: &mut [u8]) -> Result<usize, Error> {
-        let payload = msg;
+    fn decrypt_zc(&self, mut msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, recv_buf: &mut RecvBuffer) -> Result<PlainMessage, Error> {
+        let payload = msg.payload;
         if payload.len() < self.dec_key.algorithm().tag_len() {
             return Err(Error::DecryptError);
         }
@@ -288,10 +271,16 @@ impl MessageDecrypter for Tls13MessageDecrypter {
         let nonce = make_nonce(self.iv.get(&conn_id).unwrap(), seq);
         let aad = make_tls13_aad(payload.len());
 
+        let mut output = recv_buf.get_mut();
+
+        // output buffer must be at least as big as the input buffer
+        if output.len() < payload.len() {
+            return Err(Error::BufferTooShort);
+        }
 
         let plain_len = self
             .dec_key
-            .open_in_output(nonce, aad, payload,  output)
+            .open_in_output(nonce, aad, payload, output)
             .map_err(|_| Error::DecryptError)?
             .len();
 
@@ -300,22 +289,37 @@ impl MessageDecrypter for Tls13MessageDecrypter {
             *b = 0;
         }
 
-        if output.len() > MAX_FRAGMENT_LEN + 1 {
+        if output[..plain_len].len() > MAX_FRAGMENT_LEN + 1 {
             return Err(Error::PeerSentOversizedRecord);
         }
 
-        msg.typ = unpad_tls13_from_slice(output);
-        
+
+        let mut new_size = 0;
+        (msg.typ, new_size)  = unpad_tls13_from_slice(output);
+
+        let payload_len_no_type = output[..new_size].len();
         
         if msg.typ == ContentType::Unknown(0) {
             return Err(PeerMisbehaved::IllegalTlsInnerPlaintext.into());
         }
 
-        if output[..plain_len].len() > MAX_FRAGMENT_LEN {
+        if payload_len_no_type > MAX_FRAGMENT_LEN {
             return Err(Error::PeerSentOversizedRecord);
         }
 
-        Ok(plain_len - 1) // deducting one after removing the type byte
+
+
+        recv_buf.offset += payload_len_no_type;
+
+        Ok(PlainMessage {
+            typ: msg.typ,
+            version: ProtocolVersion::TLSv1_3,
+            payload: match msg.typ {
+                ContentType::ApplicationData => Payload::new(Vec::new()),
+                _ => Payload::new_from_vec(output[..new_size].to_vec()),
+
+            },
+        })
     }
 
     fn derive_dec_connection_iv(&mut self, conn_id: u32) {

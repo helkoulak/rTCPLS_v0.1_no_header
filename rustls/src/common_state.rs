@@ -94,10 +94,6 @@ impl CommonState {
         }
     }
 
-   /* /// open a stream for a new TCP CONNECTION
-    pub fn open_stream(&mut self, id: u32){
-        self.stream_map.attach_stream(id);
-    }*/
 
 
     /// Returns true if the caller should call [`Connection::write_tls`] as soon as possible.

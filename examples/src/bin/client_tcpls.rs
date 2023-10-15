@@ -115,7 +115,7 @@ impl TlsClient {
         // Reading some TLS data might have yielded new TLS
         // messages to process.  Errors from this indicate
         // TLS protocol problems and are fatal.
-        let io_state = match self.tcpls_session.tls_conn.as_mut().unwrap().process_received() {
+        let io_state = match self.tcpls_session.tls_conn.as_mut().unwrap().process_new_packets() {
             Ok(io_state) => io_state,
             Err(err) => {
                 println!("TLS error: {:?}", err);

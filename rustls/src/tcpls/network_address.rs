@@ -1,4 +1,4 @@
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 use if_addrs::get_if_addrs;
 use crate::tcpls::frame::Frame;
 

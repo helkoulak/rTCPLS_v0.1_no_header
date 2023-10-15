@@ -263,7 +263,7 @@ impl OpenConnection {
     fn do_tls_read(&mut self) {
         // Read some TLS data.
         match self.tcpls_session.
-            recv_on_connection(0, &mut self.socket, &mut self.tls_conn, None) {
+            recv_on_connection(0) {
             Err(err) => {
                 if let io::ErrorKind::WouldBlock = err.kind() {
                     return;
@@ -273,18 +273,12 @@ impl OpenConnection {
                 self.closing = true;
                 return;
             }
-            Ok((0, _)) => {
+            Ok(0) => {
                 debug!("eof");
                 self.closing = true;
                 return;
             }
-            Ok((_ , state )) => {
-                if state.plaintext_bytes_to_read() > 0 {
-                    let recv = self.tls_conn.recv_buffer_as_mut_ref(0);
-                    self.buffer.extend_from_slice(recv.pop().unwrap().as_slice());
-                    self.verify_received();
-                }
-            }
+            Ok((_)) => {}
         };
     }
 

@@ -7,7 +7,7 @@ use crate::msgs::ccs::ChangeCipherSpecPayload;
 use crate::msgs::codec::{Codec, Reader};
 use crate::msgs::enums::AlertLevel;
 use crate::msgs::handshake::HandshakeMessagePayload;
-use crate::tcpls::frame::{Frame, StreamFrameHeader};
+
 
 /// This is the maximum on-the-wire size of a TLSCiphertext.
 /// That's 2^14 payload bytes, a header, and a 2KB allowance
@@ -268,21 +268,7 @@ impl From<Message> for PlainMessage {
     }
 }
 
-impl From<DecryptedMessage> for PlainMessage {
-    fn from(dec: DecryptedMessage) -> Self {
-        let plain = match dec {
-            DecryptedMessage::PlainMessage(p) => p,
-            DecryptedMessage::BorrowedPlainMessage(p) => {
-                PlainMessage{
-                    typ: p.typ,
-                    version: p.version,
-                    payload: Payload(p.payload.to_vec())
 
-                }
-            },
-        };
-    }
-}
 
 
 /// A decrypted TLS frame
@@ -422,6 +408,7 @@ impl TryFrom<PlainMessage> for Message {
 ///
 /// This type also cannot decode its internals and
 /// cannot be read/encoded; only `OpaqueMessage` can do that.
+#[derive(Debug)]
 pub struct BorrowedPlainMessage<'a> {
     pub typ: ContentType,
     pub version: ProtocolVersion,
@@ -447,29 +434,4 @@ pub enum MessageError {
     InvalidContentType,
     UnknownProtocolVersion,
 }
-#[derive(Debug)]
-pub enum DecryptedMessage<'a> {
-    PlainMessage(PlainMessage),
-    BorrowedPlainMessage(BorrowedPlainMessage<'a>),
-}
 
-impl DecryptedMessage {
-    pub fn get_msg_type(&self) -> ContentType {
-        match self {
-            DecryptedMessage::PlainMessage(p) => p.typ,
-            DecryptedMessage::BorrowedPlainMessage(b) => b.typ,
-        }
-    }
-}
-
-impl From<PlainMessage> for DecryptedMessage {
-    fn from(p: PlainMessage) -> Self {
-        Self::PlainMessage(p)
-    }
-}
-
-impl From<BorrowedPlainMessage> for DecryptedMessage {
-    fn from(b: BorrowedPlainMessage) -> Self {
-        Self::BorrowedPlainMessage(b)
-    }
-}

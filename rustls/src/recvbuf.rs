@@ -1,9 +1,5 @@
 use std::cmp;
-use std::collections::VecDeque;
-use std::io;
-use std::io::Read;
-use crate::tcpls::stream;
-use crate::tcpls::stream::{DEFAULT_BUFFER_LIMIT, Stream};
+use crate::tcpls::stream::DEFAULT_BUFFER_LIMIT;
 
 /// This is the receive buffer of a stream
 #[derive(Default)]
@@ -11,7 +7,10 @@ pub struct RecvBuffer {
     id: u64,
     data: Vec<u8>,
     /// where the next chunk will be appended
-    offset: u64,
+    pub offset: usize,
+
+    // Length of last copied data chunk
+    len: usize,
 
     /// indicates to which offset data within outbuf has already been marked consumed by the
     /// application. V3 specific.
@@ -43,14 +42,14 @@ impl RecvBuffer {
         }
     }
     pub fn get_mut(&mut self) -> &mut [u8] {
-        &mut self.data
+        &mut self.data[self.offset..]
     }
 
     pub fn get_mut_consumed(&mut self) -> &mut [u8] {
         &mut self.data[self.consumed..]
     }
 
-    pub  fn get_offset(&self) -> u64 {
+    pub  fn get_offset(&self) -> usize {
         self.offset
     }
 
@@ -76,23 +75,21 @@ impl RecvBuffer {
 
     }
 
-   /* pub fn consume(&mut self, mut used: usize) {
-        while let Some(mut buf) = self.chunks.pop_front() {
-            if used < buf.len() {
-                self.chunks
-                    .push_front(buf.split_off(used));
-                break;
-            } else {
-                used -= buf.len();
-            }
-        }
-    }*/
+    pub fn consume(&mut self, used: usize) {
+        self.offset += used;
+    }
+
+    pub fn truncate_processed(&mut self, processed: usize) { self.offset -= processed; }
 
 
+    pub fn data_length(&self) -> usize {
+        self.offset
+    }
 }
 
 #[cfg(test)]
 mod test {
+    use crate::vecbuf::ChunkVecBuffer;
     use super::ChunkVecBuffer;
 
     #[test]

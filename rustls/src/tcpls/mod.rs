@@ -1,44 +1,34 @@
 #![allow(missing_docs)]
 #![allow(unused_qualifications)]
 
+/// This module contains optional APIs for implementing TCPLS.
+use std::{io, u32, vec};
 
-use std::{cmp, io, u32, vec};
-use std::cmp::min;
 use std::collections::HashMap;
 use std::fs;
-use std::io::{BufReader, Bytes, Read, Write};
+use std::fs::read_to_string;
+use std::io::{BufReader, ErrorKind, Read, Write};
 use std::net::{SocketAddr, ToSocketAddrs};
-use std::ops::Deref;
-use std::slice::{Chunks, ChunksExact};
+
 use std::sync::Arc;
 
 use mio::net::{TcpListener, TcpStream};
 
-use crate::{
-    ALL_CIPHER_SUITES, ALL_VERSIONS, Certificate, ClientConfig, ClientConnection, Connection, ContentType, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, Error,
-    KeyLogFile, PrivateKey, RootCertStore, server, ServerConfig,
-    ServerConnection, ServerName, SupportedCipherSuite, SupportedProtocolVersion, Ticketer, version};
-/// This module contains optional APIs for implementing TCPLS.
+use crate::{server, version, AlertDescription, Certificate, ClientConfig, ClientConnection, Connection, Error, KeyLogFile, PrivateKey, RootCertStore, ServerConfig, ServerConnection, ServerName, SupportedCipherSuite, SupportedProtocolVersion, Ticketer, ALL_CIPHER_SUITES, ALL_VERSIONS, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, ContentType, ProtocolVersion};
 
-use crate::enums::ProtocolVersion;
-use crate::msgs::base::Payload;
-use crate::msgs::codec;
-use crate::msgs::codec::{Codec, put_u16};
 use crate::msgs::deframer::MessageDeframer;
-use crate::msgs::fragmenter::PACKET_OVERHEAD;
-use crate::msgs::message::{BorrowedPlainMessage, PlainMessage};
-use crate::ProtocolVersion::TLSv1_2;
-use crate::tcpls::frame::{MAX_TCPLS_FRAGMENT_LEN, StreamFrameHeader};
+use crate::msgs::message::BorrowedPlainMessage;
+use crate::tcpls::frame::{StreamFrameHeader, MAX_TCPLS_FRAGMENT_LEN};
 use crate::tcpls::network_address::AddressMap;
 use crate::tcpls::stream::{RecvBufMap, StreamMap};
 use crate::verify::{
     AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
 };
 
-pub mod stream;
 pub mod frame;
 pub mod network_address;
 pub mod ranges;
+pub mod stream;
 
 pub struct TcplsSession {
     pub tls_config: Option<TlsConfig>,
@@ -51,8 +41,7 @@ pub struct TcplsSession {
     pub is_closed: bool,
     pub tls_hs_completed: bool,
     pub next_stream_id: u64,
-    // Objet responsible for holding bytes received on TCP socket and
-    // retrieve complete TLS records out of it for further processing
+    // Objet responsible for holding bytes received on TCP socket.
     pub(crate) message_deframer: MessageDeframer,
 }
 
@@ -93,7 +82,6 @@ impl TcplsSession {
             let _ = self.tls_conn.insert(Connection::from(client_conn));
             let _ = self.tls_config.insert(TlsConfig::Client(config.clone()));
         } else {
-
             self.tls_conn
                 .as_mut()
                 .unwrap()
@@ -122,7 +110,11 @@ impl TcplsSession {
         new_id
     }
 
-    pub fn server_accept_connection(&mut self, listener: &mut TcpListener, config: Arc<ServerConfig>) -> Result<u32, io::Error> {
+    pub fn server_accept_connection(
+        &mut self,
+        listener: &mut TcpListener,
+        config: Arc<ServerConfig>,
+    ) -> Result<u32, io::Error> {
         let (socket, remote_address) = listener
             .accept()
             .expect("encountered error while accepting connection");
@@ -137,7 +129,6 @@ impl TcplsSession {
             let _ = self.tls_conn.insert(Connection::from(server_conn));
             let _ = self.tls_config.insert(TlsConfig::from(config));
         } else {
-
             self.tls_conn
                 .as_mut()
                 .unwrap()
@@ -147,12 +138,9 @@ impl TcplsSession {
         Ok(conn_id)
     }
 
-    pub fn stream_send(
-        &mut self, stream_id: u64, input: &[u8], fin: bool,
-    ) -> Result<usize, Error> {
-
+    pub fn stream_send(&mut self, stream_id: u64, input: &[u8], fin: bool) -> Result<usize, Error> {
         if self.tls_conn.as_mut().unwrap().is_handshaking() {
-           return  Err(Error::HandshakeNotComplete)
+            return Err(Error::HandshakeNotComplete);
         }
 
         // Get existing stream or create a new one.
@@ -160,11 +148,11 @@ impl TcplsSession {
 
         // we're respecting limit for plaintext data -- so we'll
         // be out by whatever the cipher+record overhead is.  That's a
-        // constant and predictable amount, so it's not a terrible issue.
+        // constant and predictable amount.
         let cap = stream.send.apply_limit(input.len());
 
-        if cap == 0 && !input.is_empty(){
-            return Err(Error::Done)
+        if cap == 0 && !input.is_empty() {
+            return Err(Error::Done);
         }
 
         let (buf, fin) = if cap < input.len() {
@@ -172,7 +160,6 @@ impl TcplsSession {
         } else {
             (input, fin)
         };
-
 
         // Encapsulate data chunks with TCPLS stream frame header,
         // buffer it in send buffer
@@ -182,62 +169,60 @@ impl TcplsSession {
         let mut number_of_chunks = chunks.len();
 
         for mut chunk in chunks {
-
             number_of_chunks -= 1;
             let chunk_len = chunk.len();
-            let mut header = StreamFrameHeader{
+            let mut header = StreamFrameHeader {
                 length: chunk_len as u64,
                 offset: stream.send.get_offset(),
                 stream_id,
                 // consider fin at the last fragment
                 fin: if number_of_chunks == 0 {
-                    match fin { true => 1, false => 0, }
-                } else { 0 },
+                    match fin {
+                        true => 1,
+                        false => 0,
+                    }
+                } else {
+                    0
+                },
             };
 
-            let mut record= vec![0; chunk_len + header.get_header_length() + 1];
-
+            let mut record = vec![0; chunk_len + header.get_header_length() + 1];
 
             let mut octets = octets::OctetsMut::with_slice_at_offset(&mut record, 0);
 
             octets.put_bytes(chunk).unwrap();
 
-            header.encode_stream_header(&mut octets).expect("encoding stream header failed");
+            header
+                .encode_stream_header(&mut octets)
+                .expect("encoding stream header failed");
 
-           octets.put_u8(0x17).unwrap(); // ContentType::ApplicationData
+            octets.put_u8(0x17).unwrap(); // ContentType::ApplicationData
 
             stream.send.append(record);
             buffered += chunk_len;
-
         }
 
         Ok(buffered)
     }
 
-    pub fn get_or_create_stream(
-        &mut self, id: u64,
-        x: bool,
-    ) -> Result<&mut stream::Stream, Error> {
+    pub fn get_or_create_stream(&mut self, id: u64, x: bool) -> Result<&mut stream::Stream, Error> {
         self.streams.get_or_create(id, self.is_server)
     }
 
     pub fn send_on_connection(&mut self, stream_id: u64, conn_id: u32) -> Result<usize, Error> {
-
         let tls_conn = self.tls_conn.as_mut().unwrap();
 
         if tls_conn.is_handshaking() {
-            return  Err(Error::HandshakeNotComplete)
+            return Err(Error::HandshakeNotComplete);
         }
 
-        // Get existing stream or create a new one.
         let stream = match self.streams.get_mut(stream_id) {
             Some(stream) => stream,
-            None => return Err(Error::RecvBufNotFound),
+            None => return Err(Error::BufNotFound),
         };
 
         if stream.send.is_empty() {
-
-            return Ok(0)
+            return Ok(0);
         }
 
         // set active connection to decide suitable crypto context and record seq space
@@ -248,10 +233,7 @@ impl TcplsSession {
 
         // Close connection once we start to run out of
         // sequence space.
-        if tls_conn
-            .record_layer
-            .wants_close_before_encrypt()
-        {
+        if tls_conn.record_layer.wants_close_before_encrypt() {
             tls_conn.send_close_notify();
         }
 
@@ -264,92 +246,72 @@ impl TcplsSession {
         let mut sent = 0;
         let mut done = 0;
         while len > 0 {
-
             let chunk = stream.send.pop().unwrap();
 
             let em = tls_conn
                 .record_layer.
-                encrypt_outgoing_owned(chunk.as_slice());
+                encrypt_outgoing_zc(chunk.as_slice());
 
-            sent = self.tcp_connections
+            sent = self
+                .tcp_connections
                 .get_mut(&conn_id)
                 .unwrap()
-                .socket.write(em.as_slice()).unwrap();
+                .socket
+                .write(em.as_slice())
+                .unwrap();
             stream.send.consume_chunk(sent, chunk);
             len -= sent;
             done += sent;
-
         }
 
         Ok(done)
-
     }
 
     /// Receive data on specified TCP socket
     pub fn recv_on_connection(&mut self, conn_id: u32) -> Result<usize, io::Error> {
-        let mut socket = &mut self.tcp_connections
-            .get_mut(&conn_id)
-            .unwrap()
-            .socket;
-        self.message_deframer.read(socket)
+        let mut socket = &mut self.tcp_connections.get_mut(&conn_id).unwrap().socket;
+       let read =  match self.message_deframer.read(socket) {
+            Err(error) => {
+                return Err(error);
+            }
+            Ok(read) => read,
+        };
+        Ok(read)
     }
 
-    pub fn stream_recv<'a, 'b>(
-        &'a mut self, conn_id: u64, recv_id: u64, app_buffers: &'b mut RecvBufMap,
-    ) -> Result<(&'b [u8], usize, bool), Error> {
 
-        let mut len = 0;
+    pub fn stream_recv(
+        &mut self,
+        recv_id: u64,
+        app_buffers: &mut RecvBufMap,
+    ) -> Result<usize, Error> {
 
-        let outbuf = app_buffers.get_mut(recv_id).unwrap();
-        
-        let mut cap = outbuf.len();
-        
+        let mut recv_buf = app_buffers.get_or_create_recv_buffer(recv_id, Some(128 * 1024));
+
         let mut bytes_to_read = self.message_deframer.bytes_to_read();
 
-        let tls_conn = &mut self.tls_conn.unwrap();
+        if bytes_to_read == 0 {
+            return Err(Error::Done);
+        }
+
+        let tls_conn = self.tls_conn.as_mut().unwrap();
 
         if tls_conn.is_handshaking() {
-            return  Err(Error::HandshakeNotComplete)
+            return Err(Error::HandshakeNotComplete);
         }
 
-        while cap > 0 && bytes_to_read > 0  {
-
-            let slice = match self.message_deframer.pop_zc().unwrap() {
-                Some(slice) => slice,
-
-                None => break,
-
-            };
-
-
-            let buf_len = cmp::min(cap, slice.len() );
-
-            let buf = slice[..buf_len];
+        let mut done = 0;
 
 
 
-           // Decrypt the encrypted message (if necessary).
-            let mut bytes_decrypted= match self.tls_conn.as_mut().unwrap().record_layer.decrypt_incoming_zc(slice, outbuf) {
-                Ok(decrypted) => {
-                    self.message_deframer.discard(buf_len);
-                    continue
-                    decrypted,
-                },
-
-                Err(e) => return Err(e),
-            };
+            match tls_conn.process_new_packets(recv_buf) {
+                Ok(_) => {},
+                Err(err) => return Err(err),
+            }
 
 
-
-            
-        }
-
-        Ok((outbuf, len, fin))
+        Ok(recv_buf.data_length())
     }
-
-
-
-
 }
 
 pub enum TlsConfig {
@@ -407,8 +369,6 @@ pub enum TcplsConnectionState {
     CONNECTED, // Handshake completed.
     JOINED,
 }
-
-
 
 pub fn lookup_address(host: &str, port: u16) -> SocketAddr {
     let mut addrs = (host, port).to_socket_addrs().unwrap(); // resolves hostname and return an itr

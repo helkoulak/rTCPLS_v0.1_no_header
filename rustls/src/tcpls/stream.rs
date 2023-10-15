@@ -331,20 +331,20 @@ impl RecvBufMap {
     }
 
 
-    pub(crate) fn get_or_create_stream_buffer(&mut self, stream_id: u64) -> &mut RecvBuffer {
+    pub(crate) fn get_or_create_recv_buffer(&mut self, stream_id: u64, capacity: Option<usize>) -> &mut RecvBuffer {
         match self.buffers.entry(stream_id) {
             hash_map::Entry::Vacant(v) => {
-                v.insert(RecvBuffer::new(stream_id, None))
+                v.insert(RecvBuffer::new(stream_id, capacity))
             },
             hash_map::Entry::Occupied(v) => v.into_mut(),
         }
     }
 
 
-    pub fn get_mut(&mut self, stream_id: u64) -> Option<&mut [u8]> {
+    /*pub fn get_mut(&mut self, stream_id: u64) -> Option<&mut [u8]> {
         Some(self.buffers.get_mut(&stream_id)?
-            .get_mut_consumed())
-    }
+
+    }*/
 
     /*pub(crate) fn read_mut(&mut self, stream_id: u64, stream: &mut Stream) -> Result<&mut [u8], Error> {
         let buf = match self.buffers.entry(stream_id) {
