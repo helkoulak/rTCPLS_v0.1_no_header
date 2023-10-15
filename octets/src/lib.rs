@@ -204,6 +204,14 @@ impl<'a> Octets<'a> {
         Octets { buf, off: buf.len() }
     }
 
+    /// Creates an `Octets` from the given slice, without copying with offset pointing to the end of buf.
+    ///
+    /// Since the `Octets` is immutable, the input slice needs to be
+    /// immutable.
+    pub fn with_slice_at_offset(buf: &'a [u8], offset: usize) -> Self {
+        Octets { buf, off: offset }
+    }
+
     /// Reads an unsigned 8-bit integer from the current offset and advances
     /// the buffer.
     pub fn get_u8(&mut self) -> Result<u8> {
