@@ -27,6 +27,10 @@ impl ChunkVecBuffer {
         self.offset
     }
 
+    pub(crate)  fn advance_offset(&mut self, added: usize) {
+        self.offset += added;
+    }
+
     /// Sets the upper limit on how many bytes this
     /// object can store.
     ///
@@ -85,7 +89,6 @@ impl ChunkVecBuffer {
         if !bytes.is_empty() {
             self.chunks.push_back(bytes);
         }
-        self.offset += len as u64;
         len
     }
 

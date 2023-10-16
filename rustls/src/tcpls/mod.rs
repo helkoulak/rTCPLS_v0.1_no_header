@@ -199,6 +199,7 @@ impl TcplsSession {
             octets.put_u8(0x17).unwrap(); // ContentType::ApplicationData
 
             stream.send.append(record);
+            stream.send.advance_offset(chunk_len);
             buffered += chunk_len;
         }
 
