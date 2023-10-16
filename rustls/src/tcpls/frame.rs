@@ -165,6 +165,69 @@ impl Frame {
 
         Ok(before - b.cap())
     }
+
+    pub fn get_frame_size_reverse(b: &mut octets::Octets) -> Result<usize, InvalidMessage> {
+
+        let frame_type = b.get_u8_reverse().expect("failed");
+
+        let frame_size = match frame_type {
+            0x00 => 1,
+
+            0x01 => 1,
+
+            0x02..=0x03 => {
+                1 + varint_len(b.get_varint_reverse().unwrap()) +
+                    varint_len(b.get_varint_reverse().unwrap()) +
+                    varint_len(b.get_varint_reverse().unwrap());
+            },
+
+            0x04 => {
+                1 + varint_len(b.get_varint_reverse().unwrap()) +
+                    varint_len(b.get_varint_reverse().unwrap());
+            },
+
+
+            0x05 => {
+                1 + varint_len(b.get_varint_reverse().unwrap()) + 32;
+            },
+
+            0x06 => {
+                1 + varint_len(b.get_varint_reverse().unwrap());
+            },
+
+            0x07 => {
+                let mut frame_len = 1 + varint_len(b.get_varint_reverse().unwrap());
+                let address_len = match b.get_varint_reverse().unwrap() {
+                    4 => {
+                        b.rewind(4).unwrap();
+                        4
+                    },
+                    6 => {
+                        b.rewind(16).unwrap();
+                        16
+                    },
+                    _ => panic!("Wrong ip address version"),
+                };
+                // one byte for address version + address length + length of port encoding
+                   frame_len += 1 + address_len + varint_len(b.get_varint_reverse().unwrap());
+                frame_len
+
+            },
+
+            0x08 => { 1 + varint_len(b.get_varint_reverse().unwrap()) },
+
+            0x09 => { 1 + varint_len(b.get_varint_reverse().unwrap())
+                        + varint_len(b.get_varint_reverse().unwrap())
+            },
+
+            _ => return Err(InvalidMessage::InvalidFrameType.into()),
+        };
+
+        Ok(frame_size)
+    }
+
+
+
 }
 
 fn parse_stream_frame(frame_type: u8, b: &mut octets::Octets) -> octets::Result<Frame> {
