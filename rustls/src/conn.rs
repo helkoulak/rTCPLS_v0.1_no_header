@@ -746,8 +746,8 @@ impl<Data> ConnectionCore<Data> {
     }
 
     fn process_tcpls_payload(&mut self, recv_buf: &mut RecvBuffer) {
-        let offset = recv_buf.get_offset();
-        let mut b = octets::Octets::with_slice_at_offset(recv_buf.get_mut(), offset);
+       let mut output = recv_buf.get_mut();
+        let mut b = octets::Octets::with_slice_reverse(output);
         let header_len = StreamFrameHeader::get_header_size_reverse(&mut b);
         recv_buf.truncate_processed(header_len);
 
