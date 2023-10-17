@@ -112,9 +112,9 @@ mod test {
 
         {
             let mut cvb = ChunkVecBuffer::new(None);
-            cvb.append(b"test ".to_vec());
-            cvb.append(b"fixture ".to_vec());
-            cvb.append(b"data".to_vec());
+            cvb.append(b"test ".to_vec(), None, None, false);
+            cvb.append(b"fixture ".to_vec(), None, None, false);
+            cvb.append(b"data".to_vec(), None, None, false);
 
             let mut buf = [MaybeUninit::<u8>::uninit(); 8];
             let mut buf: BorrowedBuf<'_> = buf.as_mut_slice().into();
@@ -130,7 +130,7 @@ mod test {
 
         {
             let mut cvb = ChunkVecBuffer::new(None);
-            cvb.append(b"short message".to_vec());
+            cvb.append(b"short message".to_vec(), None, None, false);
 
             let mut buf = [MaybeUninit::<u8>::uninit(); 1024];
             let mut buf: BorrowedBuf<'_> = buf.as_mut_slice().into();

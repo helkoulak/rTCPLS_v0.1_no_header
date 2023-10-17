@@ -735,7 +735,7 @@ impl EarlyDataState {
         let available = bytes.0.len();
         match self {
             Self::Accepted(ref mut received) if received.apply_limit(available) == available => {
-                received.append(bytes.0);
+                received.append(bytes.0, None, None, 0);
                 true
             }
             _ => false,

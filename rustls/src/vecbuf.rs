@@ -8,7 +8,7 @@ use std::io::Read;
 /// appending a new byte vector, at the expense of
 /// more complexity when reading out.
 pub(crate) struct ChunkVecBuffer {
-    chunks: VecDeque<Vec<u8>>,
+    buffer: VecDeque<BytesFragment>,
     limit: Option<usize>,
     /// where the next chunk will be appended
     offset: u64,
@@ -17,7 +17,7 @@ pub(crate) struct ChunkVecBuffer {
 impl ChunkVecBuffer {
     pub(crate) fn new(limit: Option<usize>) -> Self {
         Self {
-            chunks: VecDeque::new(),
+            buffer: VecDeque::new(),
             limit,
             offset: 0,
         }
@@ -27,7 +27,7 @@ impl ChunkVecBuffer {
         self.offset
     }
 
-    pub(crate)  fn advance_offset(&mut self, added: usize) {
+    pub(crate)  fn advance_offset(&mut self, added: u64) {
         self.offset += added;
     }
 
@@ -44,7 +44,7 @@ impl ChunkVecBuffer {
 
     /// If we're empty
     pub(crate)  fn is_empty(&self) -> bool {
-        self.chunks.is_empty()
+        self.buffer.is_empty()
     }
 
     pub(crate)  fn is_full(&self) -> bool {
@@ -56,8 +56,8 @@ impl ChunkVecBuffer {
     /// How many bytes we're storing
     pub(crate) fn len(&self) -> usize {
         let mut len = 0;
-        for ch in &self.chunks {
-            len += ch.len();
+        for ch in &self.buffer {
+            len += ch.len;
         }
         len
     }
@@ -78,29 +78,25 @@ impl ChunkVecBuffer {
     /// we're near the limit.
     pub(crate) fn append_limited_copy(&mut self, bytes: &[u8]) -> usize {
         let take = self.apply_limit(bytes.len());
-        self.offset += self.append(bytes[..take].to_vec()) as u64;
+        self.append(bytes[..take].to_vec(), None, None, 0);
         take
     }
 
     /// Take and append the given `bytes`.
-    pub(crate) fn append(&mut self, bytes: Vec<u8>) -> usize {
+    pub(crate) fn append(&mut self, bytes: Vec<u8>, offset: Option<u64>, length: Option<usize>, fin: u8) -> usize {
         let len = bytes.len();
-
+        
         if !bytes.is_empty() {
-            self.chunks.push_back(bytes);
+            let fragment = BytesFragment::new(bytes, offset, length, fin);
+            self.buffer.push_back(fragment);
         }
         len
     }
 
     /// Take one of the chunks from this object.  This
     /// function panics if the object `is_empty`.
-    pub(crate) fn pop(&mut self) -> Option<Vec<u8>> {
-        if let Some(T) = self.chunks.pop_front() {
-            self.offset -= T.len() as u64;
-            Some(T)
-        }else {
-            None
-        }
+    pub(crate) fn pop(&mut self) -> Option<BytesFragment> {
+        self.buffer.pop_front()
     }
 
     /// Read data out of this object, writing it into `buf`
@@ -109,7 +105,7 @@ impl ChunkVecBuffer {
         let mut offs = 0;
 
         while offs < buf.len() && !self.is_empty() {
-            let used = self.chunks[0]
+            let used = self.buffer[0].fragment
                 .as_slice()
                 .read(&mut buf[offs..])?;
 
@@ -124,7 +120,7 @@ impl ChunkVecBuffer {
     /// Read data out of this object, writing it into `cursor`.
     pub(crate) fn read_buf(&mut self, mut cursor: io::BorrowedCursor<'_>) -> io::Result<()> {
         while !self.is_empty() && cursor.capacity() > 0 {
-            let chunk = self.chunks[0].as_slice();
+            let chunk = self.buffer[0].as_slice();
             let used = std::cmp::min(chunk.len(), cursor.capacity());
             cursor.append(&chunk[..used]);
             self.consume(used);
@@ -134,21 +130,29 @@ impl ChunkVecBuffer {
     }
 
     pub(crate) fn consume(&mut self, mut used: usize) {
-        while let Some(mut buf) = self.chunks.pop_front() {
-            if used < buf.len() {
-                self.chunks
-                    .push_front(buf.split_off(used));
+        while let Some(mut buf) = self.buffer.pop_front() {
+            if used < buf.fragment.len() {
+                self.buffer
+                    .push_front(
+                        BytesFragment::new(
+                            buf.fragment.split_off(used), Some(buf.offset + used as u64), Some(buf.len - used),
+                            buf.fin)
+                    );
                 break;
             } else {
-                used -= buf.len();
+                used -= buf.fragment.len();
             }
         }
     }
 
-    pub(crate) fn consume_chunk(&mut self, mut used: usize, chunk: Vec<u8>) {
+    pub(crate) fn consume_chunk(&mut self, mut used: usize, chunk: BytesFragment) {
         let mut buf = chunk;
-        if used < buf.len() {
-            self.chunks.push_front(buf.split_off(used));
+        if used < buf.fragment.len() {
+            self.buffer.push_front(BytesFragment::new(
+                buf.fragment.split_off(used), Some(buf.offset + used as u64), Some(buf.len - used),
+                buf.fin
+            )
+            );
         }
     }
 
@@ -159,13 +163,42 @@ impl ChunkVecBuffer {
         }
 
         let mut bufs = [io::IoSlice::new(&[]); 64];
-        for (iov, chunk) in bufs.iter_mut().zip(self.chunks.iter()) {
-            *iov = io::IoSlice::new(chunk);
+        for (iov, chunk) in bufs.iter_mut().zip(self.buffer.iter()) {
+            *iov = io::IoSlice::new(&chunk.fragment);
         }
-        let len = cmp::min(bufs.len(), self.chunks.len());
+        let len = cmp::min(bufs.len(), self.buffer.len());
         let used = wr.write_vectored(&bufs[..len])?;
         self.consume(used);
         Ok(used)
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct BytesFragment {
+    pub(crate) fragment: Vec<u8>,
+    /// The offset of the buffer within a stream.
+    pub(crate) offset: u64,
+    /// Application's data length without length of headers
+    pub(crate) len: usize,
+    
+    pub(crate) fin: u8,
+}
+
+impl BytesFragment {
+    pub(crate) fn new(fragment: Vec<u8>, off:Option<u64>, len: Option<usize>, fin: u8) -> Self {
+        Self {
+            fragment,
+            offset: match off {
+                Some(offset) => offset,
+                None => 0,
+            },
+            len: match len {
+                Some(len) => len,
+                None => 0,
+            },
+            fin,
+        }
+
     }
 }
 
@@ -193,9 +226,9 @@ mod test {
 
         {
             let mut cvb = ChunkVecBuffer::new(None);
-            cvb.append(b"test ".to_vec());
-            cvb.append(b"fixture ".to_vec());
-            cvb.append(b"data".to_vec());
+            cvb.append(b"test ".to_vec(), None, None, false);
+            cvb.append(b"fixture ".to_vec(), None, None, false);
+            cvb.append(b"data".to_vec(), None, None, false);
 
             let mut buf = [MaybeUninit::<u8>::uninit(); 8];
             let mut buf: BorrowedBuf<'_> = buf.as_mut_slice().into();
@@ -211,7 +244,7 @@ mod test {
 
         {
             let mut cvb = ChunkVecBuffer::new(None);
-            cvb.append(b"short message".to_vec());
+            cvb.append(b"short message".to_vec(), None, None, false);
 
             let mut buf = [MaybeUninit::<u8>::uninit(); 1024];
             let mut buf: BorrowedBuf<'_> = buf.as_mut_slice().into();

@@ -318,7 +318,7 @@ impl CommonState {
                     .append_limited_copy(data),
                 Limit::No => self
                     .sendable_plaintext
-                    .append(data.to_vec()),
+                    .append(data.to_vec(), None, None, 0),
             };
             return len;
         }
@@ -400,13 +400,13 @@ impl CommonState {
         }
 
         while let Some(buf) = self.sendable_plaintext.pop() {
-            self.send_plain(&buf, Limit::No);
+            self.send_plain(&buf.fragment, Limit::No);
         }
     }
 
     // Put m into sendable_tls for writing.
     fn queue_tls_message(&mut self, m: OpaqueMessage) {
-        self.sendable_tls.append(m.encode());
+        self.sendable_tls.append(m.encode(), None, None, 0);
     }
 
     /// Send a raw TLS message, fragmenting it if needed.
@@ -444,7 +444,7 @@ impl CommonState {
     }
 
     pub(crate) fn take_received_plaintext(&mut self, bytes: Payload) {
-        self.received_plaintext.append(bytes.0);
+        self.received_plaintext.append(bytes.0, None, None, 0);
     }
 
     #[cfg(feature = "tls12")]
