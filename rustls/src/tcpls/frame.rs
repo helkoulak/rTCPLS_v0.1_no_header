@@ -171,28 +171,28 @@ impl Frame {
         let frame_type = b.get_u8_reverse().expect("failed");
 
         let frame_size = match frame_type {
-            0x00 => 1,
+            0x00 => 1 ,
 
-            0x01 => 1,
+            0x01 => 1 ,
 
             0x02..=0x03 => {
                 1 + varint_len(b.get_varint_reverse().unwrap()) +
                     varint_len(b.get_varint_reverse().unwrap()) +
-                    varint_len(b.get_varint_reverse().unwrap());
+                    varint_len(b.get_varint_reverse().unwrap())
             },
 
             0x04 => {
                 1 + varint_len(b.get_varint_reverse().unwrap()) +
-                    varint_len(b.get_varint_reverse().unwrap());
+                    varint_len(b.get_varint_reverse().unwrap())
             },
 
 
             0x05 => {
-                1 + varint_len(b.get_varint_reverse().unwrap()) + 32;
+                1 + varint_len(b.get_varint_reverse().unwrap()) + 32
             },
 
             0x06 => {
-                1 + varint_len(b.get_varint_reverse().unwrap());
+                1 + varint_len(b.get_varint_reverse().unwrap())
             },
 
             0x07 => {
