@@ -307,10 +307,6 @@ impl MessageDecrypter for Tls13MessageDecrypter {
             return Err(Error::PeerSentOversizedRecord);
         }
 
-
-
-        recv_buf.offset += payload_len_no_type;
-
         Ok(PlainMessage {
             typ: msg.typ,
             version: ProtocolVersion::TLSv1_3,
