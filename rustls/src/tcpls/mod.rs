@@ -41,8 +41,6 @@ pub struct TcplsSession {
     pub is_closed: bool,
     pub tls_hs_completed: bool,
     pub next_stream_id: u64,
-    // Objet responsible for holding bytes received on TCP socket.
-    pub(crate) message_deframer: MessageDeframer,
 }
 
 impl TcplsSession {
@@ -58,7 +56,6 @@ impl TcplsSession {
             is_closed: false,
             tls_hs_completed: false,
             next_stream_id: 0,
-            message_deframer: MessageDeframer::default(),
         }
     }
 

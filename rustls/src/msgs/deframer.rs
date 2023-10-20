@@ -1,4 +1,5 @@
 use std::cmp::min;
+use std::collections::hash_map;
 use std::io;
 use std::ops::Range;
 
@@ -10,7 +11,8 @@ use crate::error::{Error, InvalidMessage, PeerMisbehaved};
 use crate::msgs::{codec, message};
 use crate::msgs::message::{BorrowedOpaqueMessage, MessageError};
 use crate::record_layer::{Decrypted, RecordLayer};
-use crate::recvbuf::RecvBuffer;
+use crate::recvbuf::{RecvBuf, RecvBufMap};
+use crate::tcpls::stream::SimpleIdHashMap;
 
 /// This deframer works to reconstruct TLS messages from a stream of arbitrary-sized reads.
 ///
@@ -18,6 +20,9 @@ use crate::recvbuf::RecvBuffer;
 /// QUIC connections will call `push()` to append handshake payload data directly.
 #[derive(Default)]
 pub struct MessageDeframer {
+    /// Id of active TCP connection
+    id: u64,
+
     /// Set if the peer is not talking TLS, but some other
     /// protocol.  The caller should abort the connection, because
     /// the deframer cannot recover.
@@ -489,14 +494,42 @@ const MAX_HANDSHAKE_SIZE: u32 = 0xffff;
 
 const READ_SIZE: usize = 4096;
 
+#[derive(Default)]
+pub struct MessageDeframerMap {
+    deframers: SimpleIdHashMap<MessageDeframer>,
+}
+
+impl MessageDeframerMap {
+    pub fn new() -> MessageDeframerMap {
+        MessageDeframerMap {
+            ..Default::default()
+        }
+    }
+
+    pub(crate) fn get_or_create_deframer(&mut self, connection_id: u64) -> &mut MessageDeframer {
+        match self.deframers.entry(connection_id) {
+            hash_map::Entry::Vacant(v) => {
+                v.insert(MessageDeframer::new(connection_id))
+            },
+            hash_map::Entry::Occupied(v) => v.into_mut(),
+        }
+    }
+
+
+}
+
+
+
 #[cfg(test)]
 mod tests {
     use super::MessageDeframer;
-    use crate::msgs::message::{Message, OpaqueMessage, PlainMessage};
+    use crate::msgs::message::{MAX_WIRE_SIZE, Message, OpaqueMessage, PlainMessage};
     use crate::record_layer::RecordLayer;
     use crate::{ContentType, Error, InvalidMessage};
 
     use std::io;
+    use crate::msgs::deframer::MessageDeframerMap;
+    use crate::recvbuf::RecvBufMap;
 
     const FIRST_MESSAGE: &[u8] = include_bytes!("../testdata/deframer-test.1.bin");
     const SECOND_MESSAGE: &[u8] = include_bytes!("../testdata/deframer-test.2.bin");
@@ -576,20 +609,21 @@ mod tests {
     }
 
     fn pop_first(d: &mut MessageDeframer, rl: &mut RecordLayer) {
-        let m = d.pop(rl, None).unwrap().unwrap().message;
+        let m = d.pop(rl, &mut RecvBufMap::new()).unwrap().unwrap().message;
         assert_eq!(m.typ, ContentType::Handshake);
-        Message::try_from(PlainMessage::from(m)).unwrap();
+        Message::try_from(m).unwrap();
     }
 
     fn pop_second(d: &mut MessageDeframer, rl: &mut RecordLayer) {
-        let m = d.pop(rl, None).unwrap().unwrap().message;
+        let m = d.pop(rl, &mut RecvBufMap::new()).unwrap().unwrap().message;
         assert_eq!(m.typ, ContentType::Alert);
-        Message::try_from(PlainMessage::from(m)).unwrap();
+        Message::try_from(m).unwrap();
     }
 
     #[test]
     fn check_incremental() {
-        let mut d = MessageDeframer::default();
+        let mut deframers = MessageDeframerMap::new();
+        let mut d = deframers.get_or_create_deframer(999);
         assert!(!d.has_pending());
         input_whole_incremental(&mut d, FIRST_MESSAGE);
         assert!(d.has_pending());
@@ -602,7 +636,8 @@ mod tests {
 
     #[test]
     fn check_incremental_2() {
-        let mut d = MessageDeframer::default();
+        let mut deframers = MessageDeframerMap::new();
+        let mut d = deframers.get_or_create_deframer(999);
         assert!(!d.has_pending());
         input_whole_incremental(&mut d, FIRST_MESSAGE);
         assert!(d.has_pending());
@@ -702,7 +737,7 @@ mod tests {
 
         let mut rl = RecordLayer::new();
         assert_eq!(
-            d.pop(&mut rl, None).unwrap_err(),
+            d.pop(&mut rl, &mut RecvBufMap::new()).unwrap_err(),
             Error::InvalidMessage(InvalidMessage::InvalidContentType)
         );
     }
@@ -717,7 +752,7 @@ mod tests {
 
         let mut rl = RecordLayer::new();
         assert_eq!(
-            d.pop(&mut rl, None).unwrap_err(),
+            d.pop(&mut rl, &mut RecvBufMap::new()).unwrap_err(),
             Error::InvalidMessage(InvalidMessage::UnknownProtocolVersion)
         );
     }
@@ -732,7 +767,7 @@ mod tests {
 
         let mut rl = RecordLayer::new();
         assert_eq!(
-            d.pop(&mut rl, None).unwrap_err(),
+            d.pop(&mut rl, &mut RecvBufMap::new()).unwrap_err(),
             Error::InvalidMessage(InvalidMessage::MessageTooLarge)
         );
     }
@@ -746,7 +781,7 @@ mod tests {
         );
 
         let mut rl = RecordLayer::new();
-        let m = d.pop(&mut rl, None).unwrap().unwrap().message;
+        let m = d.pop(&mut rl, &mut RecvBufMap::new()).unwrap().unwrap().message;
         assert_eq!(m.typ, ContentType::ApplicationData);
         assert_eq!(m.payload.0.len(), 0);
         assert!(!d.has_pending());
@@ -763,12 +798,12 @@ mod tests {
 
         let mut rl = RecordLayer::new();
         assert_eq!(
-            d.pop(&mut rl, None).unwrap_err(),
+            d.pop(&mut rl, &mut RecvBufMap::new()).unwrap_err(),
             Error::InvalidMessage(InvalidMessage::InvalidEmptyPayload)
         );
         // CorruptMessage has been fused
         assert_eq!(
-            d.pop(&mut rl, None).unwrap_err(),
+            d.pop(&mut rl, &mut RecvBufMap::new()).unwrap_err(),
             Error::InvalidMessage(InvalidMessage::InvalidEmptyPayload)
         );
     }
@@ -788,7 +823,7 @@ mod tests {
         assert_len(4096, input_bytes(&mut d, &message));
         assert_len(4096, input_bytes(&mut d, &message));
         assert_len(
-            OpaqueMessage::MAX_WIRE_SIZE - 16_384,
+            MAX_WIRE_SIZE - 16_384,
             input_bytes(&mut d, &message),
         );
         assert!(input_bytes(&mut d, &message).is_err());
