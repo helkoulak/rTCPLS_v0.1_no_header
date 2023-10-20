@@ -15,15 +15,15 @@ pub trait MessageDecrypter: Send + Sync {
     /// Perform the decryption over the concerned TLS message.
 
     fn decrypt(&self, m: BorrowedOpaqueMessage, seq: u64, connection_id: u32) -> Result<PlainMessage, Error>;
-   fn decrypt_zc(&self, msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, recv_buf: &mut RecvBuffer) -> Result<PlainMessage, Error>;
-    fn derive_dec_connection_iv(&mut self, conn_id: u32);
+   fn decrypt_zc(&self, msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, recv_buf: &mut RecvBuf) -> Result<PlainMessage, Error>;
+    fn derive_dec_stream_iv(&mut self, conn_id: u32);
 }
 
 /// Objects with this trait can encrypt TLS messages.
 pub(crate) trait MessageEncrypter: Send + Sync {
     fn encrypt(&self, m: BorrowedPlainMessage, seq: u64, connection_id: u32) -> Result<OpaqueMessage, Error>;
     fn encrypt_zc(&self, msg: &[u8], seq: u64, conn_id: u32) -> Result<Vec<u8>, Error>;
-    fn derive_enc_connection_iv(&mut self, conn_id: u32);
+    fn derive_enc_stream_iv(&mut self, conn_id: u32);
 }
 
 impl dyn MessageEncrypter {
@@ -92,17 +92,17 @@ pub(crate) fn make_nonce(iv: &Iv, seq: u64) -> ring::aead::Nonce {
     aead::Nonce::assume_unique_for_key(nonce)
 }
 
-pub(crate) fn derive_connection_iv(iv: &mut HashMap<u32, Iv>, connection_id: u32){
-        let mut conn_id = [0u8; aead::NONCE_LEN];
-        codec::put_u32(connection_id, &mut conn_id[..4]);
+pub(crate) fn derive_stream_iv(iv: &mut HashMap<u32, Iv>, stream_id: u32){
+        let mut id = [0u8; aead::NONCE_LEN];
+        codec::put_u32(stream_id, &mut id[..4]);
 
-        conn_id
+        id
             .iter_mut()
             .zip(iv.get_mut(&0).unwrap().0.iter_mut())
-            .for_each(|(conn_id, iv)| {
-                *conn_id ^= *iv;
+            .for_each(|(id, iv)| {
+                *id ^= *iv;
             });
-        iv.insert(connection_id, Iv::copy(&conn_id));
+        iv.insert(stream_id, Iv::copy(&id));
     }
 
 
@@ -119,7 +119,7 @@ impl MessageEncrypter for InvalidMessageEncrypter {
         todo!()
     }
 
-    fn derive_enc_connection_iv(&mut self, conn_id: u32) {
+    fn derive_enc_stream_iv(&mut self, conn_id: u32) {
 
     }
 }
@@ -132,11 +132,11 @@ impl MessageDecrypter for InvalidMessageDecrypter {
         Err(Error::DecryptError)
     }
 
-    fn decrypt_zc(&self, msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, output: &mut RecvBuffer) -> Result<PlainMessage, Error> {
+    fn decrypt_zc(&self, msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, output: &mut RecvBuf) -> Result<PlainMessage, Error> {
         todo!()
     }
 
-    fn derive_dec_connection_iv(&mut self, conn_id: u32) {
+    fn derive_dec_stream_iv(&mut self, stream_id: u32) {
 
     }
 }

@@ -108,15 +108,14 @@ impl CommonState {
 
 
     /// sets the id of the currently active tcp connection
-    pub(crate) fn set_sending_connection_id(&mut self, conn_id: u32) {
+    pub(crate) fn set_active_connection_id(&mut self, conn_id: u32) {
         self.active_conn_id = conn_id;
-        self.record_layer.set_sending_conn_id(conn_id);
     }
 
-    /*/// Gets mutable reference for receive buffer
-    pub fn recv_buffer_as_mut_ref(&mut self, conn_id: u32) -> &mut ChunkVecBuffer{
-        &mut self.stream_map.streams.get_mut(&conn_id).unwrap().recv
-    }*/
+    /// sets the id of the currently active stream
+    pub(crate) fn set_active_stream_id(&mut self, stream_id: u32) {
+        self.record_layer.set_active_stream_id(stream_id as u64);
+    }
 
     /// Returns true if the connection is currently performing the TLS handshake.
     ///

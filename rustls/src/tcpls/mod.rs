@@ -18,9 +18,10 @@ use crate::{server, version, AlertDescription, Certificate, ClientConfig, Client
 
 use crate::msgs::deframer::MessageDeframer;
 use crate::msgs::message::BorrowedPlainMessage;
+use crate::recvbuf::RecvBufMap;
 use crate::tcpls::frame::{StreamFrameHeader, MAX_TCPLS_FRAGMENT_LEN};
 use crate::tcpls::network_address::AddressMap;
-use crate::tcpls::stream::{RecvBufMap, StreamMap};
+use crate::tcpls::stream::StreamMap;
 use crate::verify::{
     AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
 };
@@ -78,12 +79,6 @@ impl TcplsSession {
                 .expect("Establishment of TLS session failed");
             let _ = self.tls_conn.insert(Connection::from(client_conn));
             let _ = self.tls_config.insert(TlsConfig::Client(config.clone()));
-        } else {
-            self.tls_conn
-                .as_mut()
-                .unwrap()
-                .record_layer
-                .start_new_seq_space(new_id);
         }
     }
 
@@ -125,12 +120,6 @@ impl TcplsSession {
                 .expect("Establishing a TLS session has failed");
             let _ = self.tls_conn.insert(Connection::from(server_conn));
             let _ = self.tls_config.insert(TlsConfig::from(config));
-        } else {
-            self.tls_conn
-                .as_mut()
-                .unwrap()
-                .record_layer
-                .start_new_seq_space(conn_id);
         }
         Ok(conn_id)
     }
@@ -141,7 +130,7 @@ impl TcplsSession {
         }
 
         // Get existing stream or create a new one.
-        let stream = self.get_or_create_stream(stream_id, true)?;
+        let stream = self.get_or_create_stream(stream_id)?;
 
         // we're respecting limit for plaintext data -- so we'll
         // be out by whatever the cipher+record overhead is.  That's a
@@ -158,53 +147,31 @@ impl TcplsSession {
             (input, fin)
         };
 
-        // Encapsulate data chunks with TCPLS stream frame header,
-        // buffer it in send buffer
 
         let mut buffered = 0;
         let chunks = buf.chunks(MAX_TCPLS_FRAGMENT_LEN);
         let mut number_of_chunks = chunks.len();
 
-        for mut chunk in chunks {
+        for chunk in chunks {
             number_of_chunks -= 1;
-            let chunk_len = chunk.len();
-            let mut header = StreamFrameHeader {
-                length: chunk_len as u64,
-                offset: stream.send.get_offset(),
-                stream_id,
-                // consider fin at the last fragment
-                fin: if number_of_chunks == 0 {
-                    match fin {
-                        true => 1,
-                        false => 0,
-                    }
-                } else {
-                    0
-                },
-            };
 
-            let mut record = vec![0; chunk_len + header.get_header_length() + 1];
-
-            let mut octets = octets::OctetsMut::with_slice_at_offset(&mut record, 0);
-
-            octets.put_bytes(chunk).unwrap();
-
-            header
-                .encode_stream_header(&mut octets)
-                .expect("encoding stream header failed");
-
-            octets.put_u8(0x17).unwrap(); // ContentType::ApplicationData
-
-            stream.send.append(record);
-            stream.send.advance_offset(chunk_len);
-            buffered += chunk_len;
+            buffered += stream.send.append(Vec::from(chunk), Some(stream.send.get_offset()), Some(chunk.len()),
+                               if number_of_chunks == 0 {
+                                   match fin {
+                                       true => 1,
+                                       false => 0,
+                                   }
+                               } else {
+                                   0
+                               });
+            stream.send.advance_offset(chunk.len() as u64);
         }
 
         Ok(buffered)
     }
 
-    pub fn get_or_create_stream(&mut self, id: u64, x: bool) -> Result<&mut stream::Stream, Error> {
-        self.streams.get_or_create(id, self.is_server)
+    pub fn get_or_create_stream(&mut self, id: u64) -> Result<&mut stream::Stream, Error> {
+        self.streams.get_or_create(id)
     }
 
     pub fn send_on_connection(&mut self, stream_id: u64, conn_id: u32) -> Result<usize, Error> {

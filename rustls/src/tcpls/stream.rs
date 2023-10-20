@@ -210,10 +210,6 @@ impl StreamMap {
                     return Err(Error::Done);
                 }
 
-                if  (stream_id & 0x1) == (is_server as u64){
-                    return Err(Error::BadStreamId);
-                }
-
                 let s = Stream::new(stream_id);
 
                 let is_writable = s.is_writable();
