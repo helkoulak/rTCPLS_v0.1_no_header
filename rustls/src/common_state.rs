@@ -1,12 +1,12 @@
 use crate::cipher::Iv;
 use crate::enums::{AlertDescription, ContentType, HandshakeType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerMisbehaved};
-use crate::{key, Stream, stream, tcpls};
+use crate::key;
 #[cfg(feature = "logging")]
 use crate::log::{debug, error, warn};
 use crate::msgs::alert::AlertMessagePayload;
 use crate::msgs::base::Payload;
-use crate::msgs::deframer::{MessageDeframer, MessageDeframerMap};
+use crate::msgs::deframer::MessageDeframerMap;
 use crate::msgs::enums::{AlertLevel, KeyUpdateRequest};
 use crate::msgs::fragmenter::MessageFragmenter;
 use crate::msgs::message::{BorrowedPlainMessage, Message, OpaqueMessage, PlainMessage};
