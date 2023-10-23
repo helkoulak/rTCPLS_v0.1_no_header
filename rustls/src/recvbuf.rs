@@ -1,9 +1,10 @@
 use std::cmp;
-use crate::tcpls::stream::DEFAULT_BUFFER_LIMIT;
+use std::collections::hash_map;
+use crate::tcpls::stream::{DEFAULT_BUFFER_LIMIT, SimpleIdHashMap};
 
 /// This is the receive buffer of a stream
 #[derive(Default)]
-pub struct RecvBuffer {
+pub struct RecvBuf {
     id: u64,
     data: Vec<u8>,
     /// where the next chunk will be appended
@@ -17,11 +18,11 @@ pub struct RecvBuffer {
     consumed: usize,
 }
 
-impl RecvBuffer {
+impl RecvBuf {
     /// create a new instance of RecvBuffer
-    pub fn new(stream_id: u64, capacity: Option<usize>) -> RecvBuffer {
+    pub fn new(stream_id: u64, capacity: Option<usize>) -> RecvBuf {
         if let Some(capacity) = capacity {
-            let mut appbuf = RecvBuffer {
+            let mut appbuf = RecvBuf {
                 id: stream_id,
                 data :vec![0; capacity],
                 ..Default::default()
@@ -32,7 +33,7 @@ impl RecvBuffer {
             unsafe { appbuf.data.set_len(capacity) };
             appbuf
         } else {
-            let mut appbuf = RecvBuffer {
+            let mut appbuf = RecvBuf {
                 id: stream_id,
                 data: vec![0; DEFAULT_BUFFER_LIMIT],
                 ..Default::default()
@@ -43,6 +44,10 @@ impl RecvBuffer {
     }
     pub fn get_mut(&mut self) -> &mut [u8] {
         &mut self.data[self.offset..]
+    }
+
+    pub fn as_ref(&mut self) -> & [u8] {
+        & self.data[self.offset..]
     }
 
     pub fn get_mut_consumed(&mut self) -> &mut [u8] {
@@ -87,10 +92,84 @@ impl RecvBuffer {
     }
 }
 
+#[derive(Default)]
+pub struct RecvBufMap {
+    buffers: SimpleIdHashMap<RecvBuf>,
+}
+
+impl RecvBufMap {
+
+    pub fn new() -> RecvBufMap {
+        RecvBufMap {
+            ..Default::default()
+        }
+    }
+
+
+    pub(crate) fn get_or_create_recv_buffer(&mut self, stream_id: u64, capacity: Option<usize>) -> &mut RecvBuf {
+        match self.buffers.entry(stream_id) {
+            hash_map::Entry::Vacant(v) => {
+                v.insert(RecvBuf::new(stream_id, capacity))
+            },
+            hash_map::Entry::Occupied(v) => v.into_mut(),
+        }
+    }
+
+
+    /*pub fn get_mut(&mut self, stream_id: u64) -> Option<&mut [u8]> {
+        Some(self.buffers.get_mut(&stream_id)?
+
+    }*/
+
+    /*pub(crate) fn read_mut(&mut self, stream_id: u64, stream: &mut Stream) -> Result<&mut [u8], Error> {
+        let buf = match self.buffers.entry(stream_id) {
+            hash_map::Entry::Vacant(_v) => {
+                return Err(Error::RecvBufNotFound);
+            }
+            hash_map::Entry::Occupied(v) => v.into_mut().read_mut(&mut stream.recv)?,
+        };
+        Ok(buf)
+    }*/
+
+    /*pub(crate) fn has_consumed(&mut self, stream_id: u64, stream: Option<&Stream>, consumed: usize) -> Result<usize, Error>{
+        match self.buffers.entry(stream_id) {
+            hash_map::Entry::Occupied(v) => {
+                // Registers how much the app has read on this stream buffer. If we don't
+                // have a stream, it means it has been collected. We need to collect our stream
+                // buffer as well assuming the application has read everything that was readable.
+                let (to_collect, remaining_data) = v.into_mut().has_consumed(stream, consumed)?;
+                if to_collect {
+                    self.collect(stream_id);
+                }
+                Ok(remaining_data)
+            },
+            _ => Ok(0),
+        }
+    }*/
+
+    /*pub(crate) fn is_consumed(&self, stream_id: u64) -> bool {
+        match self.buffers.get(&stream_id) {
+            Some(v) => {
+                v.is_consumed()
+            }
+            _ => true,
+        }
+    }*/
+
+    /* pub fn collect(&mut self, stream_id: u64) {
+         if let Some(mut buf) = self.buffers.remove(&stream_id) {
+             if self.recycled_buffers.len() < self.recycled_buffers.capacity() {
+                 buf.clear();
+                 self.recycled_buffers.push_back(buf);
+             }
+         }
+     }*/
+
+}
+
 #[cfg(test)]
 mod test {
     use crate::vecbuf::ChunkVecBuffer;
-    use super::ChunkVecBuffer;
 
     #[test]
     fn short_append_copy_with_limit() {
