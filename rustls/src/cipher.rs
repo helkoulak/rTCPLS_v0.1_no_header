@@ -7,7 +7,7 @@ use crate::msgs::codec;
 use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, OpaqueMessage, PlainMessage};
 
 use ring::{aead, hkdf};
-use crate::recvbuf::RecvBuffer;
+use crate::recvbuf::RecvBuf;
 
 
 /// Objects with this trait can decrypt TLS messages.
