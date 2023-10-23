@@ -23,7 +23,7 @@ use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::{fmt, io};
-use crate::recvbuf::RecvBuffer;
+use crate::recvbuf::{RecvBuf, RecvBufMap};
 
 /// A trait for the ability to store server session data.
 ///

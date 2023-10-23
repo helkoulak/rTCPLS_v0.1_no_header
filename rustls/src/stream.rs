@@ -2,7 +2,7 @@ use crate::conn::{ConnectionCommon, SideData};
 
 use std::io::{IoSlice, Read, Result, Write};
 use std::ops::{Deref, DerefMut};
-use crate::recvbuf::RecvBuffer;
+use crate::recvbuf::{RecvBuf, RecvBufMap};
 
 /// This type implements `io::Read` and `io::Write`, encapsulating
 /// a Connection `C` and an underlying transport `T`, such as a socket.
@@ -51,7 +51,6 @@ where
     S: SideData,
 {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-        let mut recv_buf = RecvBuffer::new(999, None);
         self.complete_prior_io()?;
 
         // We call complete_io() in a loop since a single call may read only
@@ -63,7 +62,7 @@ where
         while self.conn.wants_read() {
             let at_eof = self.conn.complete_io(self.sock)?.0 == 0;
             if at_eof {
-                if let Ok(io_state) = self.conn.process_new_packets(&mut recv_buf) {
+                if let Ok(io_state) = self.conn.process_new_packets(&mut RecvBufMap::new()) {
                     if at_eof && io_state.plaintext_bytes_to_read() == 0 {
                         return Ok(0);
                     }

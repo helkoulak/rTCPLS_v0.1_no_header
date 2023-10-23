@@ -283,7 +283,7 @@ impl TcplsSession {
             return Err(Error::HandshakeNotComplete);
         }
 
-        tls_conn.set_active_connection_id(conn_id);
+        tls_conn.set_connection_in_use(conn_id);
 
             match tls_conn.process_new_packets(app_buffers) {
                 Ok(_) => {},

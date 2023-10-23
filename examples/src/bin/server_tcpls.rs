@@ -282,7 +282,7 @@ impl OpenConnection {
         };
     }
 
-    fn try_plain_read(&mut self) {
+    /*fn try_plain_read(&mut self) {
         // Read and process all available plaintext.
         if let Ok(io_state) = self.tls_conn.process_received() {
             if io_state.plaintext_bytes_to_read() > 0 {
@@ -299,7 +299,7 @@ impl OpenConnection {
                 self.incoming_plaintext(&buf);
             }
         }
-    }
+    }*/
 
     fn try_back_read(&mut self) {
         if self.back.is_none() {
