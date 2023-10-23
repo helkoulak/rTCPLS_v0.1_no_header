@@ -12,6 +12,8 @@ pub(crate) struct ChunkVecBuffer {
     limit: Option<usize>,
     /// where the next chunk will be appended
     offset: u64,
+    /// Amount of application bytes in plain that are buffered
+    plain_buffered: usize,
 }
 
 impl ChunkVecBuffer {
@@ -20,6 +22,7 @@ impl ChunkVecBuffer {
             buffer: VecDeque::new(),
             limit,
             offset: 0,
+            plain_buffered: 0,
         }
     }
 
@@ -49,12 +52,21 @@ impl ChunkVecBuffer {
 
     pub(crate)  fn is_full(&self) -> bool {
         self.limit
-            .map(|limit| self.len() > limit)
+            .map(|limit| self.len_plain() > limit)
             .unwrap_or_default()
     }
 
     /// How many bytes we're storing
     pub(crate) fn len(&self) -> usize {
+        let mut len = 0;
+        for ch in &self.buffer {
+            len += ch.fragment.len();
+        }
+        len
+    }
+
+    /// How many plain bytes we're storing
+    pub(crate) fn len_plain(&self) -> usize {
         let mut len = 0;
         for ch in &self.buffer {
             len += ch.len;
@@ -67,7 +79,7 @@ impl ChunkVecBuffer {
     /// currently set `limit`?
     pub(crate)  fn apply_limit(&self, len: usize) -> usize {
         if let Some(limit) = self.limit {
-            let space = limit.saturating_sub(self.len());
+            let space = limit.saturating_sub(self.len_plain());
             cmp::min(len, space)
         } else {
             len
@@ -78,16 +90,16 @@ impl ChunkVecBuffer {
     /// we're near the limit.
     pub(crate) fn append_limited_copy(&mut self, bytes: &[u8]) -> usize {
         let take = self.apply_limit(bytes.len());
-        self.append(bytes[..take].to_vec(), None, None, 0);
+        self.append(bytes[..take].to_vec(), None, None);
         take
     }
 
     /// Take and append the given `bytes`.
-    pub(crate) fn append(&mut self, bytes: Vec<u8>, offset: Option<u64>, length: Option<usize>, fin: u8) -> usize {
+    pub(crate) fn append(&mut self, bytes: Vec<u8>, offset: Option<u64>, length: Option<usize>) -> usize {
         let len = bytes.len();
         
         if !bytes.is_empty() {
-            let fragment = BytesFragment::new(bytes, offset, length, fin);
+            let fragment = BytesFragment::new(bytes, offset, length);
             self.buffer.push_back(fragment);
         }
         len
@@ -135,8 +147,7 @@ impl ChunkVecBuffer {
                 self.buffer
                     .push_front(
                         BytesFragment::new(
-                            buf.fragment.split_off(used), Some(buf.offset + used as u64), Some(buf.len - used),
-                            buf.fin)
+                            buf.fragment.split_off(used), Some(buf.offset + used as u64), Some(buf.len - used))
                     );
                 break;
             } else {
@@ -149,10 +160,7 @@ impl ChunkVecBuffer {
         let mut buf = chunk;
         if used < buf.fragment.len() {
             self.buffer.push_front(BytesFragment::new(
-                buf.fragment.split_off(used), Some(buf.offset + used as u64), Some(buf.len - used),
-                buf.fin
-            )
-            );
+                buf.fragment.split_off(used), Some(buf.offset + used as u64), Some(buf.len)));
         }
     }
 
@@ -180,12 +188,12 @@ pub(crate) struct BytesFragment {
     pub(crate) offset: u64,
     /// Application's data length without length of headers
     pub(crate) len: usize,
-    
-    pub(crate) fin: u8,
+
+  //  pub(crate) fin: u8,
 }
 
 impl BytesFragment {
-    pub(crate) fn new(fragment: Vec<u8>, off:Option<u64>, len: Option<usize>, fin: u8) -> Self {
+    pub(crate) fn new(fragment: Vec<u8>, off:Option<u64>, len: Option<usize>) -> Self {
         Self {
             fragment,
             offset: match off {
@@ -196,7 +204,6 @@ impl BytesFragment {
                 Some(len) => len,
                 None => 0,
             },
-            fin,
         }
 
     }
