@@ -31,7 +31,7 @@ pub struct RecordLayer {
     encrypt_state: DirectionState,
     decrypt_state: DirectionState,
     /// id of currently used stream
-    pub active_stream_id: u64,
+    stream_in_use: u64,
 
     is_handshaking: bool,
 
@@ -50,7 +50,7 @@ impl RecordLayer {
             seq_map: RecSeqNumMap::new(),
             encrypt_state: DirectionState::Invalid,
             decrypt_state: DirectionState::Invalid,
-            active_stream_id: 0,
+            stream_in_use: 0,
             is_handshaking: true,
             trial_decryption_len: None,
         }
@@ -66,16 +66,16 @@ impl RecordLayer {
 
     #[cfg(feature = "secret_extraction")]
     pub(crate) fn write_seq(&self) -> u64 {
-        self.seq_map.as_ref(self.active_stream_id as u32).write_seq
+        self.seq_map.as_ref(self.stream_in_use as u32).write_seq
     }
 
     #[cfg(feature = "secret_extraction")]
     pub(crate) fn read_seq(&self) -> u64 {
-        self.seq_map.as_ref(self.active_stream_id as u32).read_seq
+        self.seq_map.as_ref(self.stream_in_use as u32).read_seq
     }
 
-    pub(crate) fn set_active_stream_id(&mut self, stream_id: u64) {
-        self.active_stream_id = stream_id;
+    pub(crate) fn set_stream_in_use(&mut self, stream_id: u64) {
+        self.stream_in_use = stream_id;
     }
 
     fn doing_trial_decryption(&mut self, requested: usize) -> bool {
@@ -94,7 +94,7 @@ impl RecordLayer {
     /// Prepare to use the given `MessageEncrypter` for future message encryption.
     /// It is not used until you call `start_encrypting`.
     pub(crate) fn prepare_message_encrypter(&mut self, cipher: Box<dyn MessageEncrypter>) {
-        let stream_id = self.active_stream_id;
+        let stream_id = self.stream_in_use;
         self.message_encrypter = cipher;
         self.seq_map.get_or_create(stream_id as u32).write_seq = 0;
         self.encrypt_state = DirectionState::Prepared;
@@ -103,7 +103,7 @@ impl RecordLayer {
     /// Prepare to use the given `MessageDecrypter` for future message decryption.
     /// It is not used until you call `start_decrypting`.
     pub(crate) fn prepare_message_decrypter(&mut self, cipher: Box<dyn MessageDecrypter>) {
-        let stream_id = self.active_stream_id;
+        let stream_id = self.stream_in_use;
         self.message_decrypter = cipher;
         self.seq_map.get_or_create(stream_id as u32).read_seq = 0;
         self.decrypt_state = DirectionState::Prepared;
@@ -158,13 +158,17 @@ impl RecordLayer {
     /// Return true if we are getting close to encrypting too many
     /// messages with our encryption key.
     pub(crate) fn wants_close_before_encrypt(&self) -> bool {
-        self.seq_map.as_ref(self.active_stream_id as u32).write_seq == SEQ_SOFT_LIMIT
+        self.seq_map.as_ref(self.stream_in_use as u32).write_seq == SEQ_SOFT_LIMIT
     }
 
     /// Return true if we outright refuse to do anything with the
     /// encryption key.
     pub(crate) fn encrypt_exhausted(&self) -> bool {
-        self.seq_map.as_ref(self.active_stream_id as u32).write_seq >= SEQ_HARD_LIMIT
+        self.seq_map.as_ref(self.stream_in_use as u32).write_seq >= SEQ_HARD_LIMIT
+    }
+
+    pub(crate) fn create_new_seq_space(&mut self, stream_id: u32) {
+        self.seq_map.create_new_seq_space(stream_id);
     }
 
     /// Decrypt a TLS message.
@@ -192,7 +196,7 @@ impl RecordLayer {
         // Note that there's no reason to refuse to decrypt: the security
         // failure has already happened.
 
-        let stream_id = self.active_stream_id;
+        let stream_id = self.stream_in_use;
         let want_close_before_decrypt = self.seq_map.seq_num_map.get(&stream_id).unwrap().read_seq == SEQ_SOFT_LIMIT;
 
 
@@ -248,7 +252,7 @@ impl RecordLayer {
         // Note that there's no reason to refuse to decrypt: the security
         // failure has already happened.
 
-        let stream_id = self.active_stream_id;
+        let stream_id = self.stream_in_use;
         let want_close_before_decrypt = self.seq_map.seq_num_map.get(&stream_id).unwrap().read_seq == SEQ_SOFT_LIMIT;
 
 
@@ -285,7 +289,7 @@ impl RecordLayer {
     pub(crate) fn encrypt_outgoing(&mut self, plain: BorrowedPlainMessage) -> OpaqueMessage {
         debug_assert!(self.encrypt_state == DirectionState::Active);
         assert!(!self.encrypt_exhausted());
-        let stream_id = self.active_stream_id;
+        let stream_id = self.stream_in_use;
         let seq = self.seq_map.seq_num_map.get(&stream_id).unwrap().write_seq;
         self.seq_map.seq_num_map.get_mut(&stream_id).unwrap().write_seq += 1;
         /// prepare crypto context for the specified connection
@@ -301,7 +305,7 @@ impl RecordLayer {
     pub(crate) fn encrypt_outgoing_zc(&mut self, plain: &[u8]) -> Vec<u8> {
         debug_assert!(self.encrypt_state == DirectionState::Active);
         assert!(!self.encrypt_exhausted());
-        let stream_id = self.active_stream_id;
+        let stream_id = self.stream_in_use;
         let seq = self.seq_map.seq_num_map.get(&stream_id).unwrap().write_seq;
         self.seq_map.seq_num_map.get_mut(&stream_id).unwrap().write_seq += 1;
         /// prepare crypto context for the specified connection
@@ -354,6 +358,13 @@ impl RecordLayer {
                 },
                 hash_map::Entry::Occupied(v) => v.into_mut(),
             }
+        }
+
+        /// Creates a new sequence space or do nothing if already exists
+        pub(crate) fn create_new_seq_space(&mut self, stream_id: u32) {
+           if !self.seq_num_map.contains_key(&(stream_id as u64)){
+               self.seq_num_map.insert(stream_id as u64, RecSeqNumSpace::new(stream_id))
+           }
         }
 
         pub(crate) fn as_ref(&self, stream_id: u32) -> & RecSeqNumSpace {
