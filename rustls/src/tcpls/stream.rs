@@ -27,10 +27,12 @@
 
 use std::{cmp, time};
 use std::collections::{BinaryHeap, BTreeMap, hash_map, HashMap, HashSet, VecDeque};
+use std::process::id;
 use std::sync::Arc;
 use smallvec::SmallVec;
 use crate::Error;
-use crate::recvbuf::RecvBuffer;
+use crate::msgs::deframer::MessageDeframer;
+use crate::recvbuf::RecvBuf;
 use crate::vecbuf::ChunkVecBuffer;
 
 pub const DEFAULT_BUFFER_LIMIT: usize = 64 * 1024;
@@ -113,11 +115,11 @@ impl Stream {
 /// A simple no-op hasher for Stream IDs.
 
 #[derive(Default)]
-pub struct StreamIdHasher {
+pub struct SimpleIdHasher {
     id: u64,
 }
 
-impl std::hash::Hasher for StreamIdHasher {
+impl std::hash::Hasher for SimpleIdHasher {
     #[inline]
     fn finish(&self) -> u64 {
         self.id
@@ -136,44 +138,44 @@ impl std::hash::Hasher for StreamIdHasher {
     }
 }
 
-type BuildStreamIdHasher = std::hash::BuildHasherDefault<StreamIdHasher>;
+type BuildStreamIdHasher = std::hash::BuildHasherDefault<SimpleIdHasher>;
 
-pub type StreamIdHashMap<V> = HashMap<u64, V, BuildStreamIdHasher>;
-pub type StreamIdHashSet = HashSet<u64, BuildStreamIdHasher>;
+pub type SimpleIdHashMap<V> = HashMap<u64, V, BuildStreamIdHasher>;
+pub type SimpleIdHashSet = HashSet<u64, BuildStreamIdHasher>;
 
 /// Keeps track of TCPLS streams and enforces stream limits.
 #[derive(Default)]
 pub struct StreamMap {
     /// Map of streams indexed by stream ID.
-    streams: StreamIdHashMap<Stream>,
+    streams: SimpleIdHashMap<Stream>,
     /// Queue of stream IDs corresponding to streams that have buffered data
     /// ready to be sent to the peer. This also implies that the stream has
     /// enough flow control credits to send at least some of that data.
-    flushable: StreamIdHashSet,
+    flushable: SimpleIdHashSet,
 
     /// Set of stream IDs corresponding to streams that have outstanding data
     /// to read. This is used to generate a `StreamIter` of streams without
     /// having to iterate over the full list of streams.
-    pub readable: StreamIdHashSet,
+    pub readable: SimpleIdHashSet,
 
     /// Set of stream IDs corresponding to streams that have enough flow control
     /// capacity to be written to, and is not finished. This is used to generate
     /// a `StreamIter` of streams without having to iterate over the full list
     /// of streams.
-    pub writable: StreamIdHashSet,
+    pub writable: SimpleIdHashSet,
 
     /// Set of streams that were completed and garbage collected.
     ///
     /// Instead of keeping the full stream state forever, we collect completed
     /// streams to save memory, but we still need to keep track of previously
     /// created streams, to prevent peers from re-creating them.
-    collected: StreamIdHashSet,
+    collected: SimpleIdHashSet,
 }
 
 impl StreamMap {
     pub fn new() -> Self {
         Self {
-            streams: StreamIdHashMap::default(),
+            streams: SimpleIdHashMap::default(),
             ..StreamMap::default()
         }
     }
@@ -201,16 +203,16 @@ impl StreamMap {
     /// count limits. If one of these limits is violated, the `StreamLimit`
     /// error is returned.
     pub fn get_or_create(
-        &mut self, stream_id: u64, is_server: bool,
+        &mut self, stream_id: u32,
     ) -> Result<&mut Stream, Error> {
-        let (stream, is_new_and_writable) = match self.streams.entry(stream_id) {
+        let (stream, is_new_and_writable) = match self.streams.entry(stream_id as u64) {
             hash_map::Entry::Vacant(v) => {
                 // Stream has already been closed and garbage collected.
-                if self.collected.contains(&stream_id) {
+                if self.collected.contains(&(stream_id as u64)) {
                     return Err(Error::Done);
                 }
 
-                let s = Stream::new(stream_id);
+                let s = Stream::new((stream_id as u64));
 
                 let is_writable = s.is_writable();
 
@@ -222,7 +224,7 @@ impl StreamMap {
 
 
         if is_new_and_writable {
-            self.writable.insert(stream_id);
+            self.writable.insert((stream_id as u64));
         }
 
         Ok(stream)
@@ -313,80 +315,7 @@ impl StreamMap {
     }
 }
 
-#[derive(Default)]
-pub struct RecvBufMap {
-    buffers: StreamIdHashMap<RecvBuffer>,
-}
 
-impl RecvBufMap {
-
-    pub fn new() -> RecvBufMap {
-        RecvBufMap {
-            ..Default::default()
-        }
-    }
-
-
-    pub(crate) fn get_or_create_recv_buffer(&mut self, stream_id: u64, capacity: Option<usize>) -> &mut RecvBuffer {
-        match self.buffers.entry(stream_id) {
-            hash_map::Entry::Vacant(v) => {
-                v.insert(RecvBuffer::new(stream_id, capacity))
-            },
-            hash_map::Entry::Occupied(v) => v.into_mut(),
-        }
-    }
-
-
-    /*pub fn get_mut(&mut self, stream_id: u64) -> Option<&mut [u8]> {
-        Some(self.buffers.get_mut(&stream_id)?
-
-    }*/
-
-    /*pub(crate) fn read_mut(&mut self, stream_id: u64, stream: &mut Stream) -> Result<&mut [u8], Error> {
-        let buf = match self.buffers.entry(stream_id) {
-            hash_map::Entry::Vacant(_v) => {
-                return Err(Error::RecvBufNotFound);
-            }
-            hash_map::Entry::Occupied(v) => v.into_mut().read_mut(&mut stream.recv)?,
-        };
-        Ok(buf)
-    }*/
-
-    /*pub(crate) fn has_consumed(&mut self, stream_id: u64, stream: Option<&Stream>, consumed: usize) -> Result<usize, Error>{
-        match self.buffers.entry(stream_id) {
-            hash_map::Entry::Occupied(v) => {
-                // Registers how much the app has read on this stream buffer. If we don't
-                // have a stream, it means it has been collected. We need to collect our stream
-                // buffer as well assuming the application has read everything that was readable.
-                let (to_collect, remaining_data) = v.into_mut().has_consumed(stream, consumed)?;
-                if to_collect {
-                    self.collect(stream_id);
-                }
-                Ok(remaining_data)
-            },
-            _ => Ok(0),
-        }
-    }*/
-
-    /*pub(crate) fn is_consumed(&self, stream_id: u64) -> bool {
-        match self.buffers.get(&stream_id) {
-            Some(v) => {
-                v.is_consumed()
-            }
-            _ => true,
-        }
-    }*/
-
-   /* pub fn collect(&mut self, stream_id: u64) {
-        if let Some(mut buf) = self.buffers.remove(&stream_id) {
-            if self.recycled_buffers.len() < self.recycled_buffers.capacity() {
-                buf.clear();
-                self.recycled_buffers.push_back(buf);
-            }
-        }
-    }*/
-
-}
 
 /// An iterator over TCPLS streams.
 #[derive(Default)]
@@ -397,7 +326,7 @@ pub struct StreamIter {
 
 impl StreamIter {
     #[inline]
-    fn from(streams: &StreamIdHashSet) -> Self {
+    fn from(streams: &SimpleIdHashSet) -> Self {
         StreamIter {
             streams: streams.iter().copied().collect(),
             index: 0,
