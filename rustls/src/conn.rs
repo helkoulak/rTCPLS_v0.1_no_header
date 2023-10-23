@@ -14,7 +14,7 @@ use std::fmt::Debug;
 use std::io;
 use std::mem;
 use std::ops::{Deref, DerefMut};
-use crate::recvbuf::RecvBuffer;
+use crate::recvbuf::{RecvBuf, RecvBufMap};
 use crate::tcpls;
 use crate::tcpls::frame::StreamFrameHeader;
 
@@ -64,10 +64,10 @@ impl Connection {
     /// Processes any new packets read by a previous call to [`Connection::read_tls`].
     ///
     /// See [`ConnectionCommon::process_new_packets()`] for more information.
-    pub fn process_new_packets(&mut self, recv_buf: &mut RecvBuffer) -> Result<IoState, Error> {
+    pub fn process_new_packets(&mut self, app_buffers: &mut RecvBufMap) -> Result<IoState, Error> {
         match self {
-            Self::Client(conn) => conn.process_new_packets(recv_buf),
-            Self::Server(conn) => conn.process_new_packets(recv_buf),
+            Self::Client(conn) => conn.process_new_packets(app_buffers),
+            Self::Server(conn) => conn.process_new_packets(app_buffers),
         }
     }
 
@@ -329,7 +329,7 @@ impl<Data> ConnectionCommon<Data> {
     /// Returns an object that allows reading plaintext.
     pub fn reader(&mut self) -> Reader {
         let common = &mut self.core.common_state;
-        let active_connection = common.active_conn_id;
+        let active_connection = common.conn_in_use;
         Reader {
             received_plaintext: &mut common.received_plaintext,
             // Are we done? i.e., have we processed all received messages, and received a
@@ -379,7 +379,7 @@ impl<Data> ConnectionCommon<Data> {
         Self: Sized,
         T: io::Read + io::Write,
     {
-        let mut recv_buf = RecvBuffer::new(999, None);
+
         let until_handshaked = self.is_handshaking();
         let mut eof = false;
         let mut wrlen = 0;
@@ -412,7 +412,7 @@ impl<Data> ConnectionCommon<Data> {
                 }
             }
 
-            match self.process_new_packets(&mut recv_buf) {
+            match self.process_new_packets(&mut RecvBufMap::new()) {
                 Ok(_) => {}
                 Err(e) => {
                     // In case we have an alert to send describing this error,
@@ -437,7 +437,7 @@ impl<Data> ConnectionCommon<Data> {
     ///
     /// This is a shortcut to the `process_new_packets()` -> `process_msg()` ->
     /// `process_handshake_messages()` path, specialized for the first handshake message.
-    pub(crate) fn first_handshake_message(&mut self, recv_buf: &mut RecvBuffer) -> Result<Option<Message>, Error> {
+    pub(crate) fn first_handshake_message(&mut self, recv_buf: &mut RecvBufMap) -> Result<Option<Message>, Error> {
         match self
             .core
             .deframe(recv_buf)?
@@ -475,8 +475,8 @@ impl<Data> ConnectionCommon<Data> {
     /// [`read_tls`]: Connection::read_tls
     /// [`process_new_packets`]: Connection::process_new_packets
     #[inline]
-    pub fn process_new_packets(&mut self, recv_buf: &mut RecvBuffer) -> Result<IoState, Error> {
-        self.core.process_new_packets(recv_buf)
+    pub fn process_new_packets(&mut self, app_buffers: &mut RecvBufMap) -> Result<IoState, Error> {
+        self.core.process_new_packets(app_buffers)
     }
 
 
@@ -500,7 +500,7 @@ impl<Data> ConnectionCommon<Data> {
     /// [`process_new_packets()`]: ConnectionCommon::process_new_packets
     /// [`reader()`]: ConnectionCommon::reader
     pub fn read_tls(&mut self, rd: &mut dyn io::Read) -> Result<usize, io::Error> {
-        let active_conn = self.active_conn_id;
+        let active_conn = self.conn_in_use;
         if self.received_plaintext.is_full() {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
@@ -612,11 +612,10 @@ impl<Data> ConnectionCore<Data> {
             state: Ok(state),
             data,
             common_state,
-            message_deframer: MessageDeframer::default(),
         }
     }
 
-    pub(crate) fn process_new_packets(&mut self, recv_buf: &mut RecvBuffer) -> Result<IoState, Error> {
+    pub(crate) fn process_new_packets(&mut self, app_buffers: &mut RecvBufMap) -> Result<IoState, Error> {
         let mut state = match mem::replace(&mut self.state, Err(Error::HandshakeNotComplete)) {
             Ok(state) => state,
             Err(e) => {
@@ -625,9 +624,9 @@ impl<Data> ConnectionCore<Data> {
             }
         };
 
-        while let Some(msg) = self.deframe(recv_buf)? {
+        while let Some(msg) = self.deframe(app_buffers)? {
             if msg.typ == ContentType::ApplicationData {
-                self.process_tcpls_payload(recv_buf);
+                self.process_tcpls_payload(app_buffers);
                 continue;
             }
             match self.process_msg(msg, state) {
@@ -645,7 +644,6 @@ impl<Data> ConnectionCore<Data> {
 
     /// Pull a message out of the deframer and send any messages that need to be sent as a result.
     fn deframe(&mut self, app_buffers: &mut RecvBufMap) -> Result<Option<PlainMessage>, Error> {
-        let active_conn = self.common_state.active_conn_id;
         match self
             .common_state
             .deframers_map
@@ -749,11 +747,14 @@ impl<Data> ConnectionCore<Data> {
             .process_main_protocol(msg, state, &mut self.data)
     }
 
-    fn process_tcpls_payload(&mut self, recv_buf: &mut RecvBuffer) {
-       let mut output = recv_buf.get_mut();
-        let mut b = octets::Octets::with_slice_reverse(output);
+    fn process_tcpls_payload(&mut self, app_buffers: &mut RecvBufMap) {
+       let mut output = app_buffers.get_or_create_recv_buffer(self
+                                                                  .common_state
+                                                                  .record_layer
+                                                                  .stream_in_use, None);
+        let mut b = octets::Octets::with_slice_reverse(output.as_ref());
         let header_len = StreamFrameHeader::get_header_size_reverse(&mut b);
-        recv_buf.truncate_processed(header_len);
+        output.truncate_processed(header_len);
 
     }
 
