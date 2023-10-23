@@ -50,7 +50,7 @@ pub struct CommonState {
     pub(crate) sendable_tls: ChunkVecBuffer,
 
     /// id of currently used tcp connection
-    pub active_conn_id: u32,
+    pub conn_in_use: u32,
 
     queued_key_update_message: Option<Vec<u8>>,
 
@@ -86,7 +86,7 @@ impl CommonState {
             sendable_tls: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
             deframers_map: MessageDeframerMap::new(),
 
-            active_conn_id: 0,
+            conn_in_use: 0,
             queued_key_update_message: None,
 
             protocol: Protocol::Tcp,
@@ -108,8 +108,8 @@ impl CommonState {
 
 
     /// sets the id of the currently active tcp connection
-    pub(crate) fn set_active_connection_id(&mut self, conn_id: u32) {
-        self.active_conn_id = conn_id;
+    pub(crate) fn set_connection_in_use(&mut self, conn_id: u32) {
+        self.conn_in_use = conn_id;
     }
 
     /// sets the id of the currently active stream

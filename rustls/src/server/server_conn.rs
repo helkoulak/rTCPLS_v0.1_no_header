@@ -584,8 +584,7 @@ impl Acceptor {
     ///
     /// Returns `Err(err)` if an error occurred. Do not call this function again.
     pub fn accept(&mut self) -> Result<Option<Accepted>, Error> {
-
-        let mut recv_buf = RecvBuffer::new(999, None);
+        let mut app_buffers = RecvBufMap::new();
         let mut connection = match self.inner.take() {
             Some(conn) => conn,
             None => {
@@ -593,7 +592,7 @@ impl Acceptor {
             }
         };
 
-        let message = match connection.first_handshake_message(&mut recv_buf)? {
+        let message = match connection.first_handshake_message(&mut app_buffers)? {
             Some(msg) => msg,
             None => {
                 self.inner = Some(connection);

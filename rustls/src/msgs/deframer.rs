@@ -41,12 +41,19 @@ pub struct MessageDeframer {
 }
 
 impl MessageDeframer {
+
+    pub fn new(id: u64) -> MessageDeframer {
+        MessageDeframer{
+            id,
+            ..Default::default()
+        }
+    }
     /// Return any decrypted messages that the deframer has been able to parse.
     ///
     /// Returns an `Error` if the deframer failed to parse some message contents or if decryption
     /// failed, `Ok(None)` if no full message is buffered or if trial decryption failed, and
     /// `Ok(Some(_))` if a valid message was found and decrypted successfully.
-    pub fn pop(&mut self, record_layer: &mut RecordLayer, recv_buf: &mut RecvBuffer) -> Result<Option<Deframed>, Error> {
+    pub fn pop(&mut self, record_layer: &mut RecordLayer, app_buffers: &mut RecvBufMap) -> Result<Option<Deframed>, Error> {
         if let Some(last_err) = self.last_error.clone() {
             return Err(last_err);
         } else if self.used == 0 {
@@ -114,7 +121,7 @@ impl MessageDeframer {
             }
 
             // Decrypt the encrypted message (if necessary).
-            let msg = match record_layer.decrypt_incoming_zc(m, recv_buf) {
+            let msg = match record_layer.decrypt_incoming_zc(m, app_buffers.get_or_create_recv_buffer(0, None)) {
                 Ok(Some(decrypted)) => {
                     let Decrypted {
                         want_close_before_decrypt,
