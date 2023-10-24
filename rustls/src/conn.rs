@@ -644,10 +644,11 @@ impl<Data> ConnectionCore<Data> {
 
     /// Pull a message out of the deframer and send any messages that need to be sent as a result.
     fn deframe(&mut self, app_buffers: &mut RecvBufMap) -> Result<Option<PlainMessage>, Error> {
+        let conn_in_use = self.common_state.conn_in_use;
         match self
             .common_state
             .deframers_map
-            .get_or_create_deframer(active_conn as u64)
+            .get_or_create_deframer(conn_in_use as u64)
             .pop(&mut self.common_state.record_layer, app_buffers)
         {
             Ok(Some(Deframed {
@@ -751,7 +752,7 @@ impl<Data> ConnectionCore<Data> {
        let mut output = app_buffers.get_or_create_recv_buffer(self
                                                                   .common_state
                                                                   .record_layer
-                                                                  .stream_in_use, None);
+                                                                  .get_stream_in_use(), None);
         let mut b = octets::Octets::with_slice_reverse(output.as_ref());
         let header_len = StreamFrameHeader::get_header_size_reverse(&mut b);
         output.truncate_processed(header_len);
