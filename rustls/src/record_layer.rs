@@ -171,6 +171,10 @@ impl RecordLayer {
         self.seq_map.create_new_seq_space(stream_id);
     }
 
+    pub fn get_stream_in_use(& self) -> u64 {
+        self.stream_in_use
+    }
+
     /// Decrypt a TLS message.
     ///
     /// `encr` is a decoded message allegedly received from the peer.
@@ -363,7 +367,7 @@ impl RecordLayer {
         /// Creates a new sequence space or do nothing if already exists
         pub(crate) fn create_new_seq_space(&mut self, stream_id: u32) {
            if !self.seq_num_map.contains_key(&(stream_id as u64)){
-               self.seq_num_map.insert(stream_id as u64, RecSeqNumSpace::new(stream_id))
+               self.seq_num_map.insert(stream_id as u64, RecSeqNumSpace::new(stream_id));
            }
         }
 
