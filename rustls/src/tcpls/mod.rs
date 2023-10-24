@@ -132,13 +132,13 @@ impl TcplsSession {
         }
 
         // Get existing stream or create a new one.
-        let stream = self.get_or_create_stream(stream_id)?;
+        let stream = self.streams.get_or_create(stream_id)?;
 
-        // create a new record sequence number space for the stream if not already created otherwise do nothing
+        // create new record sequence number space for stream if not already created otherwise function will do nothing
         tls_connection.record_layer.create_new_seq_space(stream_id);
 
 
-        // set active stream id to decide on crypto context and record seq space
+        // set id of stream in use to decide on crypto context and record seq space
         tls_connection.set_stream_in_use(stream_id);
 
         // check if key update message should be sent

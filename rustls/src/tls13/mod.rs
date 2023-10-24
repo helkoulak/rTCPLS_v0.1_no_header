@@ -198,7 +198,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         record[4] = (payload_len as u16 & 0xFF) as u8;
 
         let nonce = make_nonce(self.iv.get(&stream_id).unwrap(), seq);
-        let aad = make_tls13_aad(total_len);
+        let aad = make_tls13_aad(payload_len);
 
         self.enc_key
             .seal_in_output_append_tag(nonce, aad, msg, &mut record, PACKET_OVERHEAD)
