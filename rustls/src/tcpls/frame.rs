@@ -2,11 +2,10 @@ use octets::{Octets, varint_len};
 use crate::{Error, InvalidMessage};
 use crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
 
-/// Type = 1 Byte + Stream Id = 4 Bytes + Offset = 8 Bytes + Length = 2 Bytes.
-/// This is the maximum overhead for a stream frame for a single TLS record.
-pub const TCPLS_HEADER: usize = 13;
+/// Type = 1 Byte + Stream Id = 2 Bytes + Offset = 8 Bytes + Length = 2 Bytes.
+pub const TCPLS_HEADER_SIZE: usize = 13;
 
-pub const MAX_TCPLS_FRAGMENT_LEN: usize = MAX_FRAGMENT_LEN - TCPLS_HEADER;
+pub const MAX_TCPLS_FRAGMENT_LEN: usize = MAX_FRAGMENT_LEN - TCPLS_HEADER_SIZE;
 
 /*/// Payload max length for a TCPLS stream frame
 pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize =
@@ -355,13 +354,6 @@ impl StreamFrameHeader {
 
         Ok(())
     }
-
-    /*pub fn get_header_length(&self) -> usize {
-        varint_len(self.length) +
-            varint_len(self.offset) +
-            varint_len(self.stream_id) +
-            1
-    }*/
 
    /* pub fn get_header_size_reverse(b: &mut octets::Octets) -> usize {
         b.rewind(1).unwrap();
