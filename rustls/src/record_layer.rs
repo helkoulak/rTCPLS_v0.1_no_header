@@ -1,11 +1,12 @@
-use std::collections::{hash_map, HashMap};
-use crate::cipher::{Iv, MessageDecrypter, MessageEncrypter};
+use std::collections::hash_map;
+use crate::cipher::{MessageDecrypter, MessageEncrypter};
 use crate::error::Error;
-use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, OpaqueMessage, PlainMessage};
+use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, PlainMessage};
 
 #[cfg(feature = "logging")]
 use crate::log::trace;
 use crate::recvbuf::RecvBuf;
+use crate::tcpls::frame::StreamFrameHeader;
 use crate::tcpls::stream::SimpleIdHashMap;
 
 static SEQ_SOFT_LIMIT: u64 = 0xffff_ffff_ffff_0000u64;
@@ -290,7 +291,7 @@ impl RecordLayer {
     ///
     /// `plain` is a TLS message we'd like to send.  This function
     /// panics if the requisite keying material hasn't been established yet.
-    pub(crate) fn encrypt_outgoing(&mut self, plain: BorrowedPlainMessage) -> OpaqueMessage {
+    pub(crate) fn encrypt_outgoing(&mut self, plain: BorrowedPlainMessage) -> Vec<u8> {
         debug_assert!(self.encrypt_state == DirectionState::Active);
         assert!(!self.encrypt_exhausted());
         let stream_id = self.stream_in_use;
@@ -306,7 +307,7 @@ impl RecordLayer {
     }
 
 
-    pub(crate) fn encrypt_outgoing_zc(&mut self, plain: &[u8]) -> Vec<u8> {
+    pub(crate) fn encrypt_outgoing_app_data(&mut self, plain: BorrowedPlainMessage, tcpls_header: StreamFrameHeader) -> Vec<u8> {
         debug_assert!(self.encrypt_state == DirectionState::Active);
         assert!(!self.encrypt_exhausted());
         let stream_id = self.stream_in_use;
@@ -317,7 +318,7 @@ impl RecordLayer {
             self.message_encrypter.derive_enc_stream_iv(stream_id as u32);
         }
         self.message_encrypter
-            .encrypt_zc(plain, seq, stream_id as u32)
+            .encrypt_app_data(plain, seq, stream_id as u32, tcpls_header)
             .unwrap()
     }
 
@@ -388,4 +389,3 @@ pub struct Decrypted {
     /// The decrypted message.
     pub plaintext: PlainMessage,
 }
-
