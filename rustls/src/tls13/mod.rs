@@ -6,16 +6,14 @@ use crate::error::{Error, PeerMisbehaved};
 use crate::msgs::base::Payload;
 use crate::msgs::codec::Codec;
 use crate::msgs::fragmenter::{MAX_FRAGMENT_LEN, PACKET_OVERHEAD};
-use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, OpaqueMessage, PlainMessage};
+use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, PlainMessage};
 use crate::suites::{BulkAlgorithm, CipherSuiteCommon, SupportedCipherSuite};
 
 use ring::aead;
 
 use std::fmt;
-use std::io::Read;
-use octets::Octets;
 use crate::recvbuf::RecvBuf;
-use crate::tcpls::frame::{TCPLS_HEADER_SIZE, StreamFrameHeader};
+use crate::tcpls::frame::{TCPLS_HEADER_SIZE, StreamFrameHeader, TCPLS_MINIMUM_PAYLOAD_LENGTH};
 
 pub(crate) mod key_schedule;
 
@@ -198,10 +196,8 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         // TCPLS header
         output[5] = 0x04;
 
-        let payload_offset = 6;
-
         self.enc_key
-            .seal_in_output_append_tag(nonce, aad, &input, &mut output, payload_offset)
+            .seal_in_output_append_tag(nonce, aad, &input, &mut output, PACKET_OVERHEAD)
             .map_err(|_| Error::General("encrypt failed".to_string()))?;
 
         //Randomize tcpls header
@@ -211,11 +207,19 @@ impl MessageEncrypter for Tls13MessageEncrypter {
     }
 
     fn encrypt_app_data(&self, msg: BorrowedPlainMessage, seq: u64, stream_id: u32, header: StreamFrameHeader) -> Result<Vec<u8>, Error> {
-        let mut payload_len = msg.payload.len() + 1 + self.enc_key.algorithm().tag_len();
+        let padding_bytes = match  msg.payload.len() < TCPLS_MINIMUM_PAYLOAD_LENGTH {
+            true => TCPLS_MINIMUM_PAYLOAD_LENGTH - msg.payload.len(),
+            false => 0,
+        };
+        let mut payload_len = msg.payload.len() + padding_bytes + 1 + self.enc_key.algorithm().tag_len();
         let record_payload_length = payload_len + TCPLS_HEADER_SIZE;
         let mut input = vec![0; payload_len];
         input.extend_from_slice(msg.payload);
         msg.typ.encode(&mut input);
+        if padding_bytes != 0 {
+            input.extend_from_slice(vec![0;padding_bytes].as_slice());
+        }
+
         let nonce = make_nonce(self.iv.get(&stream_id).unwrap(), seq);
 
         // Prepare output buffer
@@ -247,8 +251,11 @@ impl MessageEncrypter for Tls13MessageEncrypter {
 
 
         self.enc_key
-            .seal_in_output_append_tag(nonce, aad, &input, &mut output, PACKET_OVERHEAD)
+            .seal_in_output_append_tag(nonce, aad, &input, &mut output, PACKET_OVERHEAD + TCPLS_HEADER_SIZE)
             .map_err(|_| Error::General("encrypt failed".to_string()))?;
+
+        // Take the first 16 bytes of encrypted input as input for hash function
+        self.header_protector.unwrap().encrypt_in_place(&output[18..34], &mut output[5..18])?;
 
         Ok(output)
     }
