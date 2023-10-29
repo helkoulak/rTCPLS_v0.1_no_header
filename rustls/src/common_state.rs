@@ -302,7 +302,7 @@ impl CommonState {
         }
 
         let em = self.record_layer.encrypt_outgoing(m);
-        self.queue_tls_message(em);
+        self.sendable_tls.append(em, None, None);
     }
 
     /// Encrypt and send some plaintext `data`.  `limit` controls
@@ -597,8 +597,7 @@ impl CommonState {
         let message = PlainMessage::from(Message::build_key_update_notify());
         self.queued_key_update_message = Some(
             self.record_layer
-                .encrypt_outgoing(message.borrow())
-                .encode(),
+                .encrypt_outgoing(message.borrow()),
         );
     }
 
