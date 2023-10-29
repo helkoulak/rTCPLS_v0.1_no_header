@@ -5,6 +5,8 @@ use crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
 /// Type = 1 Byte + Stream Id = 2 Bytes + Offset = 8 Bytes + Length = 2 Bytes.
 pub const TCPLS_HEADER_SIZE: usize = 13;
 
+pub const TCPLS_MINIMUM_PAYLOAD_LENGTH: usize = 16;
+
 pub const MAX_TCPLS_FRAGMENT_LEN: usize = MAX_FRAGMENT_LEN - TCPLS_HEADER_SIZE;
 
 /*/// Payload max length for a TCPLS stream frame
