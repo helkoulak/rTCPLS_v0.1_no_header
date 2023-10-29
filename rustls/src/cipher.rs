@@ -181,8 +181,8 @@ impl HeaderProtector {
         self.sip_hasher128.write(input);
         let out = self.sip_hasher128.finish128().as_bytes();
         let mut i = 0;
-        for byte in header {
-            header[i] = byte ^ out[i];
+        while i < header.len() {
+            header[i] ^= out[i];
             i += 1;
         }
         Ok(())
