@@ -168,10 +168,8 @@ impl TcplsSession {
             number_of_chunks -= 1;
 
             let mut header = StreamFrameHeader {
-                length: chunk.len() as u64,
-                offset: stream.send.get_offset(),
-                stream_id: stream_id as u64,
-                fin: if number_of_chunks == 0 {
+
+                typ: 0x02 & if number_of_chunks == 0 {
                     match fin {
                         true => 1,
                         false => 0,
@@ -179,19 +177,10 @@ impl TcplsSession {
                 } else {
                     0
                 },
+                length: chunk.len() as u16,
+                offset: stream.send.get_offset(),
+                stream_id: stream_id as u16,
             };
-
-            let mut record = vec![0; chunk.len() + header.get_header_length() + 1];
-
-            let mut octets = octets::OctetsMut::with_slice_at_offset(&mut record, 0);
-
-            octets.put_bytes(chunk).unwrap();
-
-            header
-                .encode_stream_header(&mut octets)
-                .expect("encoding stream header failed");
-
-            octets.put_u8(0x17).unwrap(); // ContentType::ApplicationData
 
 
             // Close connection once we start to run out of
@@ -207,7 +196,11 @@ impl TcplsSession {
 
             let em = tls_connection
                 .record_layer
-                .encrypt_outgoing_zc(record.as_slice());
+                .encrypt_outgoing_app_data(BorrowedPlainMessage {
+                    typ: ContentType::ApplicationData,
+                    version: ProtocolVersion::TLSv1_2,
+                    payload: chunk,
+                }, header);
 
 
             buffered += stream.send.append(em, Some(stream.send.get_offset()), Some(chunk.len()));
