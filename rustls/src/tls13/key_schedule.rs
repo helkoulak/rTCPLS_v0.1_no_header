@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::cipher::{Iv, IvLen, MessageDecrypter};
+use crate::cipher::{HeaderProtector, Iv, IvLen, MessageDecrypter};
 use crate::common_state::{CommonState, Side};
 use crate::error::Error;
 use crate::msgs::base::PayloadU8;
@@ -108,10 +108,10 @@ impl KeyScheduleEarly {
         match common.side {
             Side::Client => self
                 .ks
-                .set_encrypter(&client_early_traffic_secret, common),
+                .set_encrypter(&client_early_traffic_secret, common, false),
             Side::Server => self
                 .ks
-                .set_decrypter(&client_early_traffic_secret, common),
+                .set_decrypter(&client_early_traffic_secret, common, false),
         }
 
         #[cfg(feature = "quic")]
@@ -183,12 +183,12 @@ impl KeyScheduleHandshakeStart {
 
         // Decrypt with the peer's key, encrypt with our own key
         new.ks
-            .set_decrypter(&new.server_handshake_traffic_secret, common);
+            .set_decrypter(&new.server_handshake_traffic_secret, common, false);
 
         if !early_data_enabled {
             // Set the client encryption key for handshakes if early data is not used
             new.ks
-                .set_encrypter(&new.client_handshake_traffic_secret, common);
+                .set_encrypter(&new.client_handshake_traffic_secret, common, false);
         }
 
         new
@@ -208,7 +208,7 @@ impl KeyScheduleHandshakeStart {
         // If not doing early_data after all, this is corrected later to the handshake
         // keys (now stored in key_schedule).
         new.ks
-            .set_encrypter(&new.server_handshake_traffic_secret, common);
+            .set_encrypter(&new.server_handshake_traffic_secret, common, false);
         new
     }
 
@@ -267,7 +267,7 @@ impl KeyScheduleHandshake {
     pub(crate) fn set_handshake_encrypter(&self, common: &mut CommonState) {
         debug_assert_eq!(common.side, Side::Client);
         self.ks
-            .set_encrypter(&self.client_handshake_traffic_secret, common);
+            .set_encrypter(&self.client_handshake_traffic_secret, common, false);
     }
 
     pub(crate) fn set_handshake_decrypter(
@@ -278,12 +278,12 @@ impl KeyScheduleHandshake {
         debug_assert_eq!(common.side, Side::Server);
         let secret = &self.client_handshake_traffic_secret;
         match skip_requested {
-            None => self.ks.set_decrypter(secret, common),
+            None => self.ks.set_decrypter(secret, common, false),
             Some(max_early_data_size) => common
                 .record_layer
                 .set_message_decrypter_with_trial_decryption(
                     self.ks
-                        .derive_decrypter(&self.client_handshake_traffic_secret),
+                        .derive_decrypter(&self.client_handshake_traffic_secret, false),
                     max_early_data_size,
                 ),
         }
@@ -306,7 +306,7 @@ impl KeyScheduleHandshake {
 
         traffic
             .ks
-            .set_encrypter(server_secret, common);
+            .set_encrypter(server_secret, common, false);
 
         #[cfg(feature = "quic")]
         if common.is_quic() {
@@ -357,10 +357,10 @@ impl KeyScheduleClientBeforeFinished {
 
         self.traffic
             .ks
-            .set_decrypter(server_secret, common);
+            .set_decrypter(server_secret, common, true);
         self.traffic
             .ks
-            .set_encrypter(client_secret, common);
+            .set_encrypter(client_secret, common, true);
 
         #[cfg(feature = "quic")]
         if common.is_quic() {
@@ -389,7 +389,7 @@ impl KeyScheduleTrafficWithClientFinishedPending {
         debug_assert_eq!(common.side, Side::Server);
         self.traffic
             .ks
-            .set_decrypter(&self.handshake_client_traffic_secret, common);
+            .set_decrypter(&self.handshake_client_traffic_secret, common, false);
     }
 
     pub(crate) fn sign_client_finish(
@@ -409,6 +409,7 @@ impl KeyScheduleTrafficWithClientFinishedPending {
                 .traffic
                 .current_client_traffic_secret,
             common,
+            false,
         );
 
         (self.traffic, tag)
@@ -465,12 +466,12 @@ impl KeyScheduleTraffic {
     pub(crate) fn update_encrypter_and_notify(&mut self, common: &mut CommonState) {
         let secret = self.next_application_traffic_secret(common.side);
         common.enqueue_key_update_notification();
-        self.ks.set_encrypter(&secret, common);
+        self.ks.set_encrypter(&secret, common, false);
     }
 
     pub(crate) fn update_decrypter(&mut self, common: &mut CommonState) {
         let secret = self.next_application_traffic_secret(common.side.peer());
-        self.ks.set_decrypter(&secret, common);
+        self.ks.set_decrypter(&secret, common, false);
     }
 
     pub(crate) fn next_application_traffic_secret(&mut self, side: Side) -> hkdf::Prk {
@@ -596,7 +597,7 @@ impl KeySchedule {
         }
     }
 
-    fn set_encrypter(&self, secret: &hkdf::Prk, common: &mut CommonState) {
+    fn set_encrypter(&self, secret: &hkdf::Prk, common: &mut CommonState, set_header_protection: bool) {
         let key = derive_traffic_key(secret, self.suite.common.aead_algorithm);
         let iv = derive_traffic_iv(secret);
         let mut iv_map = HashMap::new();
@@ -606,16 +607,20 @@ impl KeySchedule {
             .set_message_encrypter(Box::new(Tls13MessageEncrypter {
                 enc_key: aead::LessSafeKey::new(key),
                 iv: iv_map,
+                header_protector: match set_header_protection {
+                    true => Some(HeaderProtector::new(self.suite.common.aead_algorithm, secret)),
+                    false => None,
+                },
             }));
     }
 
-    fn set_decrypter(&self, secret: &hkdf::Prk, common: &mut CommonState) {
+    fn set_decrypter(&self, secret: &hkdf::Prk, common: &mut CommonState, set_header_protection: bool) {
         common
             .record_layer
-            .set_message_decrypter(self.derive_decrypter(secret));
+            .set_message_decrypter(self.derive_decrypter(secret, set_header_protection));
     }
 
-    fn derive_decrypter(&self, secret: &hkdf::Prk) -> Box<dyn MessageDecrypter> {
+    fn derive_decrypter(&self, secret: &hkdf::Prk, set_header_protection: bool) -> Box<dyn MessageDecrypter> {
         let key = derive_traffic_key(secret, self.suite.common.aead_algorithm);
         let iv = derive_traffic_iv(secret);
         let mut iv_map = HashMap::new();
@@ -623,6 +628,10 @@ impl KeySchedule {
         Box::new(Tls13MessageDecrypter {
             dec_key: aead::LessSafeKey::new(key),
             iv: iv_map,
+            header_protector: match set_header_protection {
+                true => Some(HeaderProtector::new(self.suite.common.aead_algorithm, secret)),
+                false => None,
+            },
         })
     }
 
