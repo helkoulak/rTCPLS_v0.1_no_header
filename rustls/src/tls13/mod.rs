@@ -160,17 +160,17 @@ fn make_tls13_aad_no_header(len: usize) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE_N
     ])
 }
 
-fn prepare_output(header: & StreamFrameHeader) -> Vec<u8> {
+fn prepare_output(header: & StreamFrameHeader, payload_length: usize) -> Vec<u8> {
     // Prepare output buffer
-    let mut output = vec![0; PACKET_OVERHEAD + record_payload_length];
+    let mut output = vec![0; PACKET_OVERHEAD + payload_length];
     // Application data
     output[0] = 0x17;
     // TLSv1_2
     output[1] = ((0x0303 >> 8) & 0xFF) as u8;
     output[2] = (0x0303 & 0xFF) as u8;
     // payload length
-    output[3] = ((record_payload_length as u16 >> 8) & 0xFF) as u8;
-    output[4] = (record_payload_length as u16 & 0xFF) as u8;
+    output[3] = ((payload_length as u16 >> 8) & 0xFF) as u8;
+    output[4] = (payload_length as u16 & 0xFF) as u8;
     // TCPLS header
     output[5] = header.typ;
     output[6] = ((header.length >> 8) & 0xFF) as u8;
@@ -250,7 +250,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
 
         let nonce = make_nonce(self.iv.get(&stream_id).unwrap(), seq);
 
-       let mut output= prepare_output(&header);
+       let mut output= prepare_output(&header, record_payload_length);
 
         let aad = make_tls13_aad(output.as_slice());
 
