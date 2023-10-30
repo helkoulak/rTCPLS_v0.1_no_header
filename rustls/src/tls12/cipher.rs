@@ -174,7 +174,7 @@ impl MessageEncrypter for GcmMessageEncrypter {
         })
     }
 
-    fn encrypt_app_data(&self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: StreamFrameHeader) -> Result<Vec<u8>, Error> {
+    fn encrypt_zc(&self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: StreamFrameHeader) -> Result<Vec<u8>, Error> {
         todo!()
     }
 
@@ -260,7 +260,7 @@ impl MessageEncrypter for ChaCha20Poly1305MessageEncrypter {
         })
     }
 
-    fn encrypt_app_data(&self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: StreamFrameHeader) -> Result<Vec<u8>, Error> {
+    fn encrypt_zc(&self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: StreamFrameHeader) -> Result<Vec<u8>, Error> {
         todo!()
     }
 

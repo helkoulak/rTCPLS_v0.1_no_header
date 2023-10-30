@@ -196,7 +196,7 @@ impl TcplsSession {
 
             let em = tls_connection
                 .record_layer
-                .encrypt_outgoing_app_data(BorrowedPlainMessage {
+                .encrypt_outgoing_zc(BorrowedPlainMessage {
                     typ: ContentType::ApplicationData,
                     version: ProtocolVersion::TLSv1_2,
                     payload: chunk,

@@ -301,7 +301,7 @@ impl CommonState {
             return;
         }
 
-        let em = self.record_layer.encrypt_outgoing(m);
+        let em = self.record_layer.encrypt_outgoing_zc(m, StreamFrameHeader::default());
         self.sendable_tls.append(em, None, None);
     }
 
@@ -597,7 +597,7 @@ impl CommonState {
         let message = PlainMessage::from(Message::build_key_update_notify());
         self.queued_key_update_message = Some(
             self.record_layer
-                .encrypt_outgoing(message.borrow()),
+                .encrypt_outgoing_zc(message.borrow(), StreamFrameHeader::default()),
         );
     }
 

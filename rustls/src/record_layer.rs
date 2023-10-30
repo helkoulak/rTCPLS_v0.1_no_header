@@ -307,7 +307,7 @@ impl RecordLayer {
     }
 
 
-    pub(crate) fn encrypt_outgoing_app_data(&mut self, plain: BorrowedPlainMessage, tcpls_header: StreamFrameHeader) -> Vec<u8> {
+    pub(crate) fn encrypt_outgoing_zc(&mut self, plain: BorrowedPlainMessage, tcpls_header: StreamFrameHeader) -> Vec<u8> {
         debug_assert!(self.encrypt_state == DirectionState::Active);
         assert!(!self.encrypt_exhausted());
         let stream_id = self.stream_in_use;
@@ -318,7 +318,7 @@ impl RecordLayer {
             self.message_encrypter.derive_enc_stream_iv(stream_id as u32);
         }
         self.message_encrypter
-            .encrypt_app_data(plain, seq, stream_id as u32, tcpls_header)
+            .encrypt_zc(plain, seq, stream_id as u32, tcpls_header)
             .unwrap()
     }
 

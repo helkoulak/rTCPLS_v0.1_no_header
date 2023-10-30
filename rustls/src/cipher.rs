@@ -28,9 +28,9 @@ pub trait MessageDecrypter: Send + Sync {
 
 /// Objects with this trait can encrypt TLS messages.
 pub(crate) trait MessageEncrypter: Send + Sync {
-    fn encrypt(&self, m: BorrowedPlainMessage, seq: u64, connection_id: u32) -> Result<Vec<u8>, Error>;
-    fn encrypt_app_data(&self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: StreamFrameHeader) -> Result<Vec<u8>, Error>;
-    fn derive_enc_stream_iv(&mut self, conn_id: u32);
+    fn encrypt(&self, m: BorrowedPlainMessage, seq: u64, stream_id: u32) -> Result<Vec<u8>, Error>;
+    fn encrypt_zc(&self, msg: BorrowedPlainMessage, seq: u64, stream_id: u32, tcpls_header: StreamFrameHeader) -> Result<Vec<u8>, Error>;
+    fn derive_enc_stream_iv(&mut self, stream_id: u32);
 }
 
 impl dyn MessageEncrypter {
@@ -197,7 +197,7 @@ impl MessageEncrypter for InvalidMessageEncrypter {
         Err(Error::EncryptError)
     }
 
-    fn encrypt_app_data(&self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: StreamFrameHeader) -> Result<Vec<u8>, Error> {
+    fn encrypt_zc(&self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: StreamFrameHeader) -> Result<Vec<u8>, Error> {
         todo!()
     }
 

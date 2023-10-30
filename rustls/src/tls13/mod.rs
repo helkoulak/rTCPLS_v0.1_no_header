@@ -234,7 +234,8 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         Ok(output)
     }
 
-    fn encrypt_app_data(&self, msg: BorrowedPlainMessage, seq: u64, stream_id: u32, header: StreamFrameHeader) -> Result<Vec<u8>, Error> {
+    fn encrypt_zc(&self, msg: BorrowedPlainMessage, seq: u64, stream_id: u32, header: StreamFrameHeader) -> Result<Vec<u8>, Error> {
+        // Impose a minimum length for payload to increase entropy for header protection hash function
         let padding_bytes = match  msg.payload.len() < TCPLS_MINIMUM_PAYLOAD_LENGTH {
             true => TCPLS_MINIMUM_PAYLOAD_LENGTH - msg.payload.len(),
             false => 0,
