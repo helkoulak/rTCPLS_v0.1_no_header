@@ -322,7 +322,7 @@ fn parse_stream_change_frame(b: &mut octets::Octets) -> octets::Result<Frame> {
         next_offset,
     })
 }
-
+#[derive(Default)]
 pub struct StreamFrameHeader {
     pub typ: u8,
     pub length: u16,
@@ -364,6 +364,16 @@ impl StreamFrameHeader {
             varint_len(b.get_varint_reverse().unwrap())
 
     }*/
+}
+
+impl Default for StreamFrameHeader {
+    fn default() -> Self {
+        Self {
+            typ: 0x04, // To indicate a stream header with default values
+            ..Default::default()
+
+        }
+    }
 }
 
 #[test]
