@@ -160,6 +160,34 @@ fn make_tls13_aad_no_header(len: usize) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE_N
     ])
 }
 
+fn prepare_output(header: & StreamFrameHeader) -> Vec<u8> {
+    // Prepare output buffer
+    let mut output = vec![0; PACKET_OVERHEAD + record_payload_length];
+    // Application data
+    output[0] = 0x17;
+    // TLSv1_2
+    output[1] = ((0x0303 >> 8) & 0xFF) as u8;
+    output[2] = (0x0303 & 0xFF) as u8;
+    // payload length
+    output[3] = ((record_payload_length as u16 >> 8) & 0xFF) as u8;
+    output[4] = (record_payload_length as u16 & 0xFF) as u8;
+    // TCPLS header
+    output[5] = header.typ;
+    output[6] = ((header.length >> 8) & 0xFF) as u8;
+    output[7] = (header.length & 0xFF) as u8;
+    output[8] = ((header.offset >> 56) & 0xFF) as u8;
+    output[9] = ((header.offset >> 48) & 0xFF) as u8;
+    output[10] = ((header.offset >> 40) & 0xFF) as u8;
+    output[11] = ((header.offset >> 32) & 0xFF) as u8;
+    output[12] = ((header.offset >> 24) & 0xFF) as u8;
+    output[13] = ((header.offset >> 16) & 0xFF) as u8;
+    output[14] = ((header.offset >> 8) & 0xFF) as u8;
+    output[15] = (header.offset  & 0xFF) as u8;
+    output[16] = ((header.stream_id >> 8) & 0xFF) as u8;
+    output[17] = (header.stream_id  & 0xFF) as u8;
+    output
+}
+
 fn make_tls13_aad(header: &[u8]) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE]> {
     ring::aead::Aad::from([header[0], header[1], header[2], header[3]
         , header[4], header[5], header[6], header[7]
@@ -222,30 +250,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
 
         let nonce = make_nonce(self.iv.get(&stream_id).unwrap(), seq);
 
-        // Prepare output buffer
-        let mut output = vec![0; PACKET_OVERHEAD + record_payload_length];
-        // Application data
-        output[0] = 0x17;
-        // TLSv1_2
-        output[1] = ((0x0303 >> 8) & 0xFF) as u8;
-        output[2] = (0x0303 & 0xFF) as u8;
-        // payload length
-        output[3] = ((record_payload_length as u16 >> 8) & 0xFF) as u8;
-        output[4] = (record_payload_length as u16 & 0xFF) as u8;
-        // TCPLS header
-        output[5] = header.typ;
-        output[6] = ((header.length >> 8) & 0xFF) as u8;
-        output[7] = (header.length & 0xFF) as u8;
-        output[8] = ((header.offset >> 56) & 0xFF) as u8;
-        output[9] = ((header.offset >> 48) & 0xFF) as u8;
-        output[10] = ((header.offset >> 40) & 0xFF) as u8;
-        output[11] = ((header.offset >> 32) & 0xFF) as u8;
-        output[12] = ((header.offset >> 24) & 0xFF) as u8;
-        output[13] = ((header.offset >> 16) & 0xFF) as u8;
-        output[14] = ((header.offset >> 8) & 0xFF) as u8;
-        output[15] = (header.offset  & 0xFF) as u8;
-        output[16] = ((header.stream_id >> 8) & 0xFF) as u8;
-        output[17] = (header.stream_id  & 0xFF) as u8;
+       let mut output= prepare_output(&header);
 
         let aad = make_tls13_aad(output.as_slice());
 
