@@ -114,7 +114,7 @@ pub(crate) fn derive_stream_iv(iv: &mut HashMap<u32, Iv>, stream_id: u32){
 
 pub struct HeaderProtector{
     key: [u8;16],
-    sip_hasher128: SipHasher
+    sip_hasher: SipHasher
 }
 
 impl HeaderProtector {
@@ -125,7 +125,7 @@ impl HeaderProtector {
         x.fill(&mut key).unwrap();
         Self{
             key,
-            sip_hasher128: SipHasher::new_with_key(&key),
+            sip_hasher: SipHasher::new_with_key(&key),
         }
     }
 
@@ -178,12 +178,10 @@ impl HeaderProtector {
         input: &[u8],
         header: &mut [u8],
     ) -> Result<(), Error> {
-        self.sip_hasher128.write(input);
-        let out = self.sip_hasher128.finish128().as_bytes();
-        let mut i = 0;
-        while i < header.len() {
+        self.sip_hasher.write(input);
+        let out = self.sip_hasher.finish().as_bytes();
+        for i in 0..header.len() {
             header[i] ^= out[i];
-            i += 1;
         }
         Ok(())
     }
