@@ -1,9 +1,9 @@
 use octets::{Octets, varint_len};
-use crate::{Error, InvalidMessage};
+use crate::{Error, InvalidMessage, rand};
 use crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
 
-/// Type = 1 Byte + Stream Id = 2 Bytes + Offset = 8 Bytes + Length = 2 Bytes.
-pub const TCPLS_HEADER_SIZE: usize = 13;
+/// chunk_num = 4 Bytes + Offset_step = 2 Bytes + Stream Id = 2 Bytes.
+pub const TCPLS_HEADER_SIZE: usize = 8;
 
 pub const TCPLS_MINIMUM_PAYLOAD_LENGTH: usize = 16;
 
@@ -324,18 +324,16 @@ fn parse_stream_change_frame(b: &mut octets::Octets) -> octets::Result<Frame> {
 }
 #[derive(Default)]
 pub struct StreamFrameHeader {
-    pub typ: u8,
-    pub length: u16,
-    pub offset: u64,
+    pub chunk_num: u32,
+    pub offset_step: u16,
     pub stream_id: u16,
 }
 
 impl StreamFrameHeader {
-    pub fn new(typ: u8, length: u16, offset: u64, stream_id: u16) -> Self {
+    pub fn new(chunk_num: u32, offset: u16, stream_id: u16) -> Self {
         Self {
-            typ,
-            length,
-            offset,
+            chunk_num,
+            offset_step: offset,
             stream_id,
         }
     }
@@ -344,14 +342,14 @@ impl StreamFrameHeader {
         &mut self,
         b: &mut octets::OctetsMut,
     ) -> Result<(), Error> {
-        match self.typ {
+        /*match self.typ {
             2 => b.put_u8(0x02).unwrap(),
             3 => b.put_u8(0x03).unwrap(),
             4 => b.put_u8(0x04).unwrap(),
             _ => return Err(Error::General("Wrong value for stream frame type".parse().unwrap()))
-        }
-        b.put_u16(self.length).unwrap();
-        b.put_u64(self.offset).unwrap();
+        }*/
+        b.put_u32(self.chunk_num).unwrap();
+        b.put_u16(self.offset_step).unwrap();
         b.put_u16(self.stream_id).unwrap();
 
         Ok(())
@@ -369,9 +367,7 @@ impl StreamFrameHeader {
 impl Default for StreamFrameHeader {
     fn default() -> Self {
         Self {
-            typ: 0x04, // To indicate a stream header with default values
             ..Default::default()
-
         }
     }
 }
@@ -452,6 +448,13 @@ fn test_parse_new_address_frame() {
         address_version: 0x04,
         address_id: 47854755,
     };
+
+    #[test]
+    fn test_reduce_offset_size() {
+
+
+
+    }
 
     let mut d = octets::OctetsMut::with_slice(&mut v4);
 

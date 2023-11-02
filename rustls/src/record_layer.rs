@@ -9,6 +9,7 @@ use crate::recvbuf::RecvBuf;
 use crate::tcpls::frame::StreamFrameHeader;
 use crate::tcpls::stream::SimpleIdHashMap;
 
+///TODO: Change soft and hard limits according to AES_GCM_256
 static SEQ_SOFT_LIMIT: u64 = 0xffff_ffff_ffff_0000u64;
 static SEQ_HARD_LIMIT: u64 = 0xffff_ffff_ffff_fffeu64;
 
@@ -73,6 +74,13 @@ impl RecordLayer {
     #[cfg(feature = "secret_extraction")]
     pub(crate) fn read_seq(&self) -> u64 {
         self.seq_map.as_ref(self.stream_in_use as u32).read_seq
+    }
+
+    pub(crate) fn next_snd_pkt_num(&self) -> u32 {
+        self.seq_map.as_ref(self.stream_in_use as u32).next_snd_pkt_num
+    }
+    pub(crate) fn next_recv_pkt_num(&self) -> u32 {
+        self.seq_map.as_ref(self.stream_in_use as u32).next_recv_pkt_num
     }
 
     pub(crate) fn set_stream_in_use(&mut self, stream_id: u64) {
@@ -257,6 +265,9 @@ impl RecordLayer {
         // Note that there's no reason to refuse to decrypt: the security
         // failure has already happened.
 
+        //TODO correct logic here. the id of stream in use should be taken from TCPLS header
+        //TODO accordingly decryption of TCPLS header should happen at this point not before to avoid unnecessary processing
+        // in case data is already in plaintext
         let stream_id = self.stream_in_use;
         let want_close_before_decrypt = self.seq_map.seq_num_map.get(&stream_id).unwrap().read_seq == SEQ_SOFT_LIMIT;
 
@@ -274,6 +285,7 @@ impl RecordLayer {
         {
             Ok(plaintext) => {
                 self.seq_map.seq_num_map.get_mut(&stream_id).unwrap().read_seq += 1;
+                self.seq_map.seq_num_map.get_mut(&stream_id).unwrap().next_recv_pkt_num += 1;
                 Ok(Some(Decrypted {
                     want_close_before_decrypt,
                     plaintext,
@@ -313,6 +325,7 @@ impl RecordLayer {
         let stream_id = self.stream_in_use;
         let seq = self.seq_map.seq_num_map.get(&stream_id).unwrap().write_seq;
         self.seq_map.seq_num_map.get_mut(&stream_id).unwrap().write_seq += 1;
+        self.seq_map.seq_num_map.get_mut(&stream_id).unwrap().next_snd_pkt_num += 1;
         /// prepare crypto context for the specified connection
         if !self.is_handshaking && stream_id != 0 {
             self.message_encrypter.derive_enc_stream_iv(stream_id as u32);
@@ -325,18 +338,20 @@ impl RecordLayer {
 }
 
     /// The sequence number space for an open tcp connection
+    #[derive(Default)]
     pub(crate) struct RecSeqNumSpace {
         stream_id: u32,
         write_seq: u64,
         read_seq: u64,
+        next_snd_pkt_num:u32,
+        next_recv_pkt_num:u32,
     }
 
     impl RecSeqNumSpace {
         pub(crate)  fn new(stream_id: u32) -> Self {
             Self{
                 stream_id,
-                read_seq: 0,
-                write_seq: 0,
+                ..Default::default()
             }
 
         }

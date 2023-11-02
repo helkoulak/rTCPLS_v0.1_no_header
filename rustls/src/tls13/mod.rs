@@ -149,56 +149,44 @@ fn unpad_tls13_from_slice(v: &mut [u8]) -> (ContentType, usize) {
     }
 }
 
-fn make_tls13_aad_no_header(len: usize) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE_NO_HEADER]> {
+fn make_tls13_aad_no_header(len: usize) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE]> {
     ring::aead::Aad::from([
         0x17, // ContentType::ApplicationData
         0x3,  // ProtocolVersion (major)
         0x3,  // ProtocolVersion (minor)
         (len >> 8) as u8,
         len as u8,
-        0x04,
     ])
 }
 
 fn prepare_output(header: & StreamFrameHeader, payload_length: usize) -> Vec<u8> {
     // Prepare output buffer
     let mut output = vec![0; PACKET_OVERHEAD + payload_length];
+    let mut b = octets::OctetsMut::with_slice(&mut output);
+    //TLS record header
     // Application data
-    output[0] = 0x17;
+    b.put_u8(0x17)?;
     // TLSv1_2
-    output[1] = ((0x0303 >> 8) & 0xFF) as u8;
-    output[2] = (0x0303 & 0xFF) as u8;
+    b.put_u16(0x0303)?;
     // payload length
-    output[3] = ((payload_length as u16 >> 8) & 0xFF) as u8;
-    output[4] = (payload_length as u16 & 0xFF) as u8;
+    b.put_u16(payload_length as u16)?;
     // TCPLS header
-    output[5] = header.typ;
-    output[6] = ((header.length >> 8) & 0xFF) as u8;
-    output[7] = (header.length & 0xFF) as u8;
-    output[8] = ((header.offset >> 56) & 0xFF) as u8;
-    output[9] = ((header.offset >> 48) & 0xFF) as u8;
-    output[10] = ((header.offset >> 40) & 0xFF) as u8;
-    output[11] = ((header.offset >> 32) & 0xFF) as u8;
-    output[12] = ((header.offset >> 24) & 0xFF) as u8;
-    output[13] = ((header.offset >> 16) & 0xFF) as u8;
-    output[14] = ((header.offset >> 8) & 0xFF) as u8;
-    output[15] = (header.offset  & 0xFF) as u8;
-    output[16] = ((header.stream_id >> 8) & 0xFF) as u8;
-    output[17] = (header.stream_id  & 0xFF) as u8;
+    b.put_u32(header.chunk_num)?;
+    b.put_u16(header.offset_step)?;
+    b.put_u16(header.stream_id)?;
     output
 }
 
-fn make_tls13_aad(header: &[u8]) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE]> {
+fn make_tls13_aad(header: &[u8]) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE_WITH_TCPLS_HEADER]> {
     ring::aead::Aad::from([header[0], header[1], header[2], header[3]
         , header[4], header[5], header[6], header[7]
         , header[8], header[9], header[10], header[11]
-        , header[12], header[13], header[14], header[15]
-        , header[16], header[17]])
+        , header[12]])
 }
 
 // https://datatracker.ietf.org/doc/html/rfc8446#section-5.2
-const TLS13_AAD_SIZE_NO_HEADER: usize = 1 + 2 + 2 + 1;
-const TLS13_AAD_SIZE: usize = 1 + 2 + 2 + TCPLS_HEADER_SIZE;
+const TLS13_AAD_SIZE: usize = 1 + 2 + 2 ;
+const TLS13_AAD_SIZE_WITH_TCPLS_HEADER: usize = 1 + 2 + 2 + TCPLS_HEADER_SIZE;
 
 impl MessageEncrypter for Tls13MessageEncrypter {
     fn encrypt(&self, m: BorrowedPlainMessage, seq: u64, stream_id: u32) -> Result<Vec<u8>, Error> {

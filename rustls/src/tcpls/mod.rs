@@ -167,18 +167,18 @@ impl TcplsSession {
         for chunk in chunks {
             number_of_chunks -= 1;
 
+            let fin_bit:u8 = if number_of_chunks == 0 {
+                match fin {
+                    true => 1,
+                    false => 0,
+                }
+            } else {
+                0
+            };
             let mut header = StreamFrameHeader {
-
-                typ: 0x02 & if number_of_chunks == 0 {
-                    match fin {
-                        true => 1,
-                        false => 0,
-                    }
-                } else {
-                    0
-                },
-                length: chunk.len() as u16,
-                offset: stream.send.get_offset(),
+                chunk_num: tls_connection.record_layer.next_snd_pkt_num() ,
+                // Set the fin bit as the msb of offset as difference between current and previous offset is maximum 16384
+                offset_step: ((fin_bit & 0x01) << 15) | tream.send.get_offset_diff(),
                 stream_id: stream_id as u16,
             };
 
@@ -203,7 +203,7 @@ impl TcplsSession {
                 }, header);
 
 
-            buffered += stream.send.append(em, Some(stream.send.get_offset()), Some(chunk.len()));
+            buffered += stream.send.append(em, Some(stream.send.get_current_offset()), Some(chunk.len()));
             stream.send.advance_offset(chunk.len() as u64);
         }
 

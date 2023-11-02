@@ -7,11 +7,15 @@ use std::io::Read;
 /// of byte vectors.  This avoids extra copies when
 /// appending a new byte vector, at the expense of
 /// more complexity when reading out.
+/// where the next chunk will be appended
+#[derive(Default)]
 pub(crate) struct ChunkVecBuffer {
     buffer: VecDeque<BytesFragment>,
     limit: Option<usize>,
     /// where the next chunk will be appended
-    offset: u64,
+    current_offset: u64,
+    /// The offset immediately behind "current_offset"
+    previous_offset: u64,
     /// Amount of application bytes in plain that are buffered
     plain_buffered: usize,
 }
@@ -21,17 +25,21 @@ impl ChunkVecBuffer {
         Self {
             buffer: VecDeque::new(),
             limit,
-            offset: 0,
-            plain_buffered: 0,
+            ..Default::default()
         }
     }
 
-    pub(crate)  fn get_offset(&self) -> u64 {
-        self.offset
+    pub(crate)  fn get_current_offset(&self) -> u64 {
+        self.current_offset
+    }
+
+    /// Output is of type u16 as maximum payload size for a TLS record is 16384 bytes
+    pub(crate)  fn get_offset_diff(&self) -> u16 {
+        self.current_offset.saturating_sub(self.previous_offset) as u16
     }
 
     pub(crate)  fn advance_offset(&mut self, added: u64) {
-        self.offset += added;
+        self.current_offset += added;
     }
 
     /// Sets the upper limit on how many bytes this
