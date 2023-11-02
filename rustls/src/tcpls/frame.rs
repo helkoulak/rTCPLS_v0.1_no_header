@@ -5,7 +5,7 @@ use crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
 /// chunk_num = 4 Bytes + Offset_step = 2 Bytes + Stream Id = 2 Bytes.
 pub const TCPLS_HEADER_SIZE: usize = 8;
 
-pub const TCPLS_MINIMUM_PAYLOAD_LENGTH: usize = 16;
+pub const SAMPLE_PAYLOAD_LENGTH: usize = 16;
 
 pub const MAX_TCPLS_FRAGMENT_LEN: usize = MAX_FRAGMENT_LEN - TCPLS_HEADER_SIZE;
 

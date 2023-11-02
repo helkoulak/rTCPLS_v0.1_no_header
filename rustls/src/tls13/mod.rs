@@ -13,7 +13,7 @@ use ring::aead;
 
 use std::fmt;
 use crate::recvbuf::RecvBuf;
-use crate::tcpls::frame::{TCPLS_HEADER_SIZE, StreamFrameHeader, TCPLS_MINIMUM_PAYLOAD_LENGTH};
+use crate::tcpls::frame::{TCPLS_HEADER_SIZE, StreamFrameHeader, SAMPLE_PAYLOAD_LENGTH};
 
 pub(crate) mod key_schedule;
 
@@ -188,6 +188,8 @@ fn make_tls13_aad(header: &[u8]) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE_WITH_TCP
 const TLS13_AAD_SIZE: usize = 1 + 2 + 2 ;
 const TLS13_AAD_SIZE_WITH_TCPLS_HEADER: usize = 1 + 2 + 2 + TCPLS_HEADER_SIZE;
 
+pub const TCPLS_HEADER_OFFSET: usize = 5;
+
 impl MessageEncrypter for Tls13MessageEncrypter {
     fn encrypt(&self, m: BorrowedPlainMessage, seq: u64, stream_id: u32) -> Result<Vec<u8>, Error> {
         let mut payload_len = m.payload.len() + 1 + self.enc_key.algorithm().tag_len();
@@ -223,19 +225,12 @@ impl MessageEncrypter for Tls13MessageEncrypter {
     }
 
     fn encrypt_zc(&self, msg: BorrowedPlainMessage, seq: u64, stream_id: u32, header: StreamFrameHeader) -> Result<Vec<u8>, Error> {
-        // Impose a minimum length for payload to increase entropy for header protection hash function
-        let padding_bytes = match  msg.payload.len() < TCPLS_MINIMUM_PAYLOAD_LENGTH {
-            true => TCPLS_MINIMUM_PAYLOAD_LENGTH - msg.payload.len(),
-            false => 0,
-        };
-        let mut payload_len = msg.payload.len() + padding_bytes + 1 + self.enc_key.algorithm().tag_len();
+
+        let mut payload_len = msg.payload.len() + 1 + self.enc_key.algorithm().tag_len();
         let record_payload_length = payload_len + TCPLS_HEADER_SIZE;
         let mut input = vec![0; payload_len];
         input.extend_from_slice(msg.payload);
         msg.typ.encode(&mut input);
-        if padding_bytes != 0 {
-            input.extend_from_slice(vec![0;padding_bytes].as_slice());
-        }
 
         let nonce = make_nonce(self.iv.get(&stream_id).unwrap(), seq);
 
@@ -248,8 +243,9 @@ impl MessageEncrypter for Tls13MessageEncrypter {
             .seal_in_output_append_tag(nonce, aad, &input, &mut output, PACKET_OVERHEAD + TCPLS_HEADER_SIZE)
             .map_err(|_| Error::General("encrypt failed".to_string()))?;
 
-        // Take the first 16 bytes of encrypted input as input for hash function
-        self.header_protector.unwrap().encrypt_in_place(&output[18..34], &mut output[5..18])?;
+        let sample = output.chunks(SAMPLE_PAYLOAD_LENGTH).last().unwrap();
+        // Take the LSB 16 bytes of encrypted input as input sample for hash function
+        self.header_protector.unwrap().encrypt_in_place(sample, &mut output[TCPLS_HEADER_OFFSET..(TCPLS_HEADER_OFFSET + TCPLS_HEADER_SIZE)])?;
 
         Ok(output)
     }
