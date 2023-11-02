@@ -243,7 +243,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
             .seal_in_output_append_tag(nonce, aad, &input, &mut output, PACKET_OVERHEAD + TCPLS_HEADER_SIZE)
             .map_err(|_| Error::General("encrypt failed".to_string()))?;
 
-        let sample = output.chunks(SAMPLE_PAYLOAD_LENGTH).last().unwrap();
+        let sample = output.rchunks(SAMPLE_PAYLOAD_LENGTH).next().unwrap();
         // Take the LSB 16 bytes of encrypted input as input sample for hash function
         self.header_protector.unwrap().encrypt_in_place(sample, &mut output[TCPLS_HEADER_OFFSET..(TCPLS_HEADER_OFFSET + TCPLS_HEADER_SIZE)])?;
 
