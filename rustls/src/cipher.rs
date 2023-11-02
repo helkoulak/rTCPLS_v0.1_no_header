@@ -2,15 +2,16 @@
 
 
 use std::collections::HashMap;
-use std::hash::Hasher;
+
 
 use crate::error::Error;
 use crate::msgs::codec;
 use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, PlainMessage};
 
 use ring::{aead, hkdf};
+use siphasher::sip::SipHasher;
 
-use siphasher::sip128::{Hasher128, SipHasher};
+
 use crate::recvbuf::RecvBuf;
 use crate::tcpls::frame::StreamFrameHeader;
 
@@ -178,8 +179,7 @@ impl HeaderProtector {
         input: &[u8],
         header: &mut [u8],
     ) -> Result<(), Error> {
-        self.sip_hasher.write(input);
-        let out = self.sip_hasher.finish().as_bytes();
+        let out = self.sip_hasher.hash(input).to_be_bytes();
         for i in 0..header.len() {
             header[i] ^= out[i];
         }
