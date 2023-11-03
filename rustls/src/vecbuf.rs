@@ -39,6 +39,7 @@ impl ChunkVecBuffer {
     }
 
     pub(crate)  fn advance_offset(&mut self, added: u64) {
+        self.previous_offset = self.current_offset;
         self.current_offset += added;
     }
 
