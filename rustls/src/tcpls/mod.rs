@@ -123,11 +123,13 @@ impl TcplsSession {
                 .expect("Establishing a TLS session has failed");
             let _ = self.tls_conn.insert(Connection::from(server_conn));
             let _ = self.tls_config.insert(TlsConfig::from(config));
+        }else {
+            self.tls_conn.as_mut().unwrap().record_layer.create_new_seq_space(conn_id);
         }
         Ok(conn_id)
     }
 
-    pub fn stream_send(&mut self, stream_id: u32, input: &[u8], fin: bool) -> Result<usize, Error> {
+    pub fn stream_send_and_attach(&mut self, stream_id: u32, input: &[u8], fin: bool, attach_to: u32) -> Result<usize, Error> {
         let tls_connection = self.tls_conn.as_mut().unwrap();
 
         if tls_connection.is_handshaking() {
@@ -137,12 +139,23 @@ impl TcplsSession {
         // Get existing stream or create a new one.
         let stream = self.streams.get_or_create(stream_id)?;
 
-        // create new record sequence number space for stream if not already created otherwise function will do nothing
-        tls_connection.record_layer.create_new_seq_space(stream_id);
+        let conn_id = match stream.attched_to {
+            Some(conn_id) => {
+                if attach_to != conn_id {
+                    return Err(Error::General(format!("Stream is already attached to connection {}", conn_id)))
+                }else{
+                    conn_id
+                }
+            },
+            None => {
+                stream.attched_to = Some(attach_to);
+                attach_to
+            },
+        };
 
 
-        // set id of stream in use to decide on crypto context and record seq space
-        tls_connection.set_stream_in_use(stream_id);
+        // set id of tcp connection to decide on crypto context and record seq space
+        tls_connection.set_connection_in_use(conn_id);
 
         // check if key update message should be sent
         tls_connection.perhaps_write_key_update();
@@ -170,6 +183,7 @@ impl TcplsSession {
         for chunk in chunks {
             number_of_chunks -= 1;
 
+            //consider flag fin when reaching last chunk
             let fin_bit:u8 = if number_of_chunks == 0 {
                 match fin {
                     true => 1,
@@ -179,9 +193,9 @@ impl TcplsSession {
                 0
             };
             let mut header = StreamFrameHeader {
-                chunk_num: tls_connection.record_layer.next_snd_pkt_num() ,
+                chunk_num: stream.next_snd_pkt_num,
                 // Set the fin bit as the msb of offset as difference between current and previous offset is maximum 16384
-                offset_step: ((fin_bit & 0x01) << 15) | tream.send.get_offset_diff(),
+                offset_step: (((fin_bit & 0x01) << 15) as u16) | stream.send.get_offset_diff(),
                 stream_id: stream_id as u16,
             };
 
@@ -207,6 +221,7 @@ impl TcplsSession {
 
 
             buffered += stream.send.append(em, Some(stream.send.get_current_offset()), Some(chunk.len()));
+            stream.next_snd_pkt_num += 1;
             stream.send.advance_offset(chunk.len() as u64);
         }
 
@@ -217,7 +232,7 @@ impl TcplsSession {
         self.streams.get_or_create(id)
     }
 
-    pub fn send_on_connection(&mut self, stream_id: u64, conn_id: u32) -> Result<usize, Error> {
+    pub fn send_on_connection(&mut self, stream_id: u64) -> Result<usize, Error> {
         let tls_conn = self.tls_conn.as_mut().unwrap();
 
         if tls_conn.is_handshaking() {
@@ -228,6 +243,8 @@ impl TcplsSession {
             Some(stream) => stream,
             None => return Err(Error::BufNotFound),
         };
+
+        let conn_id = stream.attched_to.unwrap();
 
         if stream.send.is_empty() {
             return Ok(0);
