@@ -16,6 +16,8 @@ pub struct RecvBuf {
     /// indicates to which offset data within outbuf has already been marked consumed by the
     /// application. V3 specific.
     consumed: usize,
+
+    pub next_recv_pkt_num: u32,
 }
 
 impl RecvBuf {

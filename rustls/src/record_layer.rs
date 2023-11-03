@@ -73,13 +73,6 @@ impl RecordLayer {
         self.seq_map.as_ref(self.conn_in_use).read_seq
     }
 
-    pub(crate) fn next_snd_pkt_num(&self) -> u32 {
-        self.seq_map.as_ref(self.conn_in_use).next_snd_pkt_num
-    }
-    pub(crate) fn next_recv_pkt_num(&self) -> u32 {
-        self.seq_map.as_ref(self.conn_in_use).next_recv_pkt_num
-    }
-
     pub(crate) fn set_conn_in_use(&mut self, conn_id: u32) {
         self.conn_in_use = conn_id;
     }
@@ -339,8 +332,6 @@ impl RecordLayer {
         connection_id: u32,
         write_seq: u64,
         read_seq: u64,
-        next_snd_pkt_num:u32,
-        next_recv_pkt_num:u32,
     }
 
     impl RecSeqNumSpace {

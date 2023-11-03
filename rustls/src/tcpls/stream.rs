@@ -55,16 +55,20 @@ pub struct Stream {
 
     /// buffers encrypted TLS records that to be sent on the TCP socket
     pub(crate) send: ChunkVecBuffer,
-
+    /// The id of tcp connection the stream is attached to
+    pub attched_to: Option<u32>,
+    pub next_snd_pkt_num: u32,
 }
 
 impl Stream {
     pub fn new(id: u64) -> Self {
         Self{
-            id: id,
+            id,
             marked_for_close: false,
             aead_initialized: false,
             send: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
+            attched_to: None,
+            next_snd_pkt_num: 0,
         }
     }
 
