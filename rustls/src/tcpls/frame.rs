@@ -364,13 +364,13 @@ impl StreamFrameHeader {
     }*/
 }
 
-impl Default for StreamFrameHeader {
+/*impl Default for StreamFrameHeader {
     fn default() -> Self {
         Self {
             ..Default::default()
         }
     }
-}
+}*/
 
 #[test]
 fn test_encode_decode_stream_frame() {
