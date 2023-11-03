@@ -160,7 +160,7 @@ fn make_tls13_aad_no_header(len: usize) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE]>
     ])
 }
 
-fn prepare_output(header: & StreamFrameHeader, payload_length: usize) -> Vec<u8> {
+fn prepare_output(header: & StreamFrameHeader, payload_length: usize) -> Result<Vec<u8>, BufferError> {
     // Prepare output buffer
     let mut output = vec![0; PACKET_OVERHEAD + payload_length];
     let mut b = octets::OctetsMut::with_slice(&mut output);
@@ -175,7 +175,7 @@ fn prepare_output(header: & StreamFrameHeader, payload_length: usize) -> Vec<u8>
     b.put_u32(header.chunk_num)?;
     b.put_u16(header.offset_step)?;
     b.put_u16(header.stream_id)?;
-    output
+    Ok(output)
 }
 
 fn make_tls13_aad(header: &[u8]) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE_WITH_TCPLS_HEADER]> {
