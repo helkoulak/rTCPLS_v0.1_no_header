@@ -22,16 +22,16 @@ use crate::tcpls::frame::StreamFrameHeader;
 pub trait MessageDecrypter: Send + Sync {
     /// Perform the decryption over the concerned TLS message.
 
-    fn decrypt(&self, m: BorrowedOpaqueMessage, seq: u64, connection_id: u32) -> Result<PlainMessage, Error>;
+    fn decrypt(&self, m: BorrowedOpaqueMessage, seq: u64, conn_id: u32) -> Result<PlainMessage, Error>;
    fn decrypt_zc(&self, msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, recv_buf: &mut RecvBuf) -> Result<PlainMessage, Error>;
-    fn derive_dec_stream_iv(&mut self, conn_id: u32);
+    fn derive_dec_conn_iv(&mut self, conn_id: u32);
 }
 
 /// Objects with this trait can encrypt TLS messages.
 pub(crate) trait MessageEncrypter: Send + Sync {
-    fn encrypt(&self, m: BorrowedPlainMessage, seq: u64, stream_id: u32) -> Result<Vec<u8>, Error>;
-    fn encrypt_zc(&self, msg: BorrowedPlainMessage, seq: u64, stream_id: u32, tcpls_header: StreamFrameHeader) -> Result<Vec<u8>, Error>;
-    fn derive_enc_stream_iv(&mut self, stream_id: u32);
+    fn encrypt(&self, m: BorrowedPlainMessage, seq: u64, conn_id: u32) -> Result<Vec<u8>, Error>;
+    fn encrypt_zc(&self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: StreamFrameHeader) -> Result<Vec<u8>, Error>;
+    fn derive_enc_conn_iv(&mut self, conn_id: u32);
 }
 
 impl dyn MessageEncrypter {
@@ -100,9 +100,9 @@ pub(crate) fn make_nonce(iv: &Iv, seq: u64) -> ring::aead::Nonce {
     aead::Nonce::assume_unique_for_key(nonce)
 }
 
-pub(crate) fn derive_stream_iv(iv: &mut HashMap<u32, Iv>, stream_id: u32){
+pub(crate) fn derive_connection_iv(iv: &mut HashMap<u32, Iv>, conn_id: u32){
         let mut id = [0u8; aead::NONCE_LEN];
-        codec::put_u32(stream_id, &mut id[..4]);
+        codec::put_u32(conn_id, &mut id[..4]);
 
         id
             .iter_mut()
@@ -110,7 +110,7 @@ pub(crate) fn derive_stream_iv(iv: &mut HashMap<u32, Iv>, stream_id: u32){
             .for_each(|(id, iv)| {
                 *id ^= *iv;
             });
-        iv.insert(stream_id, Iv::copy(&id));
+        iv.insert(conn_id, Iv::copy(&id));
     }
 
 pub struct HeaderProtector{
@@ -199,7 +199,7 @@ impl MessageEncrypter for InvalidMessageEncrypter {
         todo!()
     }
 
-    fn derive_enc_stream_iv(&mut self, conn_id: u32) {
+    fn derive_enc_conn_iv(&mut self, conn_id: u32) {
 
     }
 }
@@ -216,7 +216,7 @@ impl MessageDecrypter for InvalidMessageDecrypter {
         todo!()
     }
 
-    fn derive_dec_stream_iv(&mut self, stream_id: u32) {
+    fn derive_dec_conn_iv(&mut self, stream_id: u32) {
 
     }
 }

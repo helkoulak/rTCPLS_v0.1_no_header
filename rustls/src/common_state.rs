@@ -112,10 +112,10 @@ impl CommonState {
         self.conn_in_use = conn_id;
     }
 
-    /// sets the id of the currently active stream
+   /* /// sets the id of the currently active stream
     pub(crate) fn set_stream_in_use(&mut self, stream_id: u32) {
-        self.record_layer.set_stream_in_use(stream_id as u64);
-    }
+        self.record_layer.set_conn_in_use(stream_id as u64);
+    }*/
 
     /// Returns true if the connection is currently performing the TLS handshake.
     ///

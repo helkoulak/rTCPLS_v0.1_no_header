@@ -31,11 +31,9 @@ pub struct RecordLayer {
     seq_map: RecSeqNumMap,
     encrypt_state: DirectionState,
     decrypt_state: DirectionState,
-    /// id of currently used stream
-    stream_in_use: u64,
-
+    // id of currently used tcp connection
+    conn_in_use: u32,
     is_handshaking: bool,
-
     // Message encrypted with other keys may be encountered, so failures
     // should be swallowed by the caller.  This struct tracks the amount
     // of message size this is allowed for.
@@ -51,7 +49,7 @@ impl RecordLayer {
             seq_map: RecSeqNumMap::new(),
             encrypt_state: DirectionState::Invalid,
             decrypt_state: DirectionState::Invalid,
-            stream_in_use: 0,
+            conn_in_use: 0,
             is_handshaking: true,
             trial_decryption_len: None,
         }
@@ -67,23 +65,23 @@ impl RecordLayer {
 
     #[cfg(feature = "secret_extraction")]
     pub(crate) fn write_seq(&self) -> u64 {
-        self.seq_map.as_ref(self.stream_in_use as u32).write_seq
+        self.seq_map.as_ref(self.conn_in_use).write_seq
     }
 
     #[cfg(feature = "secret_extraction")]
     pub(crate) fn read_seq(&self) -> u64 {
-        self.seq_map.as_ref(self.stream_in_use as u32).read_seq
+        self.seq_map.as_ref(self.conn_in_use).read_seq
     }
 
     pub(crate) fn next_snd_pkt_num(&self) -> u32 {
-        self.seq_map.as_ref(self.stream_in_use as u32).next_snd_pkt_num
+        self.seq_map.as_ref(self.conn_in_use).next_snd_pkt_num
     }
     pub(crate) fn next_recv_pkt_num(&self) -> u32 {
-        self.seq_map.as_ref(self.stream_in_use as u32).next_recv_pkt_num
+        self.seq_map.as_ref(self.conn_in_use).next_recv_pkt_num
     }
 
-    pub(crate) fn set_stream_in_use(&mut self, stream_id: u64) {
-        self.stream_in_use = stream_id;
+    pub(crate) fn set_conn_in_use(&mut self, conn_id: u32) {
+        self.conn_in_use = conn_id;
     }
 
     fn doing_trial_decryption(&mut self, requested: usize) -> bool {
@@ -102,18 +100,18 @@ impl RecordLayer {
     /// Prepare to use the given `MessageEncrypter` for future message encryption.
     /// It is not used until you call `start_encrypting`.
     pub(crate) fn prepare_message_encrypter(&mut self, cipher: Box<dyn MessageEncrypter>) {
-        let stream_id = self.stream_in_use;
+        let conn_id = self.conn_in_use;
         self.message_encrypter = cipher;
-        self.seq_map.get_or_create(stream_id as u32).write_seq = 0;
+        self.seq_map.as_mut_ref(conn_id).write_seq = 0;
         self.encrypt_state = DirectionState::Prepared;
     }
 
     /// Prepare to use the given `MessageDecrypter` for future message decryption.
     /// It is not used until you call `start_decrypting`.
     pub(crate) fn prepare_message_decrypter(&mut self, cipher: Box<dyn MessageDecrypter>) {
-        let stream_id = self.stream_in_use;
+        let conn_id = self.conn_in_use;
         self.message_decrypter = cipher;
-        self.seq_map.get_or_create(stream_id as u32).read_seq = 0;
+        self.seq_map.as_mut_ref(conn_id).read_seq = 0;
         self.decrypt_state = DirectionState::Prepared;
     }
 
@@ -166,21 +164,21 @@ impl RecordLayer {
     /// Return true if we are getting close to encrypting too many
     /// messages with our encryption key.
     pub(crate) fn wants_close_before_encrypt(&self) -> bool {
-        self.seq_map.as_ref(self.stream_in_use as u32).write_seq == SEQ_SOFT_LIMIT
+        self.seq_map.as_ref(self.conn_in_use).write_seq == SEQ_SOFT_LIMIT
     }
 
     /// Return true if we outright refuse to do anything with the
     /// encryption key.
     pub(crate) fn encrypt_exhausted(&self) -> bool {
-        self.seq_map.as_ref(self.stream_in_use as u32).write_seq >= SEQ_HARD_LIMIT
+        self.seq_map.as_ref(self.conn_in_use).write_seq >= SEQ_HARD_LIMIT
     }
 
-    pub(crate) fn create_new_seq_space(&mut self, stream_id: u32) {
-        self.seq_map.create_new_seq_space(stream_id);
+    pub fn create_new_seq_space(&mut self, conn_id: u32) {
+        self.seq_map.create_new_seq_space(conn_id);
     }
 
-    pub fn get_stream_in_use(& self) -> u64 {
-        self.stream_in_use
+    pub fn get_conn_in_use(& self) -> u32 {
+        self.conn_in_use
     }
 
     /// Decrypt a TLS message.
@@ -208,23 +206,23 @@ impl RecordLayer {
         // Note that there's no reason to refuse to decrypt: the security
         // failure has already happened.
 
-        let stream_id = self.stream_in_use;
-        let want_close_before_decrypt = self.seq_map.seq_num_map.get(&stream_id).unwrap().read_seq == SEQ_SOFT_LIMIT;
+        let conn_id = self.conn_in_use;
+        let want_close_before_decrypt = self.seq_map.as_ref(conn_id).read_seq == SEQ_SOFT_LIMIT;
 
 
         let encrypted_len = encr.payload.len();
 
-        /// prepare crypto context for the specified stream
-        /// if IV already exists for the specified stream, the function does nothing
-        if !self.is_handshaking && stream_id != 0 {
-            self.message_decrypter.derive_dec_stream_iv(stream_id as u32);
+        /// prepare crypto context for the specified tcp connection
+        /// if IV already exists for the specified tcp connection, the function does nothing
+        if !self.is_handshaking && conn_id != 0 {
+            self.message_decrypter.derive_dec_conn_iv(conn_id);
         }
         match self
             .message_decrypter
-            .decrypt(encr, self.seq_map.seq_num_map.get(&stream_id).unwrap().read_seq, stream_id as u32)
+            .decrypt(encr, self.seq_map.as_ref(conn_id).read_seq, conn_id)
         {
             Ok(plaintext) => {
-                self.seq_map.seq_num_map.get_mut(&stream_id).unwrap().read_seq += 1;
+                self.seq_map.as_mut_ref(conn_id).read_seq += 1;
                 Ok(Some(Decrypted {
                     want_close_before_decrypt,
                     plaintext,
@@ -264,27 +262,26 @@ impl RecordLayer {
         // Note that there's no reason to refuse to decrypt: the security
         // failure has already happened.
 
-        //TODO correct logic here. the id of stream in use should be taken from TCPLS header
         //TODO accordingly decryption of TCPLS header should happen at this point not before to avoid unnecessary processing
         // in case data is already in plaintext
-        let stream_id = self.stream_in_use;
-        let want_close_before_decrypt = self.seq_map.seq_num_map.get(&stream_id).unwrap().read_seq == SEQ_SOFT_LIMIT;
+        let conn_id = self.conn_in_use;
+        let want_close_before_decrypt = self.seq_map.as_ref(conn_id).read_seq == SEQ_SOFT_LIMIT;
 
 
         let encrypted_len = encr.payload.len();
 
         /// prepare crypto context for the specified connection
         /// if IV already exists for the specified connection, the function does nothing
-        if !self.is_handshaking && stream_id != 0 {
-            self.message_decrypter.derive_dec_stream_iv(stream_id as u32);
+        if !self.is_handshaking && conn_id != 0 {
+            self.message_decrypter.derive_dec_conn_iv(conn_id);
         }
         match self
             .message_decrypter
-            .decrypt_zc(encr, self.seq_map.seq_num_map.get(&stream_id).unwrap().read_seq, stream_id as u32, recv_buf)
+            .decrypt_zc(encr, self.seq_map.as_ref(conn_id).read_seq, conn_id, recv_buf)
         {
             Ok(plaintext) => {
-                self.seq_map.seq_num_map.get_mut(&stream_id).unwrap().read_seq += 1;
-                self.seq_map.seq_num_map.get_mut(&stream_id).unwrap().next_recv_pkt_num += 1;
+                self.seq_map.as_mut_ref(conn_id).read_seq += 1;
+                self.seq_map.as_mut_ref(conn_id).next_recv_pkt_num += 1;
                 Ok(Some(Decrypted {
                     want_close_before_decrypt,
                     plaintext,
@@ -305,15 +302,15 @@ impl RecordLayer {
     pub(crate) fn encrypt_outgoing(&mut self, plain: BorrowedPlainMessage) -> Vec<u8> {
         debug_assert!(self.encrypt_state == DirectionState::Active);
         assert!(!self.encrypt_exhausted());
-        let stream_id = self.stream_in_use;
-        let seq = self.seq_map.seq_num_map.get(&stream_id).unwrap().write_seq;
-        self.seq_map.seq_num_map.get_mut(&stream_id).unwrap().write_seq += 1;
+        let conn_id = self.conn_in_use;
+        let seq = self.seq_map.as_ref(conn_id).write_seq;
+        self.seq_map.as_mut_ref(conn_id).write_seq += 1;
         /// prepare crypto context for the specified connection
-        if !self.is_handshaking && stream_id != 0 {
-            self.message_encrypter.derive_enc_stream_iv(stream_id as u32);
+        if !self.is_handshaking && conn_id != 0 {
+            self.message_encrypter.derive_enc_conn_iv(conn_id);
         }
         self.message_encrypter
-            .encrypt(plain, seq, stream_id as u32)
+            .encrypt(plain, seq, conn_id)
             .unwrap()
     }
 
@@ -321,16 +318,16 @@ impl RecordLayer {
     pub(crate) fn encrypt_outgoing_zc(&mut self, plain: BorrowedPlainMessage, tcpls_header: StreamFrameHeader) -> Vec<u8> {
         debug_assert!(self.encrypt_state == DirectionState::Active);
         assert!(!self.encrypt_exhausted());
-        let stream_id = self.stream_in_use;
-        let seq = self.seq_map.seq_num_map.get(&stream_id).unwrap().write_seq;
-        self.seq_map.seq_num_map.get_mut(&stream_id).unwrap().write_seq += 1;
-        self.seq_map.seq_num_map.get_mut(&stream_id).unwrap().next_snd_pkt_num += 1;
+        let conn_id = self.conn_in_use;
+        let seq = self.seq_map.as_ref(conn_id).write_seq;
+        self.seq_map.as_mut_ref(conn_id).write_seq += 1;
+        self.seq_map.as_mut_ref(conn_id).next_snd_pkt_num += 1;
         /// prepare crypto context for the specified connection
-        if !self.is_handshaking && stream_id != 0 {
-            self.message_encrypter.derive_enc_stream_iv(stream_id as u32);
+        if !self.is_handshaking && conn_id != 0 {
+            self.message_encrypter.derive_enc_conn_iv(conn_id);
         }
         self.message_encrypter
-            .encrypt_zc(plain, seq, stream_id as u32, tcpls_header)
+            .encrypt_zc(plain, seq, conn_id, tcpls_header)
             .unwrap()
     }
 
@@ -339,7 +336,7 @@ impl RecordLayer {
     /// The sequence number space for an open tcp connection
     #[derive(Default)]
     pub(crate) struct RecSeqNumSpace {
-        stream_id: u32,
+        connection_id: u32,
         write_seq: u64,
         read_seq: u64,
         next_snd_pkt_num:u32,
@@ -347,9 +344,9 @@ impl RecordLayer {
     }
 
     impl RecSeqNumSpace {
-        pub(crate)  fn new(stream_id: u32) -> Self {
+        pub(crate)  fn new(conn_id: u32) -> Self {
             Self{
-                stream_id,
+                connection_id: conn_id,
                 ..Default::default()
             }
 
@@ -364,30 +361,41 @@ impl RecordLayer {
         seq_num_map: SimpleIdHashMap<RecSeqNumSpace>,
     }
     impl RecSeqNumMap {
-        pub(crate) fn new() -> RecSeqNumMap {
-            RecSeqNumMap {
-                ..Default::default()
+        /// Calling new creates the first seq num space along with the establishment of TLS session
+        pub(crate) fn new() -> Self {
+            let mut map = SimpleIdHashMap::default();
+            let seq = RecSeqNumSpace::new(0);
+            map.insert(0, seq);
+            Self {
+                seq_num_map: map,
             }
         }
 
-        pub(crate) fn get_or_create(&mut self, stream_id: u32) -> &mut RecSeqNumSpace {
-            match self.seq_num_map.entry(stream_id as u64) {
+        pub(crate) fn get_or_create(&mut self, conn_id: u32) -> &mut RecSeqNumSpace {
+            match self.seq_num_map.entry(conn_id as u64) {
                 hash_map::Entry::Vacant(v) => {
-                    v.insert(RecSeqNumSpace::new(stream_id))
+                    v.insert(RecSeqNumSpace::new(conn_id))
                 },
                 hash_map::Entry::Occupied(v) => v.into_mut(),
             }
         }
 
         /// Creates a new sequence space or do nothing if already exists
-        pub(crate) fn create_new_seq_space(&mut self, stream_id: u32) {
-           if !self.seq_num_map.contains_key(&(stream_id as u64)){
-               self.seq_num_map.insert(stream_id as u64, RecSeqNumSpace::new(stream_id));
+        pub(crate) fn create_new_seq_space(&mut self, conn_id: u32) {
+           if !self.seq_num_map.contains_key(&(conn_id as u64)){
+               self.seq_num_map.insert(conn_id as u64, RecSeqNumSpace::new(conn_id));
            }
         }
 
-        pub(crate) fn as_ref(&self, stream_id: u32) -> & RecSeqNumSpace {
-            match self.seq_num_map.get(&(stream_id as u64)) {
+        pub(crate) fn as_ref(&self, conn_id: u32) -> & RecSeqNumSpace {
+            match self.seq_num_map.get(&(conn_id as u64)) {
+                Some(seq_space) => seq_space,
+                None => panic!("sequence space not found"),
+            }
+        }
+
+        pub(crate) fn as_mut_ref(&mut self, conn_id: u32) -> &mut RecSeqNumSpace {
+            match self.seq_num_map.get_mut(&(conn_id as u64)) {
                 Some(seq_space) => seq_space,
                 None => panic!("sequence space not found"),
             }

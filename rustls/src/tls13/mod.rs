@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::cipher::{make_nonce, Iv, MessageDecrypter, MessageEncrypter, derive_stream_iv, HeaderProtector};
+use crate::cipher::{make_nonce, Iv, MessageDecrypter, MessageEncrypter, derive_connection_iv, HeaderProtector};
 use crate::enums::ContentType;
 use crate::enums::{CipherSuite, ProtocolVersion};
 use crate::error::{Error, PeerMisbehaved};
@@ -12,6 +12,7 @@ use crate::suites::{BulkAlgorithm, CipherSuiteCommon, SupportedCipherSuite};
 use ring::aead;
 
 use std::fmt;
+use octets::BufferError;
 use crate::recvbuf::RecvBuf;
 use crate::tcpls::frame::{TCPLS_HEADER_SIZE, StreamFrameHeader, SAMPLE_PAYLOAD_LENGTH};
 
@@ -224,7 +225,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         Ok(output)
     }
 
-    fn encrypt_zc(&self, msg: BorrowedPlainMessage, seq: u64, stream_id: u32, header: StreamFrameHeader) -> Result<Vec<u8>, Error> {
+    fn encrypt_zc(&self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, header: StreamFrameHeader) -> Result<Vec<u8>, Error> {
 
         let mut payload_len = msg.payload.len() + 1 + self.enc_key.algorithm().tag_len();
         let record_payload_length = payload_len + TCPLS_HEADER_SIZE;
@@ -232,9 +233,9 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         input.extend_from_slice(msg.payload);
         msg.typ.encode(&mut input);
 
-        let nonce = make_nonce(self.iv.get(&stream_id).unwrap(), seq);
+        let nonce = make_nonce(self.iv.get(&conn_id).unwrap(), seq);
 
-       let mut output= prepare_output(&header, record_payload_length);
+       let mut output= prepare_output(&header, record_payload_length).expect("output vector preparation failed");
 
         let aad = make_tls13_aad(output.as_slice());
 
@@ -250,9 +251,9 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         Ok(output)
     }
 
-    fn derive_enc_stream_iv(&mut self, stream_id: u32) {
-        if !self.iv.contains_key(&stream_id){
-            derive_stream_iv(&mut self.iv, stream_id);
+    fn derive_enc_conn_iv(&mut self, conn_id: u32) {
+        if !self.iv.contains_key(&conn_id){
+            derive_connection_iv(&mut self.iv, conn_id);
         }
     }
 
@@ -361,9 +362,9 @@ impl MessageDecrypter for Tls13MessageDecrypter {
         })
     }
 
-    fn derive_dec_stream_iv(&mut self, stream_id: u32) {
-        if !self.iv.contains_key(&stream_id) {
-            derive_stream_iv(&mut self.iv, stream_id);
+    fn derive_dec_conn_iv(&mut self, conn_id: u32) {
+        if !self.iv.contains_key(&conn_id) {
+            derive_connection_iv(&mut self.iv, conn_id);
         }
     }
 

@@ -147,7 +147,7 @@ impl MessageDecrypter for GcmMessageDecrypter {
         todo!()
     }
 
-    fn derive_dec_stream_iv(&mut self, conn_id: u32) {
+    fn derive_dec_conn_iv(&mut self, conn_id: u32) {
         todo!()
     }
 }
@@ -167,18 +167,14 @@ impl MessageEncrypter for GcmMessageEncrypter {
             .map(|tag| payload.extend(tag.as_ref()))
             .map_err(|_| Error::EncryptError)?;
 
-        Ok(OpaqueMessage {
-            typ: m.typ,
-            version: m.version,
-            payload: Payload::new(payload),
-        })
+        Ok(payload)
     }
 
     fn encrypt_zc(&self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: StreamFrameHeader) -> Result<Vec<u8>, Error> {
         todo!()
     }
 
-    fn derive_enc_stream_iv(&mut self, conn_id: u32) {
+    fn derive_enc_conn_iv(&mut self, conn_id: u32) {
         todo!()
     }
 }
@@ -235,7 +231,7 @@ impl MessageDecrypter for ChaCha20Poly1305MessageDecrypter {
         todo!()
     }
 
-    fn derive_dec_stream_iv(&mut self, conn_id: u32) {
+    fn derive_dec_conn_iv(&mut self, conn_id: u32) {
         todo!()
     }
 }
@@ -253,18 +249,14 @@ impl MessageEncrypter for ChaCha20Poly1305MessageEncrypter {
             .seal_in_place_append_tag(nonce, aad, &mut buf)
             .map_err(|_| Error::EncryptError)?;
 
-        Ok(OpaqueMessage {
-            typ: m.typ,
-            version: m.version,
-            payload: Payload::new(buf),
-        })
+        Ok(buf)
     }
 
     fn encrypt_zc(&self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: StreamFrameHeader) -> Result<Vec<u8>, Error> {
         todo!()
     }
 
-    fn derive_enc_stream_iv(&mut self, conn_id: u32) {
+    fn derive_enc_conn_iv(&mut self, conn_id: u32) {
         todo!()
     }
 }

@@ -79,7 +79,10 @@ impl TcplsSession {
                 .expect("Establishment of TLS session failed");
             let _ = self.tls_conn.insert(Connection::from(client_conn));
             let _ = self.tls_config.insert(TlsConfig::Client(config.clone()));
+        }else {
+            self.tls_conn.as_mut().unwrap().record_layer.create_new_seq_space(new_id);
         }
+
     }
 
     pub fn create_tcpls_connection_object(&mut self, socket: TcpStream, is_server: bool) -> u32 {
