@@ -9,8 +9,8 @@ use crate::recvbuf::RecvBuf;
 use crate::tcpls::frame::StreamFrameHeader;
 use crate::tcpls::stream::SimpleIdHashMap;
 
-static SEQ_SOFT_LIMIT: u64 = (((2 as f64).powf(24.5) as i64) - 0xFFFF) as u64; //0xffff_ffff_ffff_0000u64;
-static SEQ_HARD_LIMIT: u64 = ((2 as f64).powf(24.5) as i64) as u64; //0xffff_ffff_ffff_fffeu64;
+static SEQ_SOFT_LIMIT: u64 = 0x16909E7; //(((2 as f64).powf(24.5) as i64) - 0xFFFF) as u64; //0xffff_ffff_ffff_0000u64;
+static SEQ_HARD_LIMIT: u64 = 0x16A09E6; //((2 as f64).powf(24.5) as i64) as u64; //0xffff_ffff_ffff_fffeu64;
 
 #[derive(PartialEq)]
 enum DirectionState {
