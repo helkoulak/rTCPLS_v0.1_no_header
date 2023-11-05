@@ -607,7 +607,7 @@ impl KeySchedule {
             .set_message_encrypter(Box::new(Tls13MessageEncrypter {
                 enc_key: aead::LessSafeKey::new(key),
                 iv: iv_map,
-                header_protector: match set_header_protection {
+                header_encrypter: match set_header_protection {
                     true => Some(HeaderProtector::new(self.suite.common.aead_algorithm, secret)),
                     false => None,
                 },
@@ -628,7 +628,7 @@ impl KeySchedule {
         Box::new(Tls13MessageDecrypter {
             dec_key: aead::LessSafeKey::new(key),
             iv: iv_map,
-            header_protector: match set_header_protection {
+            header_decrypter: match set_header_protection {
                 true => Some(HeaderProtector::new(self.suite.common.aead_algorithm, secret)),
                 false => None,
             },

@@ -116,13 +116,13 @@ impl fmt::Debug for Tls13CipherSuite {
 struct Tls13MessageEncrypter {
     enc_key: aead::LessSafeKey,
     iv: HashMap<u32, Iv>,
-    header_protector: Option<HeaderProtector>,
+    header_encrypter: Option<HeaderProtector>,
 }
 
 struct Tls13MessageDecrypter {
     dec_key: aead::LessSafeKey,
     iv: HashMap<u32, Iv>,
-    header_protector: Option<HeaderProtector>,
+    header_decrypter: Option<HeaderProtector>,
 }
 
 fn unpad_tls13(v: &mut Vec<u8>) -> ContentType {
@@ -246,7 +246,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
 
         let sample = output.rchunks(SAMPLE_PAYLOAD_LENGTH).next().unwrap();
         // Take the LSB 16 bytes of encrypted input as input sample for hash function
-        self.header_protector.unwrap().encrypt_in_place(sample, &mut output[TCPLS_HEADER_OFFSET..(TCPLS_HEADER_OFFSET + TCPLS_HEADER_SIZE)])?;
+        self.header_encrypter.unwrap().encrypt_in_place(sample, &mut output[TCPLS_HEADER_OFFSET..(TCPLS_HEADER_OFFSET + TCPLS_HEADER_SIZE)])?;
 
         Ok(output)
     }
