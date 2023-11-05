@@ -261,6 +261,9 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         self.header_encrypter.unwrap().encrypt_in_place(input, header)
     }
 
+    fn get_tag_length(&self) -> usize {
+        self.enc_key.algorithm().tag_len()
+    }
 }
 
 impl MessageDecrypter for Tls13MessageDecrypter {

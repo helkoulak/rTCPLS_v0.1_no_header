@@ -182,6 +182,10 @@ impl RecordLayer {
         self.message_decrypter.decrypt_header(input, header)
     }
 
+    pub fn get_tag_length(&self) -> usize {
+        self.message_encrypter.get_tag_length()
+    }
+
     /// Decrypt a TLS message.
     ///
     /// `encr` is a decoded message allegedly received from the peer.

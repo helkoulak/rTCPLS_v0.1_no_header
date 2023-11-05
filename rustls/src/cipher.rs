@@ -34,6 +34,7 @@ pub(crate) trait MessageEncrypter: Send + Sync {
     fn encrypt_zc(&self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: StreamFrameHeader) -> Result<Vec<u8>, Error>;
     fn derive_enc_conn_iv(&mut self, conn_id: u32);
     fn encrypt_header(&self, input: &[u8], header: &mut [u8]) -> Result<(), Error>;
+    fn get_tag_length(&self) -> usize;
 }
 
 impl dyn MessageEncrypter {
