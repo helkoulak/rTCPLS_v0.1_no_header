@@ -174,6 +174,14 @@ impl RecordLayer {
         self.conn_in_use
     }
 
+    pub fn encrypt_header(&mut self, input: &[u8], header: &mut [u8]) -> Result<(), Error> {
+        self.message_encrypter.encrypt_header(input, header)
+    }
+
+    pub fn decrypt_header(&mut self, input: &[u8], header: &mut [u8]) -> Result<(), Error> {
+        self.message_decrypter.decrypt_header(input, header)
+    }
+
     /// Decrypt a TLS message.
     ///
     /// `encr` is a decoded message allegedly received from the peer.

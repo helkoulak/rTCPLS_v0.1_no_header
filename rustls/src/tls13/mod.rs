@@ -257,6 +257,10 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         }
     }
 
+    fn encrypt_header(&self, input: &[u8], header: &mut [u8]) -> Result<(), Error> {
+        self.header_encrypter.unwrap().encrypt_in_place(input, header)
+    }
+
 }
 
 impl MessageDecrypter for Tls13MessageDecrypter {
@@ -366,6 +370,10 @@ impl MessageDecrypter for Tls13MessageDecrypter {
         if !self.iv.contains_key(&conn_id) {
             derive_connection_iv(&mut self.iv, conn_id);
         }
+    }
+
+    fn decrypt_header(&self, input: &[u8], header: &mut [u8]) -> Result<(), Error> {
+        self.header_decrypter.unwrap().decrypt_in_place(input, header)
     }
 
 }

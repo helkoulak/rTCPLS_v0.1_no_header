@@ -25,6 +25,7 @@ pub trait MessageDecrypter: Send + Sync {
     fn decrypt(&self, m: BorrowedOpaqueMessage, seq: u64, conn_id: u32) -> Result<PlainMessage, Error>;
    fn decrypt_zc(&self, msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, recv_buf: &mut RecvBuf) -> Result<PlainMessage, Error>;
     fn derive_dec_conn_iv(&mut self, conn_id: u32);
+    fn decrypt_header(&self, input: &[u8], header: &mut [u8]) -> Result<(), Error>;
 }
 
 /// Objects with this trait can encrypt TLS messages.
@@ -32,6 +33,7 @@ pub(crate) trait MessageEncrypter: Send + Sync {
     fn encrypt(&self, m: BorrowedPlainMessage, seq: u64, conn_id: u32) -> Result<Vec<u8>, Error>;
     fn encrypt_zc(&self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: StreamFrameHeader) -> Result<Vec<u8>, Error>;
     fn derive_enc_conn_iv(&mut self, conn_id: u32);
+    fn encrypt_header(&self, input: &[u8], header: &mut [u8]) -> Result<(), Error>;
 }
 
 impl dyn MessageEncrypter {
@@ -136,7 +138,7 @@ impl HeaderProtector {
     ///
     /// `header` must reference the header slice of the encrypted TLS record
     #[inline]
-    pub fn encrypt_in_place(
+    pub(crate) fn encrypt_in_place(
         &mut self,
         input: &[u8],
         header: &mut [u8],
@@ -166,7 +168,7 @@ impl HeaderProtector {
     /// [Header Protection Sample]: https://datatracker.ietf.org/doc/html/rfc9001#section-5.4.2
     /// [Packet Number Encoding and Decoding]: https://datatracker.ietf.org/doc/html/rfc9000#section-17.1
     #[inline]
-    pub fn decrypt_in_place(
+    pub(crate) fn decrypt_in_place(
         &mut self,
         input: &[u8],
         header: &mut [u8],
