@@ -59,6 +59,8 @@ impl MessageDeframer {
             return Ok(None);
         }
 
+        let tag_len = record_layer.get_tag_length();
+
         // We loop over records we've received but not processed yet.
         // For records that decrypt as `Handshake`, we keep the current state of the joined
         // handshake message payload in `self.joining_hs`, appending to it as we see records.
