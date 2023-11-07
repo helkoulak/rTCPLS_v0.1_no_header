@@ -234,7 +234,7 @@ impl TcplsSession {
             return Err(Error::HandshakeNotComplete);
         }
 
-        let stream = match self.streams.get_mut(stream_id) {
+        let stream = match tls_conn.streams.get_mut(stream_id) {
             Some(stream) => stream,
             None => return Err(Error::BufNotFound),
         };
