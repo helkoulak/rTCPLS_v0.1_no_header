@@ -9,7 +9,9 @@ use crate::msgs::codec;
 use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, PlainMessage};
 
 use ring::{aead, hkdf};
+use ring::rand::SecureRandom;
 use siphasher::sip::SipHasher;
+use crate::msgs::codec::Codec;
 
 
 use crate::recvbuf::RecvBuf;
@@ -25,15 +27,14 @@ pub trait MessageDecrypter: Send + Sync {
     fn decrypt(&self, m: BorrowedOpaqueMessage, seq: u64, conn_id: u32) -> Result<PlainMessage, Error>;
    fn decrypt_zc(&self, msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, recv_buf: &mut RecvBuf) -> Result<PlainMessage, Error>;
     fn derive_dec_conn_iv(&mut self, conn_id: u32);
-    fn decrypt_header(&self, input: &[u8], header: &mut [u8]) -> Result<(), Error>;
+    fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error>;
 }
 
 /// Objects with this trait can encrypt TLS messages.
 pub(crate) trait MessageEncrypter: Send + Sync {
     fn encrypt(&self, m: BorrowedPlainMessage, seq: u64, conn_id: u32) -> Result<Vec<u8>, Error>;
-    fn encrypt_zc(&self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: StreamFrameHeader) -> Result<Vec<u8>, Error>;
+    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: StreamFrameHeader) -> Result<Vec<u8>, Error>;
     fn derive_enc_conn_iv(&mut self, conn_id: u32);
-    fn encrypt_header(&self, input: &[u8], header: &mut [u8]) -> Result<(), Error>;
     fn get_tag_length(&self) -> usize;
 }
 
@@ -116,13 +117,13 @@ pub(crate) fn derive_connection_iv(iv: &mut HashMap<u32, Iv>, conn_id: u32){
         iv.insert(conn_id, Iv::copy(&id));
     }
 
-pub struct HeaderProtector{
+pub(crate) struct HeaderProtector{
     key: [u8;16],
     sip_hasher: SipHasher
 }
 
 impl HeaderProtector {
-    pub fn new(aead_algorithm: &'static aead::Algorithm, secret: &hkdf::Prk) -> Self {
+    pub(crate) fn new(aead_algorithm: &'static aead::Algorithm, secret: &hkdf::Prk) -> Self {
 
         let mut key= [0; 16];
         let x = secret.expand(&[b"tcpls header protection"],aead_algorithm).unwrap();
@@ -135,9 +136,9 @@ impl HeaderProtector {
 
     /// Adds TCPLS Header Protection.
     ///
-    /// `input` must reference the first 16 bytes of encrypted payload
+    /// `input` references the calculated tag bytes
     ///
-    /// `header` must reference the header slice of the encrypted TLS record
+    /// `header` references the header slice of the encrypted TLS record
     #[inline]
     pub(crate) fn encrypt_in_place(
         &mut self,
@@ -145,6 +146,18 @@ impl HeaderProtector {
         header: &mut [u8],
     ) -> Result<(), Error> {
        self.xor_in_place(input, header)
+    }
+
+    fn xor_in_place(
+        &mut self,
+        input: &[u8],
+        header: &mut [u8],
+    ) -> Result<(), Error> {
+        let out = self.sip_hasher.hash(input).to_be_bytes();
+        for i in 0..header.len() {
+            header[i] ^= out[i];
+        }
+        Ok(())
     }
 
     /// Removes QUIC Header Protection.
@@ -169,25 +182,30 @@ impl HeaderProtector {
     /// [Header Protection Sample]: https://datatracker.ietf.org/doc/html/rfc9001#section-5.4.2
     /// [Packet Number Encoding and Decoding]: https://datatracker.ietf.org/doc/html/rfc9000#section-17.1
     #[inline]
-    pub(crate) fn decrypt_in_place(
+    pub(crate) fn decrypt_in_output(
         &mut self,
         input: &[u8],
-        header: &mut [u8],
-    ) -> Result<(), Error> {
-        self.xor_in_place(input, header)
+        header: &[u8],
+    ) -> Result<[u8; 8], Error> {
+        self.xor_in_output(input, header)
     }
 
-    fn xor_in_place(
+    fn xor_in_output(
         &mut self,
         input: &[u8],
-        header: &mut [u8],
-    ) -> Result<(), Error> {
-        let out = self.sip_hasher.hash(input).to_be_bytes();
+        header: & [u8],
+    ) -> Result<[u8; 8], Error> {
+        let mut out = self.sip_hasher.hash(input).to_be_bytes();
         for i in 0..header.len() {
-            header[i] ^= out[i];
+            out[i] ^= header[i];
         }
-        Ok(())
+        Ok(out)
     }
+
+    pub(crate) fn calculate_hash(&mut self, input: &[u8]) -> [u8;8] {
+        self.sip_hasher.hash(input).to_be_bytes()
+    }
+
 }
 
 /// A `MessageEncrypter` which doesn't work.
@@ -198,12 +216,13 @@ impl MessageEncrypter for InvalidMessageEncrypter {
         Err(Error::EncryptError)
     }
 
-    fn encrypt_zc(&self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: StreamFrameHeader) -> Result<Vec<u8>, Error> {
+    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: StreamFrameHeader) -> Result<Vec<u8>, Error> {
         todo!()
     }
+    fn derive_enc_conn_iv(&mut self, conn_id: u32) {}
 
-    fn derive_enc_conn_iv(&mut self, conn_id: u32) {
-
+    fn get_tag_length(&self) -> usize {
+        todo!()
     }
 }
 
@@ -222,4 +241,34 @@ impl MessageDecrypter for InvalidMessageDecrypter {
     fn derive_dec_conn_iv(&mut self, stream_id: u32) {
 
     }
+
+    fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error> {
+        todo!()
+    }
 }
+
+#[test]
+fn test_header_protection() {
+    let mut header = [0u8;8];
+    let mut tag = [0u8;16];
+    let mut out = [0u8;8];
+    let mut key = [0u8;16];
+    let mut rng = ring::rand::SystemRandom::new();
+
+    rng.fill(&mut key).unwrap();
+    let mut header_protector = HeaderProtector{
+        key,
+        sip_hasher: SipHasher::new_with_key(&key),
+    };
+
+    for i in 1..20 {
+        rng.fill(&mut header).unwrap();
+        rng.fill(&mut tag).unwrap();
+
+        header_protector.encrypt_in_place(&tag, &mut header).expect("TODO: panic message");
+        out = header_protector.decrypt_in_output(&tag, &header).unwrap();
+
+        assert_eq!(out, header)
+    }
+}
+

@@ -373,7 +373,7 @@ impl OpenConnection {
 
     fn tls_write(&mut self) -> io::Result<usize> {
         self.tls_conn
-            .write_tls(&mut self.socket)
+            .write_tls(&mut self.socket, 0)
     }
 
     fn do_tls_write_and_handle_error(&mut self) {

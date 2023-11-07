@@ -342,17 +342,19 @@ impl StreamFrameHeader {
         &mut self,
         b: &mut octets::OctetsMut,
     ) -> Result<(), Error> {
-        /*match self.typ {
-            2 => b.put_u8(0x02).unwrap(),
-            3 => b.put_u8(0x03).unwrap(),
-            4 => b.put_u8(0x04).unwrap(),
-            _ => return Err(Error::General("Wrong value for stream frame type".parse().unwrap()))
-        }*/
         b.put_u32(self.chunk_num).unwrap();
         b.put_u16(self.offset_step).unwrap();
         b.put_u16(self.stream_id).unwrap();
 
         Ok(())
+    }
+
+    pub fn decode_stream_header(b: &mut octets::Octets) -> Self {
+        Self{
+            chunk_num: b.get_u32().unwrap(),
+            offset_step: b.get_u16().unwrap(),
+            stream_id: b.get_u16().unwrap(),
+        }
     }
 
    /* pub fn get_header_size_reverse(b: &mut octets::Octets) -> usize {

@@ -145,7 +145,7 @@ impl TlsClient {
 
     fn do_write(&mut self) {
 
-        self.tcpls_session.tls_conn.as_mut().unwrap().write_tls(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket)
+        self.tcpls_session.tls_conn.as_mut().unwrap().write_tls(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket, 0)
             .unwrap();
     }
 

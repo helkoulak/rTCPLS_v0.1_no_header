@@ -386,7 +386,7 @@ impl<Data> ConnectionCommon<Data> {
         let mut rdlen = 0;
 
         loop {
-            while self.wants_write() {
+            while self.wants_write(0) {
                 wrlen += self.write_tls(io, 0)?;
             }
 
@@ -749,14 +749,14 @@ impl<Data> ConnectionCore<Data> {
     }
 
     fn process_tcpls_payload(&mut self, app_buffers: &mut RecvBufMap) {
-       let mut output = app_buffers.get_or_create_recv_buffer(self
+      /* let mut output = app_buffers.get_or_create_recv_buffer(self
                                                                   .common_state
                                                                   .record_layer
-                                                                  .get_stream_in_use(), None);
+                                                                  .get__in_use(), None);
         let mut b = octets::Octets::with_slice_reverse(output.as_ref());
         let header_len = StreamFrameHeader::get_header_size_reverse(&mut b);
         output.truncate_processed(header_len);
-
+*/
     }
 
     pub(crate) fn export_keying_material<T: AsMut<[u8]>>(

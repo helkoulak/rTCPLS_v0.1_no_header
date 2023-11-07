@@ -5,10 +5,10 @@ use crate::tcpls::stream::{DEFAULT_BUFFER_LIMIT, SimpleIdHashMap};
 /// This is the receive buffer of a stream
 #[derive(Default)]
 pub struct RecvBuf {
-    id: u64,
+    pub id: u64,
     data: Vec<u8>,
     /// where the next chunk will be appended
-    pub offset: usize,
+    pub offset: u64,
 
     // Length of last copied data chunk
     len: usize,
@@ -45,18 +45,18 @@ impl RecvBuf {
         }
     }
     pub fn get_mut(&mut self) -> &mut [u8] {
-        &mut self.data[self.offset..]
+        &mut self.data[self.offset as usize..]
     }
 
     pub fn as_ref(&mut self) -> & [u8] {
-        & self.data[self.offset..]
+        & self.data[self.offset as usize..]
     }
 
     pub fn get_mut_consumed(&mut self) -> &mut [u8] {
         &mut self.data[self.consumed..]
     }
 
-    pub  fn get_offset(&self) -> usize {
+    pub  fn get_offset(&self) -> u64 {
         self.offset
     }
 
@@ -83,13 +83,13 @@ impl RecvBuf {
     }
 
     pub fn consume(&mut self, used: usize) {
-        self.offset += used;
+        self.offset += used as u64;
     }
 
-    pub fn truncate_processed(&mut self, processed: usize) { self.offset -= processed; }
+    pub fn truncate_processed(&mut self, processed: usize) { self.offset -= processed as u64; }
 
 
-    pub fn data_length(&self) -> usize {
+    pub fn data_length(&self) -> u64 {
         self.offset
     }
 }

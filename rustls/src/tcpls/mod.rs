@@ -128,16 +128,24 @@ impl TcplsSession {
     }
 
     pub fn stream_send_and_attach(&mut self, stream_id: u32, input: &[u8], fin: bool, attach_to: u32) -> Result<usize, Error> {
-        let tls_connection = self.tls_conn.as_mut().unwrap();
 
-        if tls_connection.is_handshaking() {
+        if self.tls_conn.as_ref().unwrap().is_handshaking() {
             return Err(Error::HandshakeNotComplete);
         }
 
-        // Get existing stream or create a new one.
-        let stream = tls_connection.streams.get_or_create(stream_id)?;
+        // make sure you have the required stream
+        match self.tls_conn.as_mut().unwrap().streams.get_or_create(stream_id) {
+            Ok(stream ) => (),
+            Err(e) => return Err(e),
+        } ;
 
-        let conn_id = match stream.attched_to {
+        let conn_id = match self
+            .tls_conn
+            .as_mut()
+            .unwrap()
+            .streams
+            .get_or_create(stream_id)
+            .unwrap().attched_to {
             Some(conn_id) => {
                 if attach_to != conn_id {
                     return Err(Error::General(format!("Stream is already attached to connection {}", conn_id)))
@@ -146,22 +154,37 @@ impl TcplsSession {
                 }
             },
             None => {
-                stream.attched_to = Some(attach_to);
+                self
+                    .tls_conn
+                    .as_mut()
+                    .unwrap()
+                    .streams
+                    .get_or_create(stream_id)
+                    .unwrap().attched_to = Some(attach_to);
                 attach_to
             },
         };
 
-
         // set id of tcp connection to decide on crypto context and record seq space
-        tls_connection.set_connection_in_use(conn_id);
+            self.tls_conn.as_mut().unwrap().set_connection_in_use(conn_id);
 
-        // check if key update message should be sent
-        tls_connection.perhaps_write_key_update(stream_id);
+
+
+            // check if key update message should be sent
+            self.tls_conn.as_mut().unwrap().perhaps_write_key_update(stream_id);
+
+
 
         // we're respecting limit for plaintext data -- so we'll
         // be out by whatever the cipher+record overhead is.  That's a
         // constant and predictable amount.
-        let cap = stream.send.apply_limit(input.len());
+        let cap = self
+            .tls_conn
+            .as_mut()
+            .unwrap()
+            .streams
+            .get_or_create(stream_id)
+            .unwrap().send.apply_limit(input.len());
 
         if cap == 0 && !input.is_empty() {
             return Err(Error::Done);
@@ -191,25 +214,31 @@ impl TcplsSession {
                 0
             };
             let mut header = StreamFrameHeader {
-                chunk_num: stream.next_snd_pkt_num,
+                chunk_num: self
+                    .tls_conn
+                    .as_mut()
+                    .unwrap()
+                    .streams
+                    .get_or_create(stream_id)
+                    .unwrap().next_snd_pkt_num,
                 // Set the fin bit as the msb of offset as difference between current and previous offset is maximum 16384
-                offset_step: (((fin_bit & 0x01) << 15) as u16) | stream.send.get_offset_diff(),
+                offset_step: (((fin_bit & 0x01) << 15) as u16) | self.tls_conn.as_mut().unwrap().streams.get_or_create(stream_id).unwrap().send.get_offset_diff(),
                 stream_id: stream_id as u16,
             };
 
 
             // Close connection once we start to run out of
             // sequence space.
-            if tls_connection.record_layer.wants_close_before_encrypt() {
-                tls_connection.send_close_notify();
+            if self.tls_conn.as_mut().unwrap().record_layer.wants_close_before_encrypt() {
+                self.tls_conn.as_mut().unwrap().send_close_notify();
             }
 
             // Refuse to wrap counter at all costs.
-            if tls_connection.record_layer.encrypt_exhausted() {
+            if self.tls_conn.as_mut().unwrap().record_layer.encrypt_exhausted() {
                 return Err(Error::EncryptError);
             }
 
-            let em = tls_connection
+            let em = self.tls_conn.as_mut().unwrap()
                 .record_layer
                 .encrypt_outgoing_zc(BorrowedPlainMessage {
                     typ: ContentType::ApplicationData,
@@ -218,9 +247,27 @@ impl TcplsSession {
                 }, header);
 
 
-            buffered += stream.send.append(em);
-            stream.next_snd_pkt_num += 1;
-            stream.send.advance_offset(chunk.len() as u64);
+            buffered += self
+                .tls_conn
+                .as_mut()
+                .unwrap()
+                .streams
+                .get_or_create(stream_id)
+                .unwrap().send.append(em);
+            self
+                .tls_conn
+                .as_mut()
+                .unwrap()
+                .streams
+                .get_or_create(stream_id)
+                .unwrap().next_snd_pkt_num += 1;
+            self
+                .tls_conn
+                .as_mut()
+                .unwrap()
+                .streams
+                .get_or_create(stream_id)
+                .unwrap().send.advance_offset(chunk.len() as u64);
         }
 
         Ok(buffered)

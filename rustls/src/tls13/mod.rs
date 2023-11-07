@@ -12,6 +12,7 @@ use crate::suites::{BulkAlgorithm, CipherSuiteCommon, SupportedCipherSuite};
 use ring::aead;
 
 use std::fmt;
+use std::io::Read;
 use octets::BufferError;
 use crate::recvbuf::RecvBuf;
 use crate::tcpls::frame::{TCPLS_HEADER_SIZE, StreamFrameHeader, SAMPLE_PAYLOAD_LENGTH};
@@ -116,13 +117,13 @@ impl fmt::Debug for Tls13CipherSuite {
 struct Tls13MessageEncrypter {
     enc_key: aead::LessSafeKey,
     iv: HashMap<u32, Iv>,
-    header_encrypter: Option<HeaderProtector>,
+    header_encrypter: HeaderProtector,
 }
 
 struct Tls13MessageDecrypter {
     dec_key: aead::LessSafeKey,
     iv: HashMap<u32, Iv>,
-    header_decrypter: Option<HeaderProtector>,
+    header_decrypter: HeaderProtector,
 }
 
 fn unpad_tls13(v: &mut Vec<u8>) -> ContentType {
@@ -189,7 +190,7 @@ fn make_tls13_aad(header: &[u8]) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE_WITH_TCP
 const TLS13_AAD_SIZE: usize = 1 + 2 + 2 ;
 const TLS13_AAD_SIZE_WITH_TCPLS_HEADER: usize = 1 + 2 + 2 + TCPLS_HEADER_SIZE;
 
-pub const TCPLS_HEADER_OFFSET: usize = 5;
+const TCPLS_HEADER_OFFSET: usize = 5;
 
 impl MessageEncrypter for Tls13MessageEncrypter {
     fn encrypt(&self, m: BorrowedPlainMessage, seq: u64, stream_id: u32) -> Result<Vec<u8>, Error> {
@@ -225,9 +226,10 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         Ok(output)
     }
 
-    fn encrypt_zc(&self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, header: StreamFrameHeader) -> Result<Vec<u8>, Error> {
-
-        let mut payload_len = msg.payload.len() + 1 + self.enc_key.algorithm().tag_len();
+    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, header: StreamFrameHeader) -> Result<Vec<u8>, Error> {
+        let tag_length =  self.enc_key.algorithm().tag_len();
+        let header_protecter = &mut self.header_encrypter;
+        let mut payload_len = msg.payload.len() + 1 + tag_length;
         let record_payload_length = payload_len + TCPLS_HEADER_SIZE;
         let mut input = vec![0; payload_len];
         input.extend_from_slice(msg.payload);
@@ -239,14 +241,20 @@ impl MessageEncrypter for Tls13MessageEncrypter {
 
         let aad = make_tls13_aad(output.as_slice());
 
-
         self.enc_key
             .seal_in_output_append_tag(nonce, aad, &input, &mut output, PACKET_OVERHEAD + TCPLS_HEADER_SIZE)
             .map_err(|_| Error::General("encrypt failed".to_string()))?;
 
-        let sample = output.rchunks(SAMPLE_PAYLOAD_LENGTH).next().unwrap();
-        // Take the LSB 16 bytes of encrypted input as input sample for hash function
-        self.header_encrypter.unwrap().encrypt_in_place(sample, &mut output[TCPLS_HEADER_OFFSET..(TCPLS_HEADER_OFFSET + TCPLS_HEADER_SIZE)])?;
+        // Take the LSBs of calculated tag as input sample for hash function
+        let sample = output.rchunks(tag_length).next().unwrap();
+
+        let mut i = TCPLS_HEADER_OFFSET;
+        // Calculate hash(sample) XOR header
+        for byte in header_protecter.calculate_hash(sample){
+            output[i] ^= byte;
+            i += 1;
+        }
+
 
         Ok(output)
     }
@@ -255,10 +263,6 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         if !self.iv.contains_key(&conn_id){
             derive_connection_iv(&mut self.iv, conn_id);
         }
-    }
-
-    fn encrypt_header(&self, input: &[u8], header: &mut [u8]) -> Result<(), Error> {
-        self.header_encrypter.unwrap().encrypt_in_place(input, header)
     }
 
     fn get_tag_length(&self) -> usize {
@@ -313,14 +317,14 @@ impl MessageDecrypter for Tls13MessageDecrypter {
     }
 
 
-    fn decrypt_zc(&self, mut msg: BorrowedOpaqueMessage, seq: u64, stream_id: u32, recv_buf: &mut RecvBuf) -> Result<PlainMessage, Error> {
+    fn decrypt_zc(&self, mut msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, recv_buf: &mut RecvBuf) -> Result<PlainMessage, Error> {
         let payload = msg.payload;
         if payload.len() < self.dec_key.algorithm().tag_len() {
             return Err(Error::DecryptError);
         }
 
-        let nonce = make_nonce(self.iv.get(&stream_id).unwrap(), seq);
-        let aad = make_tls13_aad_no_header(payload.len());
+        let nonce = make_nonce(self.iv.get(&conn_id).unwrap(), seq);
+        let aad = make_tls13_aad(payload);
 
         let mut output = recv_buf.get_mut();
 
@@ -336,7 +340,7 @@ impl MessageDecrypter for Tls13MessageDecrypter {
             .len();
 
         // truncate tag
-        for b in &mut output[plain_len.. plain_len + self.dec_key.algorithm().tag_len()] {
+        for b in &mut output[plain_len..] {
             *b = 0;
         }
 
@@ -364,7 +368,6 @@ impl MessageDecrypter for Tls13MessageDecrypter {
             payload: match msg.typ {
                 ContentType::ApplicationData => Payload::new(Vec::new()),
                 _ => Payload::new_from_vec(output[..new_size].to_vec()),
-
             },
         })
     }
@@ -375,8 +378,8 @@ impl MessageDecrypter for Tls13MessageDecrypter {
         }
     }
 
-    fn decrypt_header(&self, input: &[u8], header: &mut [u8]) -> Result<(), Error> {
-        self.header_decrypter.unwrap().decrypt_in_place(input, header)
+    fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error> {
+        self.header_decrypter.decrypt_in_output(input, header)
     }
 
 }

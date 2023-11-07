@@ -11,6 +11,7 @@ use crate::msgs::{codec, message};
 use crate::msgs::message::{BorrowedOpaqueMessage, MessageError};
 use crate::record_layer::{Decrypted, RecordLayer};
 use crate::recvbuf::{RecvBuf, RecvBufMap};
+use crate::tcpls::frame::{StreamFrameHeader, TCPLS_HEADER_SIZE};
 use crate::tcpls::stream::SimpleIdHashMap;
 
 /// This deframer works to reconstruct TLS messages from a stream of arbitrary-sized reads.
@@ -58,14 +59,17 @@ impl MessageDeframer {
         } else if self.used == 0 {
             return Ok(None);
         }
-
         let tag_len = record_layer.get_tag_length();
+        let mut header_decoded = StreamFrameHeader::default();
+        let mut payload_offset = 0;
+        let mut payload_length = 0;
+        let mut end = 0;
 
         // We loop over records we've received but not processed yet.
         // For records that decrypt as `Handshake`, we keep the current state of the joined
         // handshake message payload in `self.joining_hs`, appending to it as we see records.
         let expected_len = loop {
-            let start = match &self.joining_hs {
+            let mut start = match &self.joining_hs {
                 Some(meta) => {
                     match meta.expected_len {
                         // We're joining a handshake payload, and we've seen the full payload.
@@ -76,53 +80,72 @@ impl MessageDeframer {
                         _ => meta.message.end,
                     }
                 }
-                None => 0,
+                None => end,
             };
 
-            // Does our `buf` contain a full message?  It does if it is big enough to
-            // contain a header, and that header has a length which falls within `buf`.
-            // If so, deframe it and place the message onto the frames output queue.
-            let mut rd = codec::Reader::init(&self.buf[start..self.used]);
-            let m = match BorrowedOpaqueMessage::read(&mut rd) {
-                Ok((ct,ver, s, len)) => BorrowedOpaqueMessage {
-                    typ: ct,
-                    version: ver,
-                    payload: &self.buf[s..s + len as usize],
-                },
-                Err(msg_err) => {
-                    let err_kind = match msg_err {
-                        MessageError::TooShortForHeader | MessageError::TooShortForLength => {
-                            return Ok(None)
-                        }
-                        MessageError::InvalidEmptyPayload => InvalidMessage::InvalidEmptyPayload,
-                        MessageError::MessageTooLarge => InvalidMessage::MessageTooLarge,
-                        MessageError::InvalidContentType => InvalidMessage::InvalidContentType,
-                        MessageError::UnknownProtocolVersion => {
-                            InvalidMessage::UnknownProtocolVersion
-                        }
-                    };
 
-                    return Err(self.set_err(err_kind));
+                // Does our `buf` contain a full message?  It does if it is big enough to
+                // contain a header, and that header has a length which falls within `buf`.
+                // If so, deframe it and place the message onto the frames output queue.
+                let mut rd = codec::Reader::init(&self.buf[start..self.used]);
+                let m = match BorrowedOpaqueMessage::read(&mut rd) {
+                    Ok((ct, ver, offset, len)) => {
+                        payload_offset = offset;
+                        payload_length = len;
+                        BorrowedOpaqueMessage {
+                            typ: ct,
+                            version: ver,
+                            payload: & self.buf[payload_offset..payload_offset + payload_length],
+                        }
+                    },
+                    Err(msg_err) => {
+                        let err_kind = match msg_err {
+                            MessageError::TooShortForHeader | MessageError::TooShortForLength => {
+                                return Ok(None)
+                            }
+                            MessageError::InvalidEmptyPayload => InvalidMessage::InvalidEmptyPayload,
+                            MessageError::MessageTooLarge => InvalidMessage::MessageTooLarge,
+                            MessageError::InvalidContentType => InvalidMessage::InvalidContentType,
+                            MessageError::UnknownProtocolVersion => {
+                                InvalidMessage::UnknownProtocolVersion
+                            }
+                        };
+
+                        return Err(self.set_err(err_kind));
+                    }
+                };
+
+
+                // If we're in the middle of joining a handshake payload and the next message is not of
+                // type handshake, yield an error. Return CCS messages immediately without decrypting.
+                end = start + rd.used();
+                if m.typ == ContentType::ChangeCipherSpec && self.joining_hs.is_none() {
+                    // This is unencrypted. We check the contents later.
+                    let plain = m.into_plain_message();
+                    self.discard(end);
+                    return Ok(Some(Deframed {
+                        want_close_before_decrypt: false,
+                        aligned: true,
+                        trial_decryption_finished: false,
+                        message: plain,
+                    }));
                 }
-            };
 
-            // If we're in the middle of joining a handshake payload and the next message is not of
-            // type handshake, yield an error. Return CCS messages immediately without decrypting.
-            let end = start + rd.used();
-            if m.typ == ContentType::ChangeCipherSpec && self.joining_hs.is_none() {
-                // This is unencrypted. We check the contents later.
-                let plain = m.into_plain_message();
-                self.discard(end);
-                return Ok(Some(Deframed {
-                    want_close_before_decrypt: false,
-                    aligned: true,
-                    trial_decryption_finished: false,
-                    message: plain,
-                }));
-            }
+                // process tcpls header and choose recv_buf accordingly
+                let output = record_layer.decrypt_header(& self.buf[(payload_offset + payload_length - tag_len)..payload_offset + payload_length],
+                                            &self.buf[payload_offset..payload_offset + TCPLS_HEADER_SIZE]).expect("decrypting header failed");
+                let mut b = octets::Octets::with_slice(&output);
+                header_decoded = StreamFrameHeader::decode_stream_header(&mut b);
+                let mut recv_buf = app_buffers.get_or_create_recv_buffer(header_decoded.stream_id as u64, None);
+                if recv_buf.next_recv_pkt_num != header_decoded.chunk_num {
+                    continue
+                }else {
+                    recv_buf.offset += header_decoded.offset_step as u64;
+                }
+
 
             // Decrypt the encrypted message (if necessary).
-            let msg = match record_layer.decrypt_incoming_zc(m, app_buffers.get_or_create_recv_buffer(0, None)) {
+            let msg = match record_layer.decrypt_incoming_zc(m, recv_buf) {
                 Ok(Some(decrypted)) => {
                     let Decrypted {
                         want_close_before_decrypt,
@@ -531,7 +554,7 @@ impl MessageDeframerMap {
 #[cfg(test)]
 mod tests {
     use super::MessageDeframer;
-    use crate::msgs::message::{MAX_WIRE_SIZE, Message, OpaqueMessage, PlainMessage};
+    use crate::msgs::message::{MAX_WIRE_SIZE, Message, PlainMessage};
     use crate::record_layer::RecordLayer;
     use crate::{ContentType, Error, InvalidMessage};
 

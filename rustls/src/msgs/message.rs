@@ -4,6 +4,7 @@ use crate::error::{Error, InvalidMessage};
 use crate::msgs::alert::AlertMessagePayload;
 use crate::msgs::base::Payload;
 use crate::msgs::ccs::ChangeCipherSpecPayload;
+use crate::msgs::codec;
 use crate::msgs::codec::{Codec, Reader};
 use crate::msgs::enums::AlertLevel;
 use crate::msgs::handshake::HandshakeMessagePayload;
@@ -166,7 +167,7 @@ impl OpaqueMessage {
 /// This type owns all memory for its interior parts except for the payload. It is used to read from I/O
 /// buffers as well as for decryption. It can be converted
 /// into a `Message` by decoding the payload.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct BorrowedOpaqueMessage<'a> {
     pub typ: ContentType,
     pub version: ProtocolVersion,
@@ -176,7 +177,7 @@ pub struct BorrowedOpaqueMessage<'a> {
 impl<'a> BorrowedOpaqueMessage<'a> {
     /// `MessageError` allows callers to distinguish between valid prefixes (might
     /// become valid if we read more data) and invalid data.
-    pub fn read(r: &mut Reader) -> Result<(ContentType, ProtocolVersion, usize, u16), MessageError> {
+    pub fn read(r: &mut Reader) -> Result<(ContentType, ProtocolVersion, usize, usize), MessageError> {
         let typ = ContentType::read(r).map_err(|_| MessageError::TooShortForHeader)?;
         // Don't accept any new content-types.
         if let ContentType::Unknown(_) = typ {
@@ -219,7 +220,7 @@ impl<'a> BorrowedOpaqueMessage<'a> {
             typ,
             version,
             start_offset,
-            len,
+            len as usize,
             ))
     }
 

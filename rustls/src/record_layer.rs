@@ -174,11 +174,7 @@ impl RecordLayer {
         self.conn_in_use
     }
 
-    pub fn encrypt_header(&mut self, input: &[u8], header: &mut [u8]) -> Result<(), Error> {
-        self.message_encrypter.encrypt_header(input, header)
-    }
-
-    pub fn decrypt_header(&mut self, input: &[u8], header: &mut [u8]) -> Result<(), Error> {
+    pub fn decrypt_header(&mut self, input: &[u8], header: & [u8]) -> Result<[u8; 8], Error> {
         self.message_decrypter.decrypt_header(input, header)
     }
 
@@ -286,7 +282,10 @@ impl RecordLayer {
         {
             Ok(plaintext) => {
                 self.seq_map.as_mut_ref(conn_id).read_seq += 1;
-                self.seq_map.as_mut_ref(conn_id).next_recv_pkt_num += 1;
+                if recv_buf.id > 0 {
+                    recv_buf.next_recv_pkt_num += 1;
+                }
+
                 Ok(Some(Decrypted {
                     want_close_before_decrypt,
                     plaintext,
@@ -326,7 +325,6 @@ impl RecordLayer {
         let conn_id = self.conn_in_use;
         let seq = self.seq_map.as_ref(conn_id).write_seq;
         self.seq_map.as_mut_ref(conn_id).write_seq += 1;
-        self.seq_map.as_mut_ref(conn_id).next_snd_pkt_num += 1;
         /// prepare crypto context for the specified connection
         if !self.is_handshaking && conn_id != 0 {
             self.message_encrypter.derive_enc_conn_iv(conn_id);
