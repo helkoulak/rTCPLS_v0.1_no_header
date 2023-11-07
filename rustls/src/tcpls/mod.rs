@@ -225,10 +225,7 @@ impl TcplsSession {
 
         Ok(buffered)
     }
-
-    pub fn get_or_create_stream(&mut self, id: u32) -> Result<&mut stream::Stream, Error> {
-        self.streams.get_or_create(id)
-    }
+    
 
     pub fn send_on_connection(&mut self, stream_id: u64) -> Result<usize, Error> {
         let tls_conn = self.tls_conn.as_mut().unwrap();
