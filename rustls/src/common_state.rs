@@ -302,7 +302,7 @@ impl CommonState {
         }
 
         let em = self.record_layer.encrypt_outgoing_zc(m, StreamFrameHeader::default());
-        self.sendable_tls.append(em, None, None);
+        self.sendable_tls.append(em);
     }
 
     /// Encrypt and send some plaintext `data`.  `limit` controls
@@ -320,7 +320,7 @@ impl CommonState {
                     .append_limited_copy(data),
                 Limit::No => self
                     .sendable_plaintext
-                    .append(data.to_vec(), None, None),
+                    .append(data.to_vec()),
             };
             return len;
         }
@@ -402,13 +402,13 @@ impl CommonState {
         }
 
         while let Some(buf) = self.sendable_plaintext.pop() {
-            self.send_plain(&buf.fragment, Limit::No);
+            self.send_plain(&buf, Limit::No);
         }
     }
 
     // Put m into sendable_tls for writing.
     fn queue_tls_message(&mut self, m: OpaqueMessage) {
-        self.sendable_tls.append(m.encode(), None, None);
+        self.sendable_tls.append(m.encode());
     }
 
     /// Send a raw TLS message, fragmenting it if needed.
@@ -446,7 +446,7 @@ impl CommonState {
     }
 
     pub(crate) fn take_received_plaintext(&mut self, bytes: Payload) {
-        self.received_plaintext.append(bytes.0, None, None);
+        self.received_plaintext.append(bytes.0);
     }
 
     #[cfg(feature = "tls12")]
@@ -603,7 +603,7 @@ impl CommonState {
 
     pub(crate) fn perhaps_write_key_update(&mut self) {
         if let Some(message) = self.queued_key_update_message.take() {
-            self.sendable_tls.append(message, None, None);
+            self.sendable_tls.append(message);
         }
     }
 }

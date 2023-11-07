@@ -220,7 +220,7 @@ impl TcplsSession {
                 }, header);
 
 
-            buffered += stream.send.append(em, Some(stream.send.get_current_offset()), Some(chunk.len()));
+            buffered += stream.send.append(em);
             stream.next_snd_pkt_num += 1;
             stream.send.advance_offset(chunk.len() as u64);
         }
@@ -261,7 +261,7 @@ impl TcplsSession {
                 .get_mut(&conn_id)
                 .unwrap()
                 .socket
-                .write(chunk.fragment.as_slice())
+                .write(chunk.as_slice())
                 .unwrap();
             stream.send.consume_chunk(sent, chunk);
             len -= sent;
