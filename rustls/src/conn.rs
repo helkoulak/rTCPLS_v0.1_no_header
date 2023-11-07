@@ -41,8 +41,8 @@ impl Connection {
     /// Writes TLS messages to `wr`.
     ///
     /// See [`ConnectionCommon::write_tls()`] for more information.
-    pub fn write_tls(&mut self, wr: &mut dyn io::Write) -> Result<usize, io::Error> {
-        self.sendable_tls.write_to(wr)
+    pub fn write_tls(&mut self, wr: &mut dyn io::Write, id: u32) -> Result<usize, io::Error> {
+        self.streams.get_or_create(id).unwrap().send.write_to(wr)
     }
 
     /// Returns an object that allows reading plaintext.
@@ -237,13 +237,13 @@ pub(crate) trait PlaintextSink {
 
 impl<T> PlaintextSink for ConnectionCommon<T> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        Ok(self.send_some_plaintext(buf))
+        Ok(self.send_some_plaintext(buf, 0))
     }
 
     fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
         let mut sz = 0;
         for buf in bufs {
-            sz += self.send_some_plaintext(buf);
+            sz += self.send_some_plaintext(buf, 0);
         }
         Ok(sz)
     }
@@ -387,7 +387,7 @@ impl<Data> ConnectionCommon<Data> {
 
         loop {
             while self.wants_write() {
-                wrlen += self.write_tls(io)?;
+                wrlen += self.write_tls(io, 0)?;
             }
 
             if !until_handshaked && wrlen > 0 {
@@ -418,7 +418,7 @@ impl<Data> ConnectionCommon<Data> {
                     // In case we have an alert to send describing this error,
                     // try a last-gasp write -- but don't predate the primary
                     // error.
-                    let _ignored = self.write_tls(io);
+                    let _ignored = self.write_tls(io, 0);
 
                     return Err(io::Error::new(io::ErrorKind::InvalidData, e));
                 }
@@ -522,8 +522,8 @@ impl<Data> ConnectionCommon<Data> {
     ///
     /// After this function returns, the connection buffer may not yet be fully flushed. The
     /// [`CommonState::wants_write`] function can be used to check if the output buffer is empty.
-    pub fn write_tls(&mut self, wr: &mut dyn io::Write) -> Result<usize, io::Error> {
-        self.sendable_tls.write_to(wr)
+    pub fn write_tls(&mut self, wr: &mut dyn io::Write, id: u32) -> Result<usize, io::Error> {
+        self.streams.get_or_create(id).unwrap().send.write_to(wr)
     }
 
     /// Derives key material from the agreed connection secrets.
@@ -639,7 +639,7 @@ impl<Data> ConnectionCore<Data> {
         }
 
         self.state = Ok(state);
-        Ok(self.common_state.current_io_state())
+        Ok(self.common_state.current_io_state(0))
     }
 
     /// Pull a message out of the deframer and send any messages that need to be sent as a result.

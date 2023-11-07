@@ -309,7 +309,7 @@ pub(super) fn emit_fake_ccs(sent_tls13_fake_ccs: &mut bool, common: &mut CommonS
         version: ProtocolVersion::TLSv1_2,
         payload: MessagePayload::ChangeCipherSpec(ChangeCipherSpecPayload {}),
     };
-    common.send_msg(m, false);
+    common.send_msg(m, false, 0);
 }
 
 fn validate_encrypted_extensions(
@@ -740,7 +740,7 @@ fn emit_certificate_tls13(
         }),
     };
     transcript.add_message(&m);
-    common.send_msg(m, true);
+    common.send_msg(m, true, 0);
 }
 
 fn emit_certverify_tls13(
@@ -763,7 +763,7 @@ fn emit_certverify_tls13(
     };
 
     transcript.add_message(&m);
-    common.send_msg(m, true);
+    common.send_msg(m, true, 0);
     Ok(())
 }
 
@@ -783,7 +783,7 @@ fn emit_finished_tls13(
     };
 
     transcript.add_message(&m);
-    common.send_msg(m, true);
+    common.send_msg(m, true, 0);
 }
 
 fn emit_end_of_early_data_tls13(transcript: &mut HandshakeHash, common: &mut CommonState) {
@@ -800,7 +800,7 @@ fn emit_end_of_early_data_tls13(transcript: &mut HandshakeHash, common: &mut Com
     };
 
     transcript.add_message(&m);
-    common.send_msg(m, true);
+    common.send_msg(m, true, 0);
 }
 
 struct ExpectFinished {

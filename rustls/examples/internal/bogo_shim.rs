@@ -644,7 +644,7 @@ fn handle_err(err: Error) -> ! {
 
 fn flush(sess: &mut Connection, conn: &mut net::TcpStream) {
     while sess.wants_write() {
-        match sess.write_tls(conn) {
+        match sess.write_tls(conn, 0) {
             Err(err) => {
                 println!("IO error: {:?}", err);
                 process::exit(0);
@@ -764,7 +764,7 @@ fn exec(opts: &Options, mut sess: Connection, count: usize) {
 
             let mut one_byte = [0u8];
             let mut cursor = io::Cursor::new(&mut one_byte[..]);
-            sess.write_tls(&mut cursor).unwrap();
+            sess.write_tls(&mut cursor, 0).unwrap();
             conn.write_all(&one_byte)
                 .expect("IO error");
 

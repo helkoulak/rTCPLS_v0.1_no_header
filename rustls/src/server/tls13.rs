@@ -497,7 +497,7 @@ mod client_hello {
 
         trace!("sending server hello {:?}", sh);
         transcript.add_message(&sh);
-        cx.common.send_msg(sh, false);
+        cx.common.send_msg(sh, false, 0);
 
         // Start key schedule
         let key_schedule_pre_handshake = if let Some(psk) = resuming_psk {
@@ -538,7 +538,7 @@ mod client_hello {
             version: ProtocolVersion::TLSv1_2,
             payload: MessagePayload::ChangeCipherSpec(ChangeCipherSpecPayload {}),
         };
-        common.send_msg(m, false);
+        common.send_msg(m, false, 0);
     }
 
     fn emit_hello_retry_request(
@@ -572,7 +572,7 @@ mod client_hello {
         trace!("Requesting retry {:?}", m);
         transcript.rollup_for_hrr();
         transcript.add_message(&m);
-        common.send_msg(m, false);
+        common.send_msg(m, false, 0);
     }
 
     fn decide_if_early_data_allowed(
@@ -680,7 +680,7 @@ mod client_hello {
 
         trace!("sending encrypted extensions {:?}", ee);
         transcript.add_message(&ee);
-        cx.common.send_msg(ee, true);
+        cx.common.send_msg(ee, true, 0);
         Ok(early_data)
     }
 
@@ -724,7 +724,7 @@ mod client_hello {
 
         trace!("Sending CertificateRequest {:?}", m);
         transcript.add_message(&m);
-        cx.common.send_msg(m, true);
+        cx.common.send_msg(m, true, 0);
         Ok(true)
     }
 
@@ -774,7 +774,7 @@ mod client_hello {
 
         trace!("sending certificate {:?}", c);
         transcript.add_message(&c);
-        common.send_msg(c, true);
+        common.send_msg(c, true, 0);
     }
 
     fn emit_certificate_verify_tls13(
@@ -806,7 +806,7 @@ mod client_hello {
 
         trace!("sending certificate-verify {:?}", m);
         transcript.add_message(&m);
-        common.send_msg(m, true);
+        common.send_msg(m, true, 0);
         Ok(())
     }
 
@@ -832,7 +832,7 @@ mod client_hello {
         trace!("sending finished {:?}", m);
         transcript.add_message(&m);
         let hash_at_server_fin = transcript.get_current_hash();
-        cx.common.send_msg(m, true);
+        cx.common.send_msg(m, true, 0);
 
         // Now move to application data keys.  Read key change is deferred until
         // the Finish message is received & validated.
@@ -1138,7 +1138,7 @@ impl ExpectFinished {
         };
 
         trace!("sending new ticket {:?} (stateless: {})", m, stateless);
-        cx.common.send_msg(m, true);
+        cx.common.send_msg(m, true, 0);
         Ok(())
     }
 }

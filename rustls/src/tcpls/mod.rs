@@ -35,7 +35,6 @@ pub struct TcplsSession {
     pub tls_config: Option<TlsConfig>,
     pub tls_conn: Option<Connection>,
     pub tcp_connections: HashMap<u32, TcpConnection>,
-    pub streams: StreamMap,
     pub next_conn_id: u32,
     pub address_map: AddressMap,
     pub is_server: bool,
@@ -50,7 +49,6 @@ impl TcplsSession {
             tls_config: None,
             tls_conn: None,
             tcp_connections: HashMap::new(),
-            streams: StreamMap::new(),
             next_conn_id: 0,
             address_map: AddressMap::new(),
             is_server,
@@ -137,7 +135,7 @@ impl TcplsSession {
         }
 
         // Get existing stream or create a new one.
-        let stream = self.streams.get_or_create(stream_id)?;
+        let stream = tls_connection.streams.get_or_create(stream_id)?;
 
         let conn_id = match stream.attched_to {
             Some(conn_id) => {
@@ -158,7 +156,7 @@ impl TcplsSession {
         tls_connection.set_connection_in_use(conn_id);
 
         // check if key update message should be sent
-        tls_connection.perhaps_write_key_update();
+        tls_connection.perhaps_write_key_update(stream_id);
 
         // we're respecting limit for plaintext data -- so we'll
         // be out by whatever the cipher+record overhead is.  That's a

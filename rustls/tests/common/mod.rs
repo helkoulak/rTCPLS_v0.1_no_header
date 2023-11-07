@@ -147,7 +147,7 @@ where
     while left.wants_write() {
         let sz = {
             let into_buf: &mut dyn io::Write = &mut &mut buf[..];
-            left.write_tls(into_buf).unwrap()
+            left.write_tls(into_buf, 0).unwrap()
         };
         total += sz;
         if sz == 0 {

@@ -449,7 +449,7 @@ fn emit_certificate(
     };
 
     transcript.add_message(&cert);
-    common.send_msg(cert, false);
+    common.send_msg(cert, false, 0);
 }
 
 fn emit_clientkx(transcript: &mut HandshakeHash, common: &mut CommonState, pubkey: &PublicKey) {
@@ -467,7 +467,7 @@ fn emit_clientkx(transcript: &mut HandshakeHash, common: &mut CommonState, pubke
     };
 
     transcript.add_message(&ckx);
-    common.send_msg(ckx, false);
+    common.send_msg(ckx, false, 0);
 }
 
 fn emit_certverify(
@@ -492,7 +492,7 @@ fn emit_certverify(
     };
 
     transcript.add_message(&m);
-    common.send_msg(m, false);
+    common.send_msg(m, false, 0);
     Ok(())
 }
 
@@ -502,7 +502,7 @@ fn emit_ccs(common: &mut CommonState) {
         payload: MessagePayload::ChangeCipherSpec(ChangeCipherSpecPayload {}),
     };
 
-    common.send_msg(ccs, false);
+    common.send_msg(ccs, false, 0);
 }
 
 fn emit_finished(
@@ -523,7 +523,7 @@ fn emit_finished(
     };
 
     transcript.add_message(&f);
-    common.send_msg(f, true);
+    common.send_msg(f, true, 0);
 }
 
 struct ServerKxDetails {

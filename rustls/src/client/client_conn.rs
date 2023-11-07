@@ -600,7 +600,7 @@ impl ClientConnection {
             .check_write(data.len())
             .map(|sz| {
                 self.inner
-                    .send_early_plaintext(&data[..sz])
+                    .send_early_plaintext(&data[..sz], 0)
             })
     }
 

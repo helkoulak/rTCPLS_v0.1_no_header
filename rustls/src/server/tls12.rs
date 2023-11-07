@@ -358,7 +358,7 @@ mod client_hello {
 
         trace!("sending server hello {:?}", sh);
         transcript.add_message(&sh);
-        cx.common.send_msg(sh, false);
+        cx.common.send_msg(sh, false, 0);
         Ok(ep.send_ticket)
     }
 
@@ -376,7 +376,7 @@ mod client_hello {
         };
 
         transcript.add_message(&c);
-        common.send_msg(c, false);
+        common.send_msg(c, false, 0);
     }
 
     fn emit_cert_status(transcript: &mut HandshakeHash, common: &mut CommonState, ocsp: &[u8]) {
@@ -391,7 +391,7 @@ mod client_hello {
         };
 
         transcript.add_message(&c);
-        common.send_msg(c, false);
+        common.send_msg(c, false, 0);
     }
 
     fn emit_server_kx(
@@ -430,7 +430,7 @@ mod client_hello {
         };
 
         transcript.add_message(&m);
-        common.send_msg(m, false);
+        common.send_msg(m, false, 0);
         Ok(kx)
     }
 
@@ -471,7 +471,7 @@ mod client_hello {
 
         trace!("Sending CertificateRequest {:?}", m);
         transcript.add_message(&m);
-        cx.common.send_msg(m, false);
+        cx.common.send_msg(m, false, 0);
         Ok(true)
     }
 
@@ -485,7 +485,7 @@ mod client_hello {
         };
 
         transcript.add_message(&m);
-        common.send_msg(m, false);
+        common.send_msg(m, false, 0);
     }
 }
 
@@ -788,7 +788,7 @@ fn emit_ticket(
     };
 
     transcript.add_message(&m);
-    cx.common.send_msg(m, false);
+    cx.common.send_msg(m, false, 0);
     Ok(())
 }
 
@@ -798,7 +798,7 @@ fn emit_ccs(common: &mut CommonState) {
         payload: MessagePayload::ChangeCipherSpec(ChangeCipherSpecPayload {}),
     };
 
-    common.send_msg(m, false);
+    common.send_msg(m, false, 0);
 }
 
 fn emit_finished(
@@ -819,7 +819,7 @@ fn emit_finished(
     };
 
     transcript.add_message(&f);
-    common.send_msg(f, true);
+    common.send_msg(f, true, 0);
 }
 
 struct ExpectFinished {

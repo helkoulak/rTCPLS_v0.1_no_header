@@ -185,8 +185,8 @@ impl StreamMap {
     }
 
     /// Returns the stream with the given ID if it exists.
-    pub fn get(&self, id: u64) -> Option<&Stream> {
-        self.streams.get(&id)
+    pub fn get(&self, id: u32) -> Option<&Stream> {
+        self.streams.get(&(id as u64))
     }
 
     /// Returns the mutable stream with the given ID if it exists.
