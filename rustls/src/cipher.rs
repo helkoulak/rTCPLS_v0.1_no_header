@@ -281,3 +281,42 @@ fn test_header_protection() {
     }
 }
 
+
+#[test]
+
+fn test_building_header_from_header_dec() {
+    let mut encrypted_with_header_protected= [0u8;52];
+    let mut encrypted_with_header_unprotected= [0u8;52];
+    let mut key = [0u8;16];
+    let mut rng = ring::rand::SystemRandom::new();
+    let header_offset = 5;
+    let tag_length = 16;
+
+    rng.fill(&mut key).unwrap();
+    let mut header_protector = HeaderProtector{
+        key,
+        sip_hasher: SipHasher::new_with_key(&key),
+    };
+        rng.fill(&mut encrypted_with_header_unprotected).unwrap();
+
+        let mut a = octets::Octets::with_slice_at_offset(&encrypted_with_header_unprotected, header_offset);
+
+        let header_before_protection = StreamFrameHeader::decode_stream_header(&mut a);
+
+        let sample = encrypted_with_header_unprotected.rchunks(tag_length).next().unwrap(); // use tag bytes as sample
+
+        encrypted_with_header_protected = encrypted_with_header_unprotected.clone();
+
+
+        let mut i = header_offset; // Header offset
+        // Calculate hash(sample) XOR header
+        for byte in header_protector.calculate_hash(sample) {
+            encrypted_with_header_protected[i] ^= byte;
+            i += 1;
+        }
+        let header_recostructed = StreamFrameHeader::decode_stream_header_from_slice(
+            &header_protector.decrypt_in_output(sample, &encrypted_with_header_protected[5..13]).unwrap());
+
+        assert_eq!(header_recostructed, header_before_protection)
+}
+
