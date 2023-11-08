@@ -74,7 +74,7 @@ impl RecvBuf {
     }
 
     pub fn capacity(&self) -> usize {
-        self.data.len() - self.offset
+        self.data.len() - self.offset as usize
     }
 
     /// For a proposed write of `len` bytes, how many
