@@ -249,8 +249,8 @@ impl MessageDecrypter for InvalidMessageDecrypter {
 
 #[test]
 fn test_header_protection() {
-    let mut header = [0u8;8];
-    let mut tag = [0u8;16];
+    let mut encrypted_with_header_protected= [0u8;52];
+    let mut encrypted_with_header_unprotected= [0u8;52];
     let mut out = [0u8;8];
     let mut key = [0u8;16];
     let mut rng = ring::rand::SystemRandom::new();
@@ -262,13 +262,22 @@ fn test_header_protection() {
     };
 
     for i in 1..20 {
-        rng.fill(&mut header).unwrap();
-        rng.fill(&mut tag).unwrap();
+        rng.fill(&mut encrypted_with_header_unprotected).unwrap();
 
-        header_protector.encrypt_in_place(&tag, &mut header).expect("TODO: panic message");
-        out = header_protector.decrypt_in_output(&tag, &header).unwrap();
+        let sample = encrypted_with_header_unprotected.rchunks(16).next().unwrap();
 
-        assert_eq!(out, header)
+        encrypted_with_header_protected = encrypted_with_header_unprotected.clone();
+
+
+        let mut i = 5; // Header offset
+        // Calculate hash(sample) XOR header
+        for byte in header_protector.calculate_hash(sample) {
+            encrypted_with_header_protected[i] ^= byte;
+            i += 1;
+        }
+        out = header_protector.decrypt_in_output(sample, &encrypted_with_header_protected[5..13]).unwrap();
+
+        assert_eq!(out, encrypted_with_header_unprotected[5..13])
     }
 }
 
