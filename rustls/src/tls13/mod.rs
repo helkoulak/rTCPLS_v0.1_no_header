@@ -13,6 +13,7 @@ use ring::aead;
 
 use std::fmt;
 use std::io::Read;
+use ring::rand::SecureRandom;
 use octets::BufferError;
 use crate::recvbuf::RecvBuf;
 use crate::tcpls::frame::{TCPLS_HEADER_SIZE, StreamFrameHeader, SAMPLE_PAYLOAD_LENGTH};
@@ -381,5 +382,27 @@ impl MessageDecrypter for Tls13MessageDecrypter {
     fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error> {
         self.header_decrypter.decrypt_in_output(input, header)
     }
+
+}
+
+#[test]
+fn test_truncate_tag_unpad_tls13_from_slice() {
+    let mut rng = ring::rand::SystemRandom::new();
+    let mut array = [0u8;32];
+    let zeros = [0u8;11];
+    rng.fill(&mut array).unwrap();
+    array[20] = ContentType::ApplicationData.get_u8();
+
+    for b in &mut array[21..] {
+        *b = 0;
+    }
+
+    let mut new_size = 0;
+    let mut typ = ContentType::ChangeCipherSpec;
+    (typ, new_size)  = unpad_tls13_from_slice(&mut array);
+
+    assert_eq!(typ, ContentType::ApplicationData);
+    assert_eq!(new_size , 20);
+    assert_eq!(zeros, array[21..])
 
 }
