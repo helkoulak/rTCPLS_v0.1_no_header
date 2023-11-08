@@ -180,11 +180,18 @@ fn prepare_output(header: & StreamFrameHeader, payload_length: usize) -> Result<
     Ok(output)
 }
 
-fn make_tls13_aad(header: &[u8]) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE_WITH_TCPLS_HEADER]> {
-    ring::aead::Aad::from([header[0], header[1], header[2], header[3]
-        , header[4], header[5], header[6], header[7]
-        , header[8], header[9], header[10], header[11]
-        , header[12]])
+fn make_tls13_aad_for_enc(output_buf: &[u8]) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE_WITH_TCPLS_HEADER]> {
+    ring::aead::Aad::from([output_buf[0], output_buf[1], output_buf[2], output_buf[3]
+        , output_buf[4], output_buf[5], output_buf[6], output_buf[7]
+        , output_buf[8], output_buf[9], output_buf[10], output_buf[11]
+        , output_buf[12]])
+}
+
+fn make_tls13_aad_for_dec(len: usize, header: & StreamFrameHeader ) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE_WITH_TCPLS_HEADER]> {
+    ring::aead::Aad::from([0x17, 0x3, 0x3, (len >> 8) as u8
+        , len as u8, (header.chunk_num >> 24) as u8 , ( header.chunk_num >> 16) as u8, ( header.chunk_num >> 8) as u8
+        , header.chunk_num as u8, (header.offset_step >> 8) as u8, header.offset_step as u8, (header.stream_id >> 8) as u8
+        , header.stream_id as u8])
 }
 
 // https://datatracker.ietf.org/doc/html/rfc8446#section-5.2
@@ -240,7 +247,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
 
        let mut output= prepare_output(&header, record_payload_length).expect("output vector preparation failed");
 
-        let aad = make_tls13_aad(output.as_slice());
+        let aad = make_tls13_aad_for_enc(output.as_slice());
 
         self.enc_key
             .seal_in_output_append_tag(nonce, aad, &input, &mut output, PACKET_OVERHEAD + TCPLS_HEADER_SIZE)
