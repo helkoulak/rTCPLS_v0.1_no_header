@@ -246,6 +246,7 @@ impl RecordLayer {
         &mut self,
         encr: BorrowedOpaqueMessage,
         recv_buf: &mut RecvBuf,
+        tcpls_header: &StreamFrameHeader,
     ) -> Result<Option<Decrypted>, Error> {
         if self.decrypt_state != DirectionState::Active {
             return Ok(Some(Decrypted {
@@ -278,7 +279,7 @@ impl RecordLayer {
         }
         match self
             .message_decrypter
-            .decrypt_zc(encr, self.seq_map.as_ref(conn_id).read_seq, conn_id, recv_buf)
+            .decrypt_zc(encr, self.seq_map.as_ref(conn_id).read_seq, conn_id, recv_buf, &tcpls_header)
         {
             Ok(plaintext) => {
                 self.seq_map.as_mut_ref(conn_id).read_seq += 1;

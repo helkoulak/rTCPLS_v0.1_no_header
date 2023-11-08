@@ -146,7 +146,7 @@ impl MessageDeframer {
 
 
             // Decrypt the encrypted message (if necessary).
-            let msg = match record_layer.decrypt_incoming_zc(m, recv_buf) {
+            let msg = match record_layer.decrypt_incoming_zc(m, recv_buf, &header_decoded) {
                 Ok(Some(decrypted)) => {
                     let Decrypted {
                         want_close_before_decrypt,
