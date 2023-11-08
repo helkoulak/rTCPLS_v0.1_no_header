@@ -73,6 +73,10 @@ impl RecvBuf {
        self.data.len()
     }
 
+    pub fn capacity(&self) -> usize {
+        self.data.len() - self.offset
+    }
+
     /// For a proposed write of `len` bytes, how many
     /// bytes should we actually write to adhere to the
     /// capacity of the buffer?
