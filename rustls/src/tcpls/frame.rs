@@ -322,7 +322,7 @@ fn parse_stream_change_frame(b: &mut octets::Octets) -> octets::Result<Frame> {
         next_offset,
     })
 }
-#[derive(Default)]
+#[derive(Default, PartialEq, Debug)]
 pub struct StreamFrameHeader {
     pub chunk_num: u32,
     pub offset_step: u16,
@@ -354,6 +354,14 @@ impl StreamFrameHeader {
             chunk_num: b.get_u32().unwrap(),
             offset_step: b.get_u16().unwrap(),
             stream_id: b.get_u16().unwrap(),
+        }
+    }
+
+    pub fn decode_stream_header_from_slice(b: &[u8]) -> Self {
+        Self{
+            chunk_num: u32::from_be_bytes(b[0..4].try_into().unwrap()),
+            offset_step: u16::from_be_bytes(b[4..6].try_into().unwrap()),
+            stream_id: u16::from_be_bytes(b[6..8].try_into().unwrap()),
         }
     }
 
