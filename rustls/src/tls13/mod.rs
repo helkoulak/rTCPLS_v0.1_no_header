@@ -325,42 +325,40 @@ impl MessageDecrypter for Tls13MessageDecrypter {
     }
 
 
-    fn decrypt_zc(&self, mut msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, recv_buf: &mut RecvBuf) -> Result<PlainMessage, Error> {
+    fn decrypt_zc(&self, mut msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, recv_buf: &mut RecvBuf, tcpls_header: &StreamFrameHeader) -> Result<PlainMessage, Error> {
         let payload = msg.payload;
         if payload.len() < self.dec_key.algorithm().tag_len() {
             return Err(Error::DecryptError);
         }
 
         let nonce = make_nonce(self.iv.get(&conn_id).unwrap(), seq);
-        let aad = make_tls13_aad(payload);
-
-        let mut output = recv_buf.get_mut();
+        let aad = make_tls13_aad_for_dec(payload.len(), &tcpls_header);
 
         // output buffer must be at least as big as the input buffer
-        if output.len() < payload.len() {
+        if recv_buf.capacity() < payload.len() {
             return Err(Error::BufferTooShort);
         }
 
         let plain_len = self
             .dec_key
-            .open_in_output(nonce, aad, payload, output)
+            .open_in_output(nonce, aad, payload, recv_buf.get_mut())
             .map_err(|_| Error::DecryptError)?
             .len();
 
         // truncate tag
-        for b in &mut output[plain_len..] {
+        for b in &mut recv_buf.get_mut()[plain_len..] {
             *b = 0;
         }
 
-        if output[..plain_len].len() > MAX_FRAGMENT_LEN + 1 {
+        if recv_buf.get_mut()[..plain_len].len() > MAX_FRAGMENT_LEN + 1 {
             return Err(Error::PeerSentOversizedRecord);
         }
 
 
         let mut new_size = 0;
-        (msg.typ, new_size)  = unpad_tls13_from_slice(output);
+        (msg.typ, new_size)  = unpad_tls13_from_slice(recv_buf.get_mut());
 
-        let payload_len_no_type = output[..new_size].len();
+        let payload_len_no_type = recv_buf.get_mut()[..new_size].len();
         
         if msg.typ == ContentType::Unknown(0) {
             return Err(PeerMisbehaved::IllegalTlsInnerPlaintext.into());
@@ -375,7 +373,10 @@ impl MessageDecrypter for Tls13MessageDecrypter {
             version: ProtocolVersion::TLSv1_3,
             payload: match msg.typ {
                 ContentType::ApplicationData => Payload::new(Vec::new()),
-                _ => Payload::new_from_vec(output[..new_size].to_vec()),
+                _ => {
+                    recv_buf.offset -= recv_buf.get_mut()[..new_size].len() as u64; // reduce offset as non app data will be overwritten
+                    Payload::new_from_vec(recv_buf.get_mut()[..new_size].to_vec())
+                },
             },
         })
     }
