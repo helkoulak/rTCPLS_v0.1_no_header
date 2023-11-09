@@ -306,8 +306,10 @@ impl CommonState {
             return;
         }
 
-        let em = self.record_layer.encrypt_outgoing_zc(m, StreamFrameHeader::default());
-        self.streams.get_or_create(id).unwrap().send.append(em);
+        let mut stream =  self.streams.get_or_create(id).unwrap();
+        let header = stream.build_header(m.payload.len() as u16, 0);
+        let em = self.record_layer.encrypt_outgoing_zc(m, &header);
+        stream.send.append(em);
     }
 
     /// Encrypt and send some plaintext `data`.  `limit` controls

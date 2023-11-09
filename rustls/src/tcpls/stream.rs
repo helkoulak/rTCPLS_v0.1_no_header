@@ -33,6 +33,7 @@ use smallvec::SmallVec;
 use crate::Error;
 use crate::msgs::deframer::MessageDeframer;
 use crate::recvbuf::RecvBuf;
+use crate::tcpls::frame::StreamFrameHeader;
 use crate::vecbuf::ChunkVecBuffer;
 
 pub const DEFAULT_BUFFER_LIMIT: usize = 64 * 1024;
@@ -83,6 +84,18 @@ impl Stream {
     /// Returns true if the stream has data to send.
     pub fn is_flushable(&self) -> bool {
         !self.send.is_empty()
+    }
+
+    pub fn build_header(&mut self, len: u16, fin: u8) -> StreamFrameHeader {
+        let header = StreamFrameHeader {
+            chunk_num: self.next_snd_pkt_num,
+            offset_step: (((fin & 0x01) << 15) as u16) | len,
+            stream_id: self.id,
+        };
+
+        self.next_snd_pkt_num += 1;
+        self.send.advance_offset(len as u64);
+        header
     }
 
     /*/// Returns true if the stream is complete.
