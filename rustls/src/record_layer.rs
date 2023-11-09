@@ -320,7 +320,7 @@ impl RecordLayer {
     }
 
 
-    pub(crate) fn encrypt_outgoing_zc(&mut self, plain: BorrowedPlainMessage, tcpls_header: StreamFrameHeader) -> Vec<u8> {
+    pub(crate) fn encrypt_outgoing_zc(&mut self, plain: BorrowedPlainMessage, tcpls_header: &StreamFrameHeader) -> Vec<u8> {
         debug_assert!(self.encrypt_state == DirectionState::Active);
         assert!(!self.encrypt_exhausted());
         let conn_id = self.conn_in_use;

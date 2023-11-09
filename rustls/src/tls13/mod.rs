@@ -234,7 +234,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         Ok(output)
     }
 
-    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, header: StreamFrameHeader) -> Result<Vec<u8>, Error> {
+    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, header: &StreamFrameHeader) -> Result<Vec<u8>, Error> {
         let tag_length =  self.enc_key.algorithm().tag_len();
         let header_protecter = &mut self.header_encrypter;
         let mut payload_len = msg.payload.len() + 1 + tag_length;
