@@ -41,7 +41,7 @@ pub const DEFAULT_BUFFER_LIMIT: usize = 64 * 1024;
 
 pub struct Stream {
 
-    pub id: u64,
+    pub id: u16,
 
     /**
      * the stream should be cleaned up the next time tcpls_send is called
@@ -62,7 +62,7 @@ pub struct Stream {
 }
 
 impl Stream {
-    pub fn new(id: u64) -> Self {
+    pub fn new(id: u16) -> Self {
         Self{
             id,
             marked_for_close: false,
@@ -220,7 +220,7 @@ impl StreamMap {
     /// count limits. If one of these limits is violated, the `StreamLimit`
     /// error is returned.
     pub fn get_or_create(
-        &mut self, stream_id: u32,
+        &mut self, stream_id: u16,
     ) -> Result<&mut Stream, Error> {
         let (stream, is_new_and_writable) = match self.streams.entry(stream_id as u64) {
             hash_map::Entry::Vacant(v) => {
@@ -229,7 +229,7 @@ impl StreamMap {
                     return Err(Error::Done);
                 }
 
-                let s = Stream::new((stream_id as u64));
+                let s = Stream::new((stream_id));
 
                 let is_writable = s.is_writable();
 

@@ -41,7 +41,7 @@ impl Connection {
     /// Writes TLS messages to `wr`.
     ///
     /// See [`ConnectionCommon::write_tls()`] for more information.
-    pub fn write_tls(&mut self, wr: &mut dyn io::Write, id: u32) -> Result<usize, io::Error> {
+    pub fn write_tls(&mut self, wr: &mut dyn io::Write, id: u16) -> Result<usize, io::Error> {
         self.streams.get_or_create(id).unwrap().send.write_to(wr)
     }
 
@@ -522,7 +522,7 @@ impl<Data> ConnectionCommon<Data> {
     ///
     /// After this function returns, the connection buffer may not yet be fully flushed. The
     /// [`CommonState::wants_write`] function can be used to check if the output buffer is empty.
-    pub fn write_tls(&mut self, wr: &mut dyn io::Write, id: u32) -> Result<usize, io::Error> {
+    pub fn write_tls(&mut self, wr: &mut dyn io::Write, id: u16) -> Result<usize, io::Error> {
         self.streams.get_or_create(id).unwrap().send.write_to(wr)
     }
 

@@ -215,12 +215,12 @@ impl CommonState {
     ///
     /// If internal buffers are too small, this function will not accept
     /// all the data.
-    pub(crate) fn send_some_plaintext(&mut self, data: &[u8], id: u32) -> usize {
-        self.perhaps_write_key_update(id);
+    pub(crate) fn send_some_plaintext(&mut self, data: &[u8], id: u16) -> usize {
+        self.perhaps_write_key_update();
         self.send_plain(data, Limit::Yes, id)
     }
 
-    pub(crate) fn send_early_plaintext(&mut self, data: &[u8], id: u32) -> usize {
+    pub(crate) fn send_early_plaintext(&mut self, data: &[u8], id: u16) -> usize {
         debug_assert!(self.early_traffic);
         debug_assert!(self.record_layer.is_encrypting());
 
@@ -252,7 +252,7 @@ impl CommonState {
 
     /// Fragment `m`, encrypt the fragments, and then queue
     /// the encrypted fragments for sending.
-    pub(crate) fn send_msg_encrypt(&mut self, m: PlainMessage, id: u32) {
+    pub(crate) fn send_msg_encrypt(&mut self, m: PlainMessage, id: u16) {
         let iter = self
             .message_fragmenter
             .fragment_message(&m);
@@ -262,7 +262,7 @@ impl CommonState {
     }
 
     /// Like send_msg_encrypt, but operate on an appdata directly.
-    fn send_appdata_encrypt(&mut self, payload: &[u8], limit: Limit, id: u32) -> usize {
+    fn send_appdata_encrypt(&mut self, payload: &[u8], limit: Limit, id: u16) -> usize {
         // Here, the limit on sendable_tls applies to encrypted data,
         // but we're respecting it for plaintext data -- so we'll
         // be out by whatever the cipher+record overhead is.  That's a
@@ -290,7 +290,7 @@ impl CommonState {
         len
     }
 
-    fn send_single_fragment(&mut self, m: BorrowedPlainMessage, id: u32) {
+    fn send_single_fragment(&mut self, m: BorrowedPlainMessage, id: u16) {
         // Close connection once we start to run out of
         // sequence space.
         if self
@@ -317,7 +317,7 @@ impl CommonState {
     ///
     /// Returns the number of bytes written from `data`: this might
     /// be less than `data.len()` if buffer limits were exceeded.
-    fn send_plain(&mut self, data: &[u8], limit: Limit, id: u32) -> usize {
+    fn send_plain(&mut self, data: &[u8], limit: Limit, id: u16) -> usize {
         if !self.may_send_application_data {
             // If we haven't completed handshaking, buffer
             // plaintext to send once we do.
@@ -402,7 +402,7 @@ impl CommonState {
     /// [`Connection::writer`]: crate::Connection::writer
     /// [`Connection::write_tls`]: crate::Connection::write_tls
     /// [`Connection::process_new_packets`]: crate::Connection::process_received
-    pub fn set_buffer_limit(&mut self, limit: Option<usize>, id: u32) {
+    pub fn set_buffer_limit(&mut self, limit: Option<usize>, id: u16) {
         self.sendable_plaintext.set_limit(limit);
         self.streams.get_or_create(id).unwrap().send.set_limit(limit);
     }
@@ -420,12 +420,12 @@ impl CommonState {
     }
 
     // Put m into sendable_tls for writing.
-    fn queue_tls_message(&mut self, m: OpaqueMessage, id: u32) {
+    fn queue_tls_message(&mut self, m: OpaqueMessage, id: u16) {
         self.streams.get_or_create(id).unwrap().send.append(m.encode());
     }
 
     /// Send a raw TLS message, fragmenting it if needed.
-    pub(crate) fn send_msg(&mut self, m: Message, must_encrypt: bool, id: u32) {
+    pub(crate) fn send_msg(&mut self, m: Message, must_encrypt: bool, id: u16) {
         #[cfg(feature = "quic")]
         {
             if let Protocol::Quic = self.protocol {
