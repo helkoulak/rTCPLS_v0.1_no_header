@@ -610,13 +610,17 @@ impl CommonState {
         let message = PlainMessage::from(Message::build_key_update_notify());
         self.queued_key_update_message = Some(
             self.record_layer
-                .encrypt_outgoing_zc(message.borrow(), StreamFrameHeader::default()),
+                .encrypt_outgoing_zc(message.borrow(), &(self
+                    .streams
+                    .get_or_create(0)
+                    .unwrap()
+                    .build_header(message.payload.0.len() as u16, 0)))
         );
     }
 
-    pub(crate) fn perhaps_write_key_update(&mut self, id: u32) {
+    pub(crate) fn perhaps_write_key_update(&mut self) {
         if let Some(message) = self.queued_key_update_message.take() {
-            self.streams.get_or_create(id).unwrap().send.append(message);
+            self.streams.get_or_create(0).unwrap().send.append(message);
         }
     }
 }
