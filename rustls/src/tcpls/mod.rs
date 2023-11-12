@@ -218,7 +218,7 @@ impl TcplsSession {
     }
     
 
-    pub fn send_on_connection(&mut self, conn_id: u16) -> Result<usize, Error> {
+    pub fn send_on_connection(&mut self, conn_id: u32) -> Result<usize, Error> {
         let tls_conn = self.tls_conn.as_mut().unwrap();
 
         if tls_conn.is_handshaking() {
@@ -226,33 +226,37 @@ impl TcplsSession {
         }
 
 
-        let stream = match tls_conn.streams.get_mut(conn_id) {
-            Some(stream) => stream,
-            None => return Err(Error::BufNotFound),
-        };
-
-        let conn_id = stream.attched_to;
-
-        if stream.send.is_empty() {
-            return Ok(0);
-        }
-
-        let mut len = stream.send.len();
-        let mut sent = 0;
         let mut done = 0;
-        while len > 0 {
-            let chunk = stream.send.pop().unwrap();
+        let socket = &mut self
+            .tcp_connections
+            .get_mut(&(conn_id as u64))
+            .unwrap()
+            .socket;
+        let open_streams = tls_conn.streams.open_streams();
+        for id in open_streams{
 
-            sent = self
-                .tcp_connections
-                .get_mut(&(conn_id as u64))
-                .unwrap()
-                .socket
-                .write(chunk.as_slice())
-                .unwrap();
-            stream.send.consume_chunk(sent, chunk);
-            len -= sent;
-            done += sent;
+            let stream = match tls_conn.streams.get_mut(id as u16) {
+                Some(stream) => {
+                    if stream.attched_to != conn_id || stream.send.is_empty(){
+                        continue
+                    }
+                    stream
+                },
+                None => return Err(Error::BufNotFound),
+            };
+
+            let mut len = stream.send.len();
+            let mut sent = 0;
+            while len > 0 {
+                let chunk = stream.send.pop().unwrap();
+
+                sent = socket
+                    .write(chunk.as_slice())
+                    .unwrap();
+                stream.send.consume_chunk(sent, chunk);
+                len -= sent;
+                done += sent;
+            }
         }
 
         Ok(done)
@@ -271,7 +275,7 @@ impl TcplsSession {
     }
 
 
-    pub fn stream_recv_on_connection(
+    pub fn stream_recv(
         &mut self,
         conn_id: u32,
         app_buffers: &mut RecvBufMap,
@@ -282,7 +286,7 @@ impl TcplsSession {
         if tls_conn.is_handshaking() {
             return Err(Error::HandshakeNotComplete);
         }
-
+        // Set deframer buffer to use
         tls_conn.set_connection_in_use(conn_id);
 
             match tls_conn.process_new_packets(app_buffers) {
