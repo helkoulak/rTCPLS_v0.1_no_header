@@ -29,6 +29,7 @@ use ring::constant_time;
 use std::sync::Arc;
 
 pub(super) use client_hello::CompleteClientHelloHandling;
+use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
 mod client_hello {
     use crate::enums::SignatureScheme;
@@ -41,6 +42,7 @@ mod client_hello {
     use crate::msgs::handshake::{ClientHelloPayload, ServerHelloPayload};
     use crate::msgs::handshake::{ServerExtension, ServerKeyExchangePayload};
     use crate::sign;
+    use crate::tcpls::stream::DEFAULT_STREAM_ID;
     use crate::verify::DigitallySignedStruct;
 
     use super::*;
@@ -358,7 +360,7 @@ mod client_hello {
 
         trace!("sending server hello {:?}", sh);
         transcript.add_message(&sh);
-        cx.common.send_msg(sh, false, 0);
+        cx.common.send_msg(sh, false, DEFAULT_STREAM_ID);
         Ok(ep.send_ticket)
     }
 
@@ -376,7 +378,7 @@ mod client_hello {
         };
 
         transcript.add_message(&c);
-        common.send_msg(c, false, 0);
+        common.send_msg(c, false, DEFAULT_STREAM_ID);
     }
 
     fn emit_cert_status(transcript: &mut HandshakeHash, common: &mut CommonState, ocsp: &[u8]) {
@@ -391,7 +393,7 @@ mod client_hello {
         };
 
         transcript.add_message(&c);
-        common.send_msg(c, false, 0);
+        common.send_msg(c, false, DEFAULT_STREAM_ID);
     }
 
     fn emit_server_kx(
@@ -430,7 +432,7 @@ mod client_hello {
         };
 
         transcript.add_message(&m);
-        common.send_msg(m, false, 0);
+        common.send_msg(m, false, DEFAULT_STREAM_ID);
         Ok(kx)
     }
 
@@ -471,7 +473,7 @@ mod client_hello {
 
         trace!("Sending CertificateRequest {:?}", m);
         transcript.add_message(&m);
-        cx.common.send_msg(m, false, 0);
+        cx.common.send_msg(m, false, DEFAULT_STREAM_ID);
         Ok(true)
     }
 
@@ -485,7 +487,7 @@ mod client_hello {
         };
 
         transcript.add_message(&m);
-        common.send_msg(m, false, 0);
+        common.send_msg(m, false, DEFAULT_STREAM_ID);
     }
 }
 
@@ -788,7 +790,7 @@ fn emit_ticket(
     };
 
     transcript.add_message(&m);
-    cx.common.send_msg(m, false, 0);
+    cx.common.send_msg(m, false, DEFAULT_STREAM_ID);
     Ok(())
 }
 
@@ -798,7 +800,7 @@ fn emit_ccs(common: &mut CommonState) {
         payload: MessagePayload::ChangeCipherSpec(ChangeCipherSpecPayload {}),
     };
 
-    common.send_msg(m, false, 0);
+    common.send_msg(m, false, DEFAULT_STREAM_ID);
 }
 
 fn emit_finished(
@@ -819,7 +821,7 @@ fn emit_finished(
     };
 
     transcript.add_message(&f);
-    common.send_msg(f, true, 0);
+    common.send_msg(f, true, DEFAULT_STREAM_ID);
 }
 
 struct ExpectFinished {

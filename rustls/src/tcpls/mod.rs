@@ -245,7 +245,7 @@ impl TcplsSession {
     }
     
 
-    pub fn send_on_connection(&mut self, stream_id: u64) -> Result<usize, Error> {
+    pub fn send_on_connection(&mut self, stream_id: u16) -> Result<usize, Error> {
         let tls_conn = self.tls_conn.as_mut().unwrap();
 
         if tls_conn.is_handshaking() {

@@ -45,6 +45,7 @@ use ring::constant_time;
 
 use crate::sign::{CertifiedKey, Signer};
 use std::sync::Arc;
+use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
 // Extensions we expect in plaintext in the ServerHello.
 static ALLOWED_PLAINTEXT_EXTS: &[ExtensionType] = &[
@@ -309,7 +310,7 @@ pub(super) fn emit_fake_ccs(sent_tls13_fake_ccs: &mut bool, common: &mut CommonS
         version: ProtocolVersion::TLSv1_2,
         payload: MessagePayload::ChangeCipherSpec(ChangeCipherSpecPayload {}),
     };
-    common.send_msg(m, false, 0);
+    common.send_msg(m, false, DEFAULT_STREAM_ID);
 }
 
 fn validate_encrypted_extensions(
@@ -740,7 +741,7 @@ fn emit_certificate_tls13(
         }),
     };
     transcript.add_message(&m);
-    common.send_msg(m, true, 0);
+    common.send_msg(m, true, DEFAULT_STREAM_ID);
 }
 
 fn emit_certverify_tls13(
@@ -763,7 +764,7 @@ fn emit_certverify_tls13(
     };
 
     transcript.add_message(&m);
-    common.send_msg(m, true, 0);
+    common.send_msg(m, true, DEFAULT_STREAM_ID);
     Ok(())
 }
 
@@ -783,7 +784,7 @@ fn emit_finished_tls13(
     };
 
     transcript.add_message(&m);
-    common.send_msg(m, true, 0);
+    common.send_msg(m, true, DEFAULT_STREAM_ID);
 }
 
 fn emit_end_of_early_data_tls13(transcript: &mut HandshakeHash, common: &mut CommonState) {
@@ -800,7 +801,7 @@ fn emit_end_of_early_data_tls13(transcript: &mut HandshakeHash, common: &mut Com
     };
 
     transcript.add_message(&m);
-    common.send_msg(m, true, 0);
+    common.send_msg(m, true, DEFAULT_STREAM_ID);
 }
 
 struct ExpectFinished {

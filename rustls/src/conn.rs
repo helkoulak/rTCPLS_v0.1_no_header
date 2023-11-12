@@ -17,6 +17,7 @@ use std::ops::{Deref, DerefMut};
 use crate::recvbuf::{RecvBuf, RecvBufMap};
 use crate::tcpls;
 use crate::tcpls::frame::StreamFrameHeader;
+use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
 /// A client or server connection.
 #[derive(Debug)]
@@ -386,8 +387,8 @@ impl<Data> ConnectionCommon<Data> {
         let mut rdlen = 0;
 
         loop {
-            while self.wants_write(0) {
-                wrlen += self.write_tls(io, 0)?;
+            while self.wants_write(DEFAULT_STREAM_ID) {
+                wrlen += self.write_tls(io, DEFAULT_STREAM_ID)?;
             }
 
             if !until_handshaked && wrlen > 0 {
@@ -418,7 +419,7 @@ impl<Data> ConnectionCommon<Data> {
                     // In case we have an alert to send describing this error,
                     // try a last-gasp write -- but don't predate the primary
                     // error.
-                    let _ignored = self.write_tls(io, 0);
+                    let _ignored = self.write_tls(io, DEFAULT_STREAM_ID);
 
                     return Err(io::Error::new(io::ErrorKind::InvalidData, e));
                 }
@@ -639,7 +640,7 @@ impl<Data> ConnectionCore<Data> {
         }
 
         self.state = Ok(state);
-        Ok(self.common_state.current_io_state(0))
+        Ok(self.common_state.current_io_state(DEFAULT_STREAM_ID))
     }
 
     /// Pull a message out of the deframer and send any messages that need to be sent as a result.

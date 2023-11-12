@@ -34,6 +34,7 @@ use crate::client::{tls13, ClientConfig, ServerName};
 use std::ops::Deref;
 use std::sync::Arc;
 use crate::common_state::Protocol::Tcpls;
+use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
 pub(super) type NextState = Box<dyn State<ClientConnectionData>>;
 pub(super) type NextStateOrError = Result<NextState, Error>;
@@ -341,7 +342,7 @@ fn emit_client_hello_for_retry(
     trace!("Sending ClientHello {:#?}", ch);
 
     transcript_buffer.add_message(&ch);
-    cx.common.send_msg(ch, false, 0);
+    cx.common.send_msg(ch, false, DEFAULT_STREAM_ID);
 
     // Calculate the hash of ClientHello and use it to derive EarlyTrafficSecret
     let early_key_schedule = early_key_schedule.map(|(resuming_suite, schedule)| {

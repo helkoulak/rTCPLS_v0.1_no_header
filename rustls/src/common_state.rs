@@ -1,4 +1,4 @@
-use crate::cipher::Iv;
+
 use crate::enums::{AlertDescription, ContentType, HandshakeType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerMisbehaved};
 use crate::key;
@@ -18,8 +18,8 @@ use crate::record_layer;
 #[cfg(feature = "secret_extraction")]
 use crate::suites::PartiallyExtractedSecrets;
 use crate::suites::SupportedCipherSuite;
-use crate::tcpls::frame::{Frame, StreamFrameHeader};
-use crate::tcpls::stream::StreamMap;
+
+use crate::tcpls::stream::{DEFAULT_STREAM_ID, StreamMap};
 
 #[cfg(feature = "tls12")]
 use crate::tls12::ConnectionSecrets;
@@ -104,7 +104,7 @@ impl CommonState {
     /// Returns true if the caller should call [`Connection::write_tls`] as soon as possible.
     ///
     /// [`Connection::write_tls`]: crate::Connection::write_tls
-    pub fn wants_write(&self, id: u32) -> bool {
+    pub fn wants_write(&self, id: u16) -> bool {
         !self.streams.get(id).unwrap().send.is_empty()
     }
 
@@ -415,7 +415,7 @@ impl CommonState {
         }
 
         while let Some(buf) = self.sendable_plaintext.pop() {
-            self.send_plain(&buf, Limit::No, 0);
+            self.send_plain(&buf, Limit::No, DEFAULT_STREAM_ID);
         }
     }
 
@@ -524,7 +524,7 @@ impl CommonState {
         warn!("Sending fatal alert {:?}", desc);
         debug_assert!(!self.sent_fatal_alert);
         let m = Message::build_alert(AlertLevel::Fatal, desc);
-        self.send_msg(m, self.record_layer.is_encrypting(), 0);
+        self.send_msg(m, self.record_layer.is_encrypting(), DEFAULT_STREAM_ID);
         self.sent_fatal_alert = true;
     }
 
@@ -540,7 +540,7 @@ impl CommonState {
 
     fn send_warning_alert_no_log(&mut self, desc: AlertDescription) {
         let m = Message::build_alert(AlertLevel::Warning, desc);
-        self.send_msg(m, self.record_layer.is_encrypting(), 0);
+        self.send_msg(m, self.record_layer.is_encrypting(), DEFAULT_STREAM_ID);
     }
 
     pub(crate) fn set_max_fragment_size(&mut self, new: Option<usize>) -> Result<(), Error> {
@@ -572,10 +572,10 @@ impl CommonState {
         // completed, but also don't want to read if we still have sendable tls.
         self.received_plaintext.is_empty()
             && !self.has_received_close_notify
-            && (self.may_send_application_data || self.streams.get(0).unwrap().send.is_empty())
+            && (self.may_send_application_data || self.streams.get(DEFAULT_STREAM_ID).unwrap().send.is_empty())
     }
 
-    pub(crate) fn current_io_state(&self, id: u32) -> IoState {
+    pub(crate) fn current_io_state(&self, id: u16) -> IoState {
         IoState {
             tls_bytes_to_write: self.streams.get(id).unwrap().send.len(),
             plaintext_bytes_to_read: self.received_plaintext.len(),
@@ -612,7 +612,7 @@ impl CommonState {
             self.record_layer
                 .encrypt_outgoing_zc(message.borrow(), &(self
                     .streams
-                    .get_or_create(0)
+                    .get_or_create(DEFAULT_STREAM_ID)
                     .unwrap()
                     .build_header(message.payload.0.len() as u16, 0)))
         );
@@ -620,7 +620,7 @@ impl CommonState {
 
     pub(crate) fn perhaps_write_key_update(&mut self) {
         if let Some(message) = self.queued_key_update_message.take() {
-            self.streams.get_or_create(0).unwrap().send.append(message);
+            self.streams.get_or_create(DEFAULT_STREAM_ID).unwrap().send.append(message);
         }
     }
 }

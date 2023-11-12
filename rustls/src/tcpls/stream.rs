@@ -37,6 +37,7 @@ use crate::tcpls::frame::StreamFrameHeader;
 use crate::vecbuf::ChunkVecBuffer;
 
 pub const DEFAULT_BUFFER_LIMIT: usize = 64 * 1024;
+pub const DEFAULT_STREAM_ID:u16 = 0;
 
 
 pub struct Stream {
@@ -198,13 +199,13 @@ impl StreamMap {
     }
 
     /// Returns the stream with the given ID if it exists.
-    pub fn get(&self, id: u32) -> Option<&Stream> {
+    pub fn get(&self, id: u16) -> Option<&Stream> {
         self.streams.get(&(id as u64))
     }
 
     /// Returns the mutable stream with the given ID if it exists.
-    pub fn get_mut(&mut self, id: u64) -> Option<&mut Stream> {
-        self.streams.get_mut(&id)
+    pub fn get_mut(&mut self, id: u16) -> Option<&mut Stream> {
+        self.streams.get_mut(&(id as u64))
     }
 
     /// Returns the mutable stream with the given ID if it exists, or creates

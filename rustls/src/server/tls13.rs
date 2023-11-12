@@ -38,6 +38,7 @@ use std::sync::Arc;
 use ring::constant_time;
 
 pub(super) use client_hello::CompleteClientHelloHandling;
+use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
 mod client_hello {
     use crate::enums::SignatureScheme;
@@ -62,6 +63,7 @@ mod client_hello {
     use crate::msgs::handshake::SessionId;
     use crate::server::common::ActiveCertifiedKey;
     use crate::sign;
+    use crate::tcpls::stream::DEFAULT_STREAM_ID;
     use crate::tls13::key_schedule::{
         KeyScheduleEarly, KeyScheduleHandshake, KeySchedulePreHandshake,
     };
@@ -497,7 +499,7 @@ mod client_hello {
 
         trace!("sending server hello {:?}", sh);
         transcript.add_message(&sh);
-        cx.common.send_msg(sh, false, 0);
+        cx.common.send_msg(sh, false, DEFAULT_STREAM_ID);
 
         // Start key schedule
         let key_schedule_pre_handshake = if let Some(psk) = resuming_psk {
@@ -538,7 +540,7 @@ mod client_hello {
             version: ProtocolVersion::TLSv1_2,
             payload: MessagePayload::ChangeCipherSpec(ChangeCipherSpecPayload {}),
         };
-        common.send_msg(m, false, 0);
+        common.send_msg(m, false, DEFAULT_STREAM_ID);
     }
 
     fn emit_hello_retry_request(
@@ -572,7 +574,7 @@ mod client_hello {
         trace!("Requesting retry {:?}", m);
         transcript.rollup_for_hrr();
         transcript.add_message(&m);
-        common.send_msg(m, false, 0);
+        common.send_msg(m, false, DEFAULT_STREAM_ID);
     }
 
     fn decide_if_early_data_allowed(
@@ -680,7 +682,7 @@ mod client_hello {
 
         trace!("sending encrypted extensions {:?}", ee);
         transcript.add_message(&ee);
-        cx.common.send_msg(ee, true, 0);
+        cx.common.send_msg(ee, true, DEFAULT_STREAM_ID);
         Ok(early_data)
     }
 
@@ -724,7 +726,7 @@ mod client_hello {
 
         trace!("Sending CertificateRequest {:?}", m);
         transcript.add_message(&m);
-        cx.common.send_msg(m, true, 0);
+        cx.common.send_msg(m, true, DEFAULT_STREAM_ID);
         Ok(true)
     }
 
@@ -774,7 +776,7 @@ mod client_hello {
 
         trace!("sending certificate {:?}", c);
         transcript.add_message(&c);
-        common.send_msg(c, true, 0);
+        common.send_msg(c, true, DEFAULT_STREAM_ID);
     }
 
     fn emit_certificate_verify_tls13(
@@ -806,7 +808,7 @@ mod client_hello {
 
         trace!("sending certificate-verify {:?}", m);
         transcript.add_message(&m);
-        common.send_msg(m, true, 0);
+        common.send_msg(m, true, DEFAULT_STREAM_ID);
         Ok(())
     }
 
@@ -832,7 +834,7 @@ mod client_hello {
         trace!("sending finished {:?}", m);
         transcript.add_message(&m);
         let hash_at_server_fin = transcript.get_current_hash();
-        cx.common.send_msg(m, true, 0);
+        cx.common.send_msg(m, true, DEFAULT_STREAM_ID);
 
         // Now move to application data keys.  Read key change is deferred until
         // the Finish message is received & validated.
@@ -1138,7 +1140,7 @@ impl ExpectFinished {
         };
 
         trace!("sending new ticket {:?} (stateless: {})", m, stateless);
-        cx.common.send_msg(m, true, 0);
+        cx.common.send_msg(m, true, DEFAULT_STREAM_ID);
         Ok(())
     }
 }

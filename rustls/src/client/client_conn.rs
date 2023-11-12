@@ -26,6 +26,7 @@ use std::net::IpAddr;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::{fmt, io, mem};
+use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
 /// A trait for the ability to store client session data, so that sessions
 /// can be resumed in future connections.
@@ -600,7 +601,7 @@ impl ClientConnection {
             .check_write(data.len())
             .map(|sz| {
                 self.inner
-                    .send_early_plaintext(&data[..sz], 0)
+                    .send_early_plaintext(&data[..sz], DEFAULT_STREAM_ID)
             })
     }
 

@@ -37,6 +37,7 @@ use ring::constant_time;
 use std::sync::Arc;
 
 pub(super) use server_hello::CompleteServerHelloHandling;
+use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
 mod server_hello {
     use crate::msgs::enums::ExtensionType;
@@ -449,7 +450,7 @@ fn emit_certificate(
     };
 
     transcript.add_message(&cert);
-    common.send_msg(cert, false, 0);
+    common.send_msg(cert, false, DEFAULT_STREAM_ID);
 }
 
 fn emit_clientkx(transcript: &mut HandshakeHash, common: &mut CommonState, pubkey: &PublicKey) {
@@ -467,7 +468,7 @@ fn emit_clientkx(transcript: &mut HandshakeHash, common: &mut CommonState, pubke
     };
 
     transcript.add_message(&ckx);
-    common.send_msg(ckx, false, 0);
+    common.send_msg(ckx, false, DEFAULT_STREAM_ID);
 }
 
 fn emit_certverify(
@@ -492,7 +493,7 @@ fn emit_certverify(
     };
 
     transcript.add_message(&m);
-    common.send_msg(m, false, 0);
+    common.send_msg(m, false, DEFAULT_STREAM_ID);
     Ok(())
 }
 
@@ -502,7 +503,7 @@ fn emit_ccs(common: &mut CommonState) {
         payload: MessagePayload::ChangeCipherSpec(ChangeCipherSpecPayload {}),
     };
 
-    common.send_msg(ccs, false, 0);
+    common.send_msg(ccs, false, DEFAULT_STREAM_ID);
 }
 
 fn emit_finished(
@@ -523,7 +524,7 @@ fn emit_finished(
     };
 
     transcript.add_message(&f);
-    common.send_msg(f, true, 0);
+    common.send_msg(f, true, DEFAULT_STREAM_ID);
 }
 
 struct ServerKxDetails {
