@@ -34,13 +34,12 @@ pub mod stream;
 pub struct TcplsSession {
     pub tls_config: Option<TlsConfig>,
     pub tls_conn: Option<Connection>,
-    pub tcp_connections: HashMap<u32, TcpConnection>,
+    pub tcp_connections: SimpleIdHashMap<TcpConnection>,
     pub next_conn_id: u32,
     pub address_map: AddressMap,
     pub is_server: bool,
     pub is_closed: bool,
     pub tls_hs_completed: bool,
-    pub next_stream_id: u64,
 }
 
 impl TcplsSession {
@@ -48,13 +47,12 @@ impl TcplsSession {
         Self {
             tls_config: None,
             tls_conn: None,
-            tcp_connections: HashMap::new(),
+            tcp_connections: SimpleIdHashMap::default(),
             next_conn_id: 0,
             address_map: AddressMap::new(),
             is_server,
             is_closed: false,
             tls_hs_completed: false,
-            next_stream_id: 0,
         }
     }
 
@@ -94,7 +92,7 @@ impl TcplsSession {
             tcp_conn.is_primary = true;
         }
 
-        self.tcp_connections.insert(new_id, tcp_conn);
+        self.tcp_connections.insert(new_id as u64, tcp_conn);
 
         self.next_conn_id += 1;
         self.address_map.next_local_address_id += 1;
