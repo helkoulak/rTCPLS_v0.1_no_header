@@ -375,4 +375,10 @@ impl ExactSizeIterator for StreamIter {
     }
 }
 
+#[test]
 
+fn test_create_stream(){
+    let mut map = StreamMap::new();
+    let stream = map.get_or_create(55, None).unwrap();
+    assert_eq!(stream.send.is_empty(), true)
+}
