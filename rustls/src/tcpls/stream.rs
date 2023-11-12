@@ -312,7 +312,9 @@ impl StreamMap {
     /// Creates an iterator over streams that have been collected.
     pub fn collected(&self) -> StreamIter { StreamIter::from(&self.collected) }
 
-    pub fn open_streams_ids(&self) -> SimpleIdHashSet {
+
+    /// Returns the set of ids of open streams
+    pub fn open_streams(&self) -> SimpleIdHashSet {
         let mut id_set = SimpleIdHashSet::default();
         for item in self.streams.iter() {
             id_set.insert(item.1.id as u64);
