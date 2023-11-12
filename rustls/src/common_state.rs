@@ -271,7 +271,7 @@ impl CommonState {
         let len = match limit {
             Limit::Yes => self
                 .streams
-                .get_or_create(id)
+                .get_or_create(id, None)
                 .unwrap()
                 .send
                 .apply_limit(payload.len()),
@@ -306,8 +306,9 @@ impl CommonState {
             return;
         }
 
-        let mut stream =  self.streams.get_or_create(id).unwrap();
+        let mut stream =  self.streams.get_or_create(id, None).unwrap();
         let header = stream.build_header(m.payload.len() as u16, 0);
+        self.record_layer.set_conn_in_use(stream.attched_to);
         let em = self.record_layer.encrypt_outgoing_zc(m, &header);
         stream.send.append(em);
     }
@@ -324,13 +325,13 @@ impl CommonState {
             let len = match limit {
                 Limit::Yes => self
                     .streams
-                    .get_or_create(id)
+                    .get_or_create(id, None)
                     .unwrap()
                     .send
                     .append_limited_copy(data),
                 Limit::No => self
                     .streams
-                    .get_or_create(id)
+                    .get_or_create(id, None)
                     .unwrap()
                     .send
                     .append(data.to_vec()),
@@ -404,7 +405,7 @@ impl CommonState {
     /// [`Connection::process_new_packets`]: crate::Connection::process_received
     pub fn set_buffer_limit(&mut self, limit: Option<usize>, id: u16) {
         self.sendable_plaintext.set_limit(limit);
-        self.streams.get_or_create(id).unwrap().send.set_limit(limit);
+        self.streams.get_or_create(id, None).unwrap().send.set_limit(limit);
     }
 
     /// Send any buffered plaintext.  Plaintext is buffered if
@@ -421,7 +422,7 @@ impl CommonState {
 
     // Put m into sendable_tls for writing.
     fn queue_tls_message(&mut self, m: OpaqueMessage, id: u16) {
-        self.streams.get_or_create(id).unwrap().send.append(m.encode());
+        self.streams.get_or_create(id, None).unwrap().send.append(m.encode());
     }
 
     /// Send a raw TLS message, fragmenting it if needed.
@@ -608,19 +609,21 @@ impl CommonState {
 
     pub(crate) fn enqueue_key_update_notification(&mut self) {
         let message = PlainMessage::from(Message::build_key_update_notify());
+        let mut stream = self
+            .streams
+            .get_or_create(DEFAULT_STREAM_ID, None)
+            .unwrap();
+        self.record_layer.set_conn_in_use(stream.attched_to);
         self.queued_key_update_message = Some(
             self.record_layer
-                .encrypt_outgoing_zc(message.borrow(), &(self
-                    .streams
-                    .get_or_create(DEFAULT_STREAM_ID)
-                    .unwrap()
-                    .build_header(message.payload.0.len() as u16, 0)))
+                .encrypt_outgoing_zc(message.borrow(),
+                                     &stream.build_header(message.payload.0.len() as u16, 0))
         );
     }
 
     pub(crate) fn perhaps_write_key_update(&mut self) {
         if let Some(message) = self.queued_key_update_message.take() {
-            self.streams.get_or_create(DEFAULT_STREAM_ID).unwrap().send.append(message);
+            self.streams.get_or_create(DEFAULT_STREAM_ID, None).unwrap().send.append(message);
         }
     }
 }

@@ -127,7 +127,7 @@ impl TcplsSession {
         Ok(conn_id)
     }
 
-    pub fn stream_attach_and_send(&mut self, str_id: u16, input: &[u8], fin: bool, attach_to: u32) -> Result<usize, Error> {
+    pub fn stream_send(&mut self, str_id: u16, input: &[u8], fin: bool, attach_to: Option<u32>) -> Result<usize, Error> {
 
         let mut tls_connection = self.tls_conn.as_mut().unwrap();
 
@@ -135,46 +135,29 @@ impl TcplsSession {
             return Err(Error::HandshakeNotComplete);
         }
 
-        // set id of tcp connection to decide on crypto context and record seq space
-        tls_connection.set_connection_in_use(attach_to);
-
         // check if key update message should be sent
         tls_connection.perhaps_write_key_update();
 
         // make sure you have the required stream
-        match tls_connection.streams.get_or_create(str_id) {
+        match tls_connection.streams.get_or_create(str_id, attach_to) {
             Ok(stream ) => (),
             Err(e) => return Err(e),
         } ;
 
-        // Attach stream
-        match tls_connection
+        let conn_id = tls_connection
             .streams
-            .get_or_create(str_id)
-            .unwrap().attched_to {
-            Some(conn_id) => {
-                if attach_to != conn_id {
-                    return Err(Error::General(format!("Stream is already attached to connection {}", conn_id)))
-                }
-            },
-            None => {
-                tls_connection
-                    .streams
-                    .get_or_create(str_id)
-                    .unwrap().attched_to = Some(attach_to);
-            },
-        };
+            .get_or_create(str_id, None)
+            .unwrap().attched_to;
 
-
-
-
+        // set id of tcp connection to decide on crypto context and record seq space
+        tls_connection.record_layer.set_conn_in_use(conn_id);
 
         // we're respecting limit for plaintext data -- so we'll
         // be out by whatever the cipher+record overhead is.  That's a
         // constant and predictable amount.
         let cap = tls_connection
             .streams
-            .get_or_create(str_id)
+            .get_or_create(str_id, None)
             .unwrap().send.apply_limit(input.len());
 
         if cap == 0 && !input.is_empty() {
@@ -207,7 +190,7 @@ impl TcplsSession {
             // Build TCPLS header of record
             let mut header = tls_connection
                 .streams
-                .get_or_create(str_id)
+                .get_or_create(str_id, None)
                 .unwrap()
                 .build_header(chunk.len() as u16, fin_bit);
 
@@ -233,7 +216,7 @@ impl TcplsSession {
 
             tls_connection
                 .streams
-                .get_or_create(str_id)
+                .get_or_create(str_id, None)
                 .unwrap()
                 .send
                 .append(em);
@@ -245,19 +228,20 @@ impl TcplsSession {
     }
     
 
-    pub fn send_on_connection(&mut self, stream_id: u16) -> Result<usize, Error> {
+    pub fn send_on_connection(&mut self, conn_id: u16) -> Result<usize, Error> {
         let tls_conn = self.tls_conn.as_mut().unwrap();
 
         if tls_conn.is_handshaking() {
             return Err(Error::HandshakeNotComplete);
         }
 
-        let stream = match tls_conn.streams.get_mut(stream_id) {
+
+        let stream = match tls_conn.streams.get_mut(conn_id) {
             Some(stream) => stream,
             None => return Err(Error::BufNotFound),
         };
 
-        let conn_id = stream.attched_to.unwrap();
+        let conn_id = stream.attched_to;
 
         if stream.send.is_empty() {
             return Ok(0);
@@ -271,7 +255,7 @@ impl TcplsSession {
 
             sent = self
                 .tcp_connections
-                .get_mut(&conn_id)
+                .get_mut(&(conn_id as u64))
                 .unwrap()
                 .socket
                 .write(chunk.as_slice())
@@ -286,7 +270,7 @@ impl TcplsSession {
 
     /// Receive data on specified TCP socket
     pub fn recv_on_connection(&mut self, conn_id: u32) -> Result<usize, io::Error> {
-        let mut socket = match self.tcp_connections.get_mut(&conn_id) {
+        let mut socket = match self.tcp_connections.get_mut(&(conn_id as u64)) {
             Some(conn) => &mut conn.socket,
             None => panic!("Socket of specified TCP connection does not exist")
         };

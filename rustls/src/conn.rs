@@ -43,7 +43,7 @@ impl Connection {
     ///
     /// See [`ConnectionCommon::write_tls()`] for more information.
     pub fn write_tls(&mut self, wr: &mut dyn io::Write, id: u16) -> Result<usize, io::Error> {
-        self.streams.get_or_create(id).unwrap().send.write_to(wr)
+        self.streams.get_or_create(id, None).unwrap().send.write_to(wr)
     }
 
     /// Returns an object that allows reading plaintext.
@@ -524,7 +524,7 @@ impl<Data> ConnectionCommon<Data> {
     /// After this function returns, the connection buffer may not yet be fully flushed. The
     /// [`CommonState::wants_write`] function can be used to check if the output buffer is empty.
     pub fn write_tls(&mut self, wr: &mut dyn io::Write, id: u16) -> Result<usize, io::Error> {
-        self.streams.get_or_create(id).unwrap().send.write_to(wr)
+        self.streams.get_or_create(id, None).unwrap().send.write_to(wr)
     }
 
     /// Derives key material from the agreed connection secrets.

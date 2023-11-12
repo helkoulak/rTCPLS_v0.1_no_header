@@ -58,7 +58,7 @@ pub struct Stream {
     /// buffers encrypted TLS records that to be sent on the TCP socket
     pub(crate) send: ChunkVecBuffer,
     /// The id of tcp connection the stream is attached to
-    pub attched_to: Option<u32>,
+    pub attched_to: u32,
     pub next_snd_pkt_num: u32,
 }
 
@@ -69,7 +69,7 @@ impl Stream {
             marked_for_close: false,
             aead_initialized: false,
             send: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
-            attched_to: None,
+            attched_to: 0,
             next_snd_pkt_num: 0,
         }
     }
@@ -222,6 +222,7 @@ impl StreamMap {
     /// error is returned.
     pub fn get_or_create(
         &mut self, stream_id: u16,
+        attach_to: Option<u32>,
     ) -> Result<&mut Stream, Error> {
         let (stream, is_new_and_writable) = match self.streams.entry(stream_id as u64) {
             hash_map::Entry::Vacant(v) => {
@@ -230,7 +231,11 @@ impl StreamMap {
                     return Err(Error::Done);
                 }
 
-                let s = Stream::new((stream_id));
+                let mut s = Stream::new(stream_id);
+                s.attched_to = match attach_to {
+                    Some(id) => id,
+                    None => 0, // By default the stream is attached to connection 0
+                };
 
                 let is_writable = s.is_writable();
 
