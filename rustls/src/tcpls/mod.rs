@@ -4,24 +4,24 @@
 /// This module contains optional APIs for implementing TCPLS.
 use std::{io, u32, vec};
 
-use std::collections::HashMap;
+
 use std::fs;
-use std::fs::read_to_string;
-use std::io::{BufReader, ErrorKind, Read, Write};
+
+use std::io::{BufReader, Read, Write};
 use std::net::{SocketAddr, ToSocketAddrs};
 
 use std::sync::Arc;
 
 use mio::net::{TcpListener, TcpStream};
 
-use crate::{server, version, AlertDescription, Certificate, ClientConfig, ClientConnection, Connection, Error, KeyLogFile, PrivateKey, RootCertStore, ServerConfig, ServerConnection, ServerName, SupportedCipherSuite, SupportedProtocolVersion, Ticketer, ALL_CIPHER_SUITES, ALL_VERSIONS, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, ContentType, ProtocolVersion};
+use crate::{server, version, Certificate, ClientConfig, ClientConnection, Connection, Error, KeyLogFile, PrivateKey, RootCertStore, ServerConfig, ServerConnection, ServerName, SupportedCipherSuite, SupportedProtocolVersion, Ticketer, ALL_CIPHER_SUITES, ALL_VERSIONS, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, ContentType, ProtocolVersion};
 
-use crate::msgs::deframer::MessageDeframer;
+
 use crate::msgs::message::BorrowedPlainMessage;
 use crate::recvbuf::RecvBufMap;
-use crate::tcpls::frame::{StreamFrameHeader, MAX_TCPLS_FRAGMENT_LEN};
+use crate::tcpls::frame::MAX_TCPLS_FRAGMENT_LEN;
 use crate::tcpls::network_address::AddressMap;
-use crate::tcpls::stream::StreamMap;
+use crate::tcpls::stream::{SimpleIdHashMap, SimpleIdHashSet};
 use crate::verify::{
     AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
 };
