@@ -90,7 +90,7 @@ impl Stream {
     pub fn build_header(&mut self, len: u16, fin: u8) -> StreamFrameHeader {
         let header = StreamFrameHeader {
             chunk_num: self.next_snd_pkt_num,
-            offset_step: (((fin & 0x01) << 15) as u16) | len,
+            offset_step: (((fin as u16 & 0x01) << 15) | len),
             stream_id: self.id,
         };
 
