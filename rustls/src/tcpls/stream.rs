@@ -27,6 +27,7 @@
 
 use std::{cmp, time};
 use std::collections::{BinaryHeap, BTreeMap, hash_map, HashMap, HashSet, VecDeque};
+use std::collections::hash_map::Iter;
 use std::process::id;
 use std::sync::Arc;
 use smallvec::SmallVec;
@@ -310,6 +311,18 @@ impl StreamMap {
 
     /// Creates an iterator over streams that have been collected.
     pub fn collected(&self) -> StreamIter { StreamIter::from(&self.collected) }
+
+    pub fn open_streams_ids(&self) -> SimpleIdHashSet {
+        let mut id_set = SimpleIdHashSet::default();
+        for item in self.streams.iter() {
+            id_set.insert(item.1.id as u64);
+        }
+        id_set
+    }
+
+    pub fn iter(&self) -> Iter<'_, u64, Stream> {
+        self.streams.iter()
+    }
 
         /// Returns true if the stream has been collected.
     pub fn is_collected(&self, stream_id: u64) -> bool { self.collected.contains(&stream_id) }
