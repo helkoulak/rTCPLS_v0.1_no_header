@@ -137,15 +137,12 @@ impl TcplsSession {
         tls_connection.perhaps_write_key_update();
 
         // make sure you have the required stream
-        match tls_connection.streams.get_or_create(str_id, attach_to) {
-            Ok(stream ) => (),
+        let (conn_id, cap) = match tls_connection.streams.get_or_create(str_id, attach_to) {
+            Ok(stream ) => {
+                (stream.attched_to, stream.send.apply_limit(input.len()))
+            },
             Err(e) => return Err(e),
         } ;
-
-        let conn_id = tls_connection
-            .streams
-            .get_or_create(str_id, None)
-            .unwrap().attched_to;
 
         // set id of tcp connection to decide on crypto context and record seq space
         tls_connection.record_layer.set_conn_in_use(conn_id);
@@ -153,11 +150,6 @@ impl TcplsSession {
         // we're respecting limit for plaintext data -- so we'll
         // be out by whatever the cipher+record overhead is.  That's a
         // constant and predictable amount.
-        let cap = tls_connection
-            .streams
-            .get_or_create(str_id, None)
-            .unwrap().send.apply_limit(input.len());
-
         if cap == 0 && !input.is_empty() {
             return Err(Error::Done);
         }
