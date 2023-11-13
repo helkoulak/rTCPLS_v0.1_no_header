@@ -31,6 +31,8 @@ pub mod network_address;
 pub mod ranges;
 pub mod stream;
 
+pub const DEFAULT_CONNECTION_ID:u32 = 0;
+
 pub struct TcplsSession {
     pub tls_config: Option<TlsConfig>,
     pub tls_conn: Option<Connection>,
@@ -48,7 +50,7 @@ impl TcplsSession {
             tls_config: None,
             tls_conn: None,
             tcp_connections: SimpleIdHashMap::default(),
-            next_conn_id: 0,
+            next_conn_id: DEFAULT_CONNECTION_ID,
             address_map: AddressMap::new(),
             is_server,
             is_closed: false,
