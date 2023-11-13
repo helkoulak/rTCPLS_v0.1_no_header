@@ -20,10 +20,7 @@ pub enum Frame {
     Ping,
 
     Stream {
-        stream_data: Vec<u8>,
-        length: u64,
-        offset: u64,
-        stream_id: u64,
+        length: u16,
         fin: u8,
     },
 
@@ -67,19 +64,19 @@ impl Frame {
 
             0x01 => Frame::Ping,
 
-            0x02..=0x04 => parse_stream_frame(frame_type, b).unwrap(),
+            0x02..=0x03 => parse_stream_frame(frame_type, b).unwrap(),
 
-            0x05 => parse_ack_frame(b).unwrap(),
+            0x04 => parse_ack_frame(b).unwrap(),
 
-            0x06 => parse_new_token_frame(b).unwrap(),
+            0x05 => parse_new_token_frame(b).unwrap(),
 
-            0x07 => parse_connection_reset_frame(b).unwrap(),
+            0x06 => parse_connection_reset_frame(b).unwrap(),
 
-            0x08 => parse_new_address_frame(b).unwrap(),
+            0x07 => parse_new_address_frame(b).unwrap(),
 
-            0x09 => parse_remove_address_frame(b).unwrap(),
+            0x08 => parse_remove_address_frame(b).unwrap(),
 
-            0x0A => parse_stream_change_frame(b).unwrap(),
+            0x09 => parse_stream_change_frame(b).unwrap(),
 
             _ => return Err(InvalidMessage::InvalidFrameType.into()),
         };
@@ -98,16 +95,10 @@ impl Frame {
                 b.put_varint(0x01).unwrap();
             }
             Frame::Stream {
-                stream_data,
                 length,
-                offset,
-                stream_id,
                 fin,
             } => {
-                b.put_bytes(stream_data.as_ref()).unwrap();
-                b.put_varint_reverse(*length).unwrap();
-                b.put_varint_reverse(*offset).unwrap();
-                b.put_varint_reverse(*stream_id).unwrap();
+                b.put_u16(*length).unwrap();
                 match fin {
                     1 => b.put_u8(0x03).unwrap(),
                     0 => b.put_u8(0x02).unwrap(),
@@ -122,18 +113,18 @@ impl Frame {
             } => {
                 b.put_varint_reverse(*highest_record_sn_received).unwrap();
                 b.put_varint_reverse(*connection_id).unwrap();
-                b.put_varint(0x05).unwrap();
+                b.put_varint(0x04).unwrap();
             }
 
             Frame::NewToken { token, sequence } => {
                 b.put_bytes(token).unwrap();
                 b.put_varint_reverse(*sequence).unwrap();
-                b.put_varint(0x06).unwrap();
+                b.put_varint(0x05).unwrap();
             }
 
             Frame::ConnectionReset { connection_id } => {
                 b.put_varint_reverse(*connection_id).unwrap();
-                b.put_varint(0x07).unwrap();
+                b.put_varint(0x06).unwrap();
             }
             Frame::NewAddress {
                 port,
@@ -145,12 +136,12 @@ impl Frame {
                 b.put_bytes(address.as_ref()).unwrap();
                 b.put_varint_reverse(*address_version).unwrap();
                 b.put_varint_reverse(*address_id).unwrap();
-                b.put_varint(0x08).unwrap();
+                b.put_varint(0x07).unwrap();
             }
 
             Frame::RemoveAddress { address_id } => {
                 b.put_varint_reverse(*address_id).unwrap();
-                b.put_varint(0x09).unwrap();
+                b.put_varint(0x08).unwrap();
             }
 
             Frame::StreamChange {
@@ -159,7 +150,7 @@ impl Frame {
             } => {
                 b.put_varint_reverse(*next_record_stream_id).unwrap();
                 b.put_varint_reverse(*next_offset).unwrap();
-                b.put_varint(0x0A).unwrap();
+                b.put_varint(0x09).unwrap();
             }
 
             _ => {}
@@ -177,27 +168,23 @@ impl Frame {
 
             0x01 => 1 ,
 
-            0x02..=0x04 => {
+            0x02..=0x03 => 3,
+
+            0x04 => {
                 1 + varint_len(b.get_varint_reverse().unwrap()) +
-                    varint_len(b.get_varint_reverse().unwrap()) +
                     varint_len(b.get_varint_reverse().unwrap())
             },
+
 
             0x05 => {
-                1 + varint_len(b.get_varint_reverse().unwrap()) +
-                    varint_len(b.get_varint_reverse().unwrap())
-            },
-
-
-            0x06 => {
                 1 + varint_len(b.get_varint_reverse().unwrap()) + 32
             },
 
-            0x07 => {
+            0x06 => {
                 1 + varint_len(b.get_varint_reverse().unwrap())
             },
 
-            0x08 => {
+            0x07 => {
                 let mut frame_len = 1 + varint_len(b.get_varint_reverse().unwrap());
                 let address_len = match b.get_varint_reverse().unwrap() {
                     4 => {
@@ -216,9 +203,9 @@ impl Frame {
 
             },
 
-            0x09 => { 1 + varint_len(b.get_varint_reverse().unwrap()) },
+            0x08 => { 1 + varint_len(b.get_varint_reverse().unwrap()) },
 
-            0x0A => { 1 + varint_len(b.get_varint_reverse().unwrap())
+            0x09 => { 1 + varint_len(b.get_varint_reverse().unwrap())
                         + varint_len(b.get_varint_reverse().unwrap())
             },
 
@@ -233,26 +220,17 @@ impl Frame {
 }
 
 fn parse_stream_frame(frame_type: u8, b: &mut octets::Octets) -> octets::Result<Frame> {
-    let stream_id = b.get_varint_reverse().unwrap();
 
-    let offset = b.get_varint_reverse().unwrap();
-
-    let length = b.get_varint_reverse().unwrap();
-
-    let stream_bytes = b.get_bytes_reverse(length as usize)?.to_vec();
+    let length = b.get_u16().unwrap();
 
     let fin = match frame_type {
         2 => 0,
         3 => 1,
-        4 => 0,
         _ => panic!("Invalid frame type"),
     };
 
     Ok(Frame::Stream {
-        stream_data: stream_bytes,
         length,
-        offset,
-        stream_id,
         fin,
     })
 }
@@ -323,13 +301,13 @@ fn parse_stream_change_frame(b: &mut octets::Octets) -> octets::Result<Frame> {
     })
 }
 #[derive(Default, PartialEq, Debug)]
-pub struct StreamFrameHeader {
+pub struct TcplsHeader {
     pub chunk_num: u32,
     pub offset_step: u16,
     pub stream_id: u16,
 }
 
-impl StreamFrameHeader {
+impl TcplsHeader {
     pub fn new(chunk_num: u32, offset: u16, stream_id: u16) -> Self {
         Self {
             chunk_num,
@@ -338,7 +316,7 @@ impl StreamFrameHeader {
         }
     }
 
-    pub fn encode_stream_header(
+    pub fn encode_tcpls_header(
         &mut self,
         b: &mut octets::OctetsMut,
     ) -> Result<(), Error> {
@@ -349,7 +327,7 @@ impl StreamFrameHeader {
         Ok(())
     }
 
-    pub fn decode_stream_header(b: &mut octets::Octets) -> Self {
+    pub fn decode_tcpls_header(b: &mut octets::Octets) -> Self {
         Self{
             chunk_num: b.get_u32().unwrap(),
             offset_step: b.get_u16().unwrap(),
@@ -357,7 +335,7 @@ impl StreamFrameHeader {
         }
     }
 
-    pub fn decode_stream_header_from_slice(b: &[u8]) -> Self {
+    pub fn decode_tcpls_header_from_slice(b: &[u8]) -> Self {
         Self{
             chunk_num: u32::from_be_bytes(b[0..4].try_into().unwrap()),
             offset_step: u16::from_be_bytes(b[4..6].try_into().unwrap()),
@@ -387,13 +365,7 @@ fn test_encode_decode_stream_frame() {
     let mut buf = [0; 32];
 
     let mut stream_frame = Frame::Stream {
-        stream_data: vec![
-            0xDE, 0xAD, 0xBE, 0xEF, 0xDE, 0xAD, 0xBE, 0xEF, 0xDE, 0xAD, 0xBE, 0xEF, 0xDE, 0xAD,
-            0xBE, 0xEF, 0xDE, 0xAD, 0xBE, 0xEF, 0xDE, 0xAD, 0xBE, 0xEF,
-        ],
         length: 24,
-        offset: 66000,
-        stream_id: 500,
         fin: 1,
     };
 
