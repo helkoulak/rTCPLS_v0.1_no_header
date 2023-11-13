@@ -221,7 +221,7 @@ impl Frame {
 
 fn parse_stream_frame(frame_type: u8, b: &mut octets::Octets) -> octets::Result<Frame> {
 
-    let length = b.get_u16().unwrap();
+    let length = b.get_u16_reverse().unwrap();
 
     let fin = match frame_type {
         2 => 0,
@@ -362,7 +362,7 @@ impl TcplsHeader {
 
 #[test]
 fn test_encode_decode_stream_frame() {
-    let mut buf = [0; 32];
+    let mut buf = [0; 3];
 
     let mut stream_frame = Frame::Stream {
         length: 24,
