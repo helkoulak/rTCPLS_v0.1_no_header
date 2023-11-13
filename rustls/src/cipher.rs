@@ -15,7 +15,7 @@ use crate::msgs::codec::Codec;
 
 
 use crate::recvbuf::RecvBuf;
-use crate::tcpls::frame::StreamFrameHeader;
+use crate::tcpls::frame::TcplsHeader;
 
 
 
@@ -25,7 +25,7 @@ pub trait MessageDecrypter: Send + Sync {
     /// Perform the decryption over the concerned TLS message.
 
     fn decrypt(&self, m: BorrowedOpaqueMessage, seq: u64, conn_id: u32) -> Result<PlainMessage, Error>;
-   fn decrypt_zc(&self, msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, recv_buf: &mut RecvBuf, tcpls_header: &StreamFrameHeader) -> Result<PlainMessage, Error>;
+   fn decrypt_zc(&self, msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, recv_buf: &mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<PlainMessage, Error>;
     fn derive_dec_conn_iv(&mut self, conn_id: u32);
     fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error>;
 }
@@ -33,7 +33,7 @@ pub trait MessageDecrypter: Send + Sync {
 /// Objects with this trait can encrypt TLS messages.
 pub(crate) trait MessageEncrypter: Send + Sync {
     fn encrypt(&self, m: BorrowedPlainMessage, seq: u64, conn_id: u32) -> Result<Vec<u8>, Error>;
-    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: &StreamFrameHeader) -> Result<Vec<u8>, Error>;
+    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: &TcplsHeader) -> Result<Vec<u8>, Error>;
     fn derive_enc_conn_iv(&mut self, conn_id: u32);
     fn get_tag_length(&self) -> usize;
 }
@@ -216,7 +216,7 @@ impl MessageEncrypter for InvalidMessageEncrypter {
         Err(Error::EncryptError)
     }
 
-    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: &StreamFrameHeader) -> Result<Vec<u8>, Error> {
+    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: &TcplsHeader) -> Result<Vec<u8>, Error> {
         todo!()
     }
     fn derive_enc_conn_iv(&mut self, conn_id: u32) {}
@@ -234,7 +234,7 @@ impl MessageDecrypter for InvalidMessageDecrypter {
         Err(Error::DecryptError)
     }
 
-    fn decrypt_zc(&self, msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, recv_buf: &mut RecvBuf, tcpls_header: &StreamFrameHeader) -> Result<PlainMessage, Error> {
+    fn decrypt_zc(&self, msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, recv_buf: &mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<PlainMessage, Error> {
         todo!()
     }
 
@@ -301,7 +301,7 @@ fn test_building_header_from_header_dec() {
 
         let mut a = octets::Octets::with_slice_at_offset(&encrypted_with_header_unprotected, header_offset);
 
-        let header_before_protection = StreamFrameHeader::decode_stream_header(&mut a);
+        let header_before_protection = TcplsHeader::decode_tcpls_header(&mut a);
 
         let sample = encrypted_with_header_unprotected.rchunks(tag_length).next().unwrap(); // use tag bytes as sample
 
@@ -314,7 +314,7 @@ fn test_building_header_from_header_dec() {
             encrypted_with_header_protected[i] ^= byte;
             i += 1;
         }
-        let header_recostructed = StreamFrameHeader::decode_stream_header_from_slice(
+        let header_recostructed = TcplsHeader::decode_tcpls_header_from_slice(
             &header_protector.decrypt_in_output(sample, &encrypted_with_header_protected[5..13]).unwrap());
 
         assert_eq!(header_recostructed, header_before_protection)

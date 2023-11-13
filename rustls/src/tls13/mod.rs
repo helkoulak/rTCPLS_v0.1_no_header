@@ -16,7 +16,7 @@ use std::io::Read;
 use ring::rand::SecureRandom;
 use octets::BufferError;
 use crate::recvbuf::RecvBuf;
-use crate::tcpls::frame::{TCPLS_HEADER_SIZE, StreamFrameHeader, SAMPLE_PAYLOAD_LENGTH};
+use crate::tcpls::frame::{TCPLS_HEADER_SIZE, TcplsHeader, SAMPLE_PAYLOAD_LENGTH};
 
 pub(crate) mod key_schedule;
 
@@ -162,7 +162,7 @@ fn make_tls13_aad_no_header(len: usize) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE]>
     ])
 }
 
-fn prepare_output(header: & StreamFrameHeader, payload_length: usize) -> Result<Vec<u8>, BufferError> {
+fn prepare_output(header: &TcplsHeader, payload_length: usize) -> Result<Vec<u8>, BufferError> {
     // Prepare output buffer
     let mut output = vec![0; PACKET_OVERHEAD + payload_length];
     let mut b = octets::OctetsMut::with_slice(&mut output);
@@ -187,7 +187,7 @@ fn make_tls13_aad_for_enc(output_buf: &[u8]) -> ring::aead::Aad<[u8; TLS13_AAD_S
         , output_buf[12]])
 }
 
-fn make_tls13_aad_for_dec(len: usize, header: & StreamFrameHeader ) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE_WITH_TCPLS_HEADER]> {
+fn make_tls13_aad_for_dec(len: usize, header: &TcplsHeader) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE_WITH_TCPLS_HEADER]> {
     ring::aead::Aad::from([0x17, 0x3, 0x3, (len >> 8) as u8
         , len as u8, (header.chunk_num >> 24) as u8 , ( header.chunk_num >> 16) as u8, ( header.chunk_num >> 8) as u8
         , header.chunk_num as u8, (header.offset_step >> 8) as u8, header.offset_step as u8, (header.stream_id >> 8) as u8
@@ -234,7 +234,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         Ok(output)
     }
 
-    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, header: &StreamFrameHeader) -> Result<Vec<u8>, Error> {
+    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, header: &TcplsHeader) -> Result<Vec<u8>, Error> {
         let tag_length =  self.enc_key.algorithm().tag_len();
         let header_protecter = &mut self.header_encrypter;
         let mut payload_len = msg.payload.len() + 1 + tag_length;
@@ -325,7 +325,7 @@ impl MessageDecrypter for Tls13MessageDecrypter {
     }
 
 
-    fn decrypt_zc(&self, mut msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, recv_buf: &mut RecvBuf, tcpls_header: &StreamFrameHeader) -> Result<PlainMessage, Error> {
+    fn decrypt_zc(&self, mut msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, recv_buf: &mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<PlainMessage, Error> {
         let payload = msg.payload;
         if payload.len() < self.dec_key.algorithm().tag_len() {
             return Err(Error::DecryptError);
