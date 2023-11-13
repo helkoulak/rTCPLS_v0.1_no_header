@@ -11,7 +11,7 @@ use crate::msgs::{codec, message};
 use crate::msgs::message::{BorrowedOpaqueMessage, MessageError};
 use crate::record_layer::{Decrypted, RecordLayer};
 use crate::recvbuf::{RecvBuf, RecvBufMap};
-use crate::tcpls::frame::{StreamFrameHeader, TCPLS_HEADER_SIZE};
+use crate::tcpls::frame::{TcplsHeader, TCPLS_HEADER_SIZE};
 use crate::tcpls::stream::SimpleIdHashMap;
 
 /// This deframer works to reconstruct TLS messages from a stream of arbitrary-sized reads.
@@ -60,7 +60,7 @@ impl MessageDeframer {
             return Ok(None);
         }
         let tag_len = record_layer.get_tag_length();
-        let mut header_decoded = StreamFrameHeader::default();
+        let mut header_decoded = TcplsHeader::default();
         let mut payload_offset = 0;
         let mut payload_length = 0;
         let mut end = 0;
@@ -136,7 +136,7 @@ impl MessageDeframer {
                 // Take the LSBs of calculated tag as input sample for hash function
                 let sample = m.payload.rchunks(tag_len).next().unwrap();
                 // process tcpls header and choose recv_buf accordingly
-                header_decoded = StreamFrameHeader::decode_stream_header_from_slice(&record_layer.decrypt_header(sample,&m.payload[..TCPLS_HEADER_SIZE]).expect("decrypting header failed"));
+                header_decoded = TcplsHeader::decode_tcpls_header_from_slice(&record_layer.decrypt_header(sample, &m.payload[..TCPLS_HEADER_SIZE]).expect("decrypting header failed"));
                 let mut recv_buf = app_buffers.get_or_create_recv_buffer(header_decoded.stream_id as u64, None);
                 if recv_buf.next_recv_pkt_num != header_decoded.chunk_num {
                     continue

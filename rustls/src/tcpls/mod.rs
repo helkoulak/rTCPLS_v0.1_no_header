@@ -19,7 +19,7 @@ use crate::{server, version, Certificate, ClientConfig, ClientConnection, Connec
 
 use crate::msgs::message::BorrowedPlainMessage;
 use crate::recvbuf::RecvBufMap;
-use crate::tcpls::frame::MAX_TCPLS_FRAGMENT_LEN;
+use crate::tcpls::frame::{Frame, MAX_TCPLS_FRAGMENT_LEN};
 use crate::tcpls::network_address::AddressMap;
 use crate::tcpls::stream::{SimpleIdHashMap, SimpleIdHashSet};
 use crate::verify::{

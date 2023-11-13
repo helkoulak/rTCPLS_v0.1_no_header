@@ -34,7 +34,7 @@ use smallvec::SmallVec;
 use crate::Error;
 use crate::msgs::deframer::MessageDeframer;
 use crate::recvbuf::RecvBuf;
-use crate::tcpls::frame::StreamFrameHeader;
+use crate::tcpls::frame::TcplsHeader;
 use crate::vecbuf::ChunkVecBuffer;
 
 pub const DEFAULT_BUFFER_LIMIT: usize = 64 * 1024;
