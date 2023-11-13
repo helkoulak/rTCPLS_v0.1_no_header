@@ -6,7 +6,7 @@ use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, PlainMes
 #[cfg(feature = "logging")]
 use crate::log::trace;
 use crate::recvbuf::RecvBuf;
-use crate::tcpls::frame::TcplsHeader;
+use crate::tcpls::frame::{Frame, TcplsHeader};
 use crate::tcpls::stream::SimpleIdHashMap;
 
 static SEQ_SOFT_LIMIT: u64 = 0x16909E7; //(((2 as f64).powf(24.5) as i64) - 0xFFFF) as u64; //0xffff_ffff_ffff_0000u64;
@@ -320,7 +320,7 @@ impl RecordLayer {
     }
 
 
-    pub(crate) fn encrypt_outgoing_zc(&mut self, plain: BorrowedPlainMessage, tcpls_header: &TcplsHeader) -> Vec<u8> {
+    pub(crate) fn encrypt_outgoing_zc(&mut self, plain: BorrowedPlainMessage, tcpls_header: &TcplsHeader, stream_header: Option<Frame>) -> Vec<u8> {
         debug_assert!(self.encrypt_state == DirectionState::Active);
         assert!(!self.encrypt_exhausted());
         let conn_id = self.conn_in_use;
@@ -331,7 +331,7 @@ impl RecordLayer {
             self.message_encrypter.derive_enc_conn_iv(conn_id);
         }
         self.message_encrypter
-            .encrypt_zc(plain, seq, conn_id, tcpls_header)
+            .encrypt_zc(plain, seq, conn_id, tcpls_header, stream_header)
             .unwrap()
     }
 

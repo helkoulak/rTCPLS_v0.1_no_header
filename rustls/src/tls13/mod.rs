@@ -15,8 +15,9 @@ use std::fmt;
 use std::io::Read;
 use ring::rand::SecureRandom;
 use octets::BufferError;
+use crate::msgs::codec::ListLength::U16;
 use crate::recvbuf::RecvBuf;
-use crate::tcpls::frame::{TCPLS_HEADER_SIZE, TcplsHeader, SAMPLE_PAYLOAD_LENGTH};
+use crate::tcpls::frame::{TCPLS_HEADER_SIZE, TcplsHeader, SAMPLE_PAYLOAD_LENGTH, Frame, STREAM_FRAME_HEADER_SIZE};
 
 pub(crate) mod key_schedule;
 
@@ -234,18 +235,35 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         Ok(output)
     }
 
-    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, header: &TcplsHeader) -> Result<Vec<u8>, Error> {
+    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: &TcplsHeader, stream_header: Option<Frame>) -> Result<Vec<u8>, Error> {
+        let stream_header_len =  match stream_header.as_ref() {
+            Some(header) => STREAM_FRAME_HEADER_SIZE,
+            None => 0,
+        };
         let tag_length =  self.enc_key.algorithm().tag_len();
         let header_protecter = &mut self.header_encrypter;
-        let mut payload_len = msg.payload.len() + 1 + tag_length;
+
+        let plaintext_len = msg.payload.len();
+
+        let mut payload_len = plaintext_len + stream_header_len + 1 + tag_length;
         let record_payload_length = payload_len + TCPLS_HEADER_SIZE;
         let mut input = vec![0; payload_len];
-        input.extend_from_slice(msg.payload);
-        msg.typ.encode(&mut input);
+        let mut b = octets::OctetsMut::with_slice(&mut input);
+
+        b.put_bytes(msg.payload).unwrap();
+
+        match stream_header {
+            Some(header) => {
+                header.encode(&mut b).unwrap();
+                b.put_u8(msg.typ.get_u8()).unwrap();
+            },
+            None => b.put_u8(msg.typ.get_u8()).unwrap(),
+        }
+
 
         let nonce = make_nonce(self.iv.get(&conn_id).unwrap(), seq);
 
-       let mut output= prepare_output(&header, record_payload_length).expect("output vector preparation failed");
+       let mut output= prepare_output(&tcpls_header, record_payload_length).expect("output vector preparation failed");
 
         let aad = make_tls13_aad_for_enc(output.as_slice());
 

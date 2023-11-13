@@ -88,10 +88,10 @@ impl Stream {
         !self.send.is_empty()
     }
 
-    pub fn build_header(&mut self, len: u16, fin: u8) -> StreamFrameHeader {
-        let header = StreamFrameHeader {
+    pub fn build_header(&mut self, len: u16) -> TcplsHeader {
+        let header = TcplsHeader {
             chunk_num: self.next_snd_pkt_num,
-            offset_step: (((fin as u16 & 0x01) << 15) | len),
+            offset_step: len,
             stream_id: self.id,
         };
 

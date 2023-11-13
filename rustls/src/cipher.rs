@@ -15,7 +15,7 @@ use crate::msgs::codec::Codec;
 
 
 use crate::recvbuf::RecvBuf;
-use crate::tcpls::frame::TcplsHeader;
+use crate::tcpls::frame::{Frame, TcplsHeader};
 
 
 
@@ -33,7 +33,7 @@ pub trait MessageDecrypter: Send + Sync {
 /// Objects with this trait can encrypt TLS messages.
 pub(crate) trait MessageEncrypter: Send + Sync {
     fn encrypt(&self, m: BorrowedPlainMessage, seq: u64, conn_id: u32) -> Result<Vec<u8>, Error>;
-    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: &TcplsHeader) -> Result<Vec<u8>, Error>;
+    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: &TcplsHeader, stream_header: Option<Frame>) -> Result<Vec<u8>, Error>;
     fn derive_enc_conn_iv(&mut self, conn_id: u32);
     fn get_tag_length(&self) -> usize;
 }
@@ -216,7 +216,7 @@ impl MessageEncrypter for InvalidMessageEncrypter {
         Err(Error::EncryptError)
     }
 
-    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: &TcplsHeader) -> Result<Vec<u8>, Error> {
+    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: &TcplsHeader, stream_frame_header: Option<Frame>) -> Result<Vec<u8>, Error> {
         todo!()
     }
     fn derive_enc_conn_iv(&mut self, conn_id: u32) {}

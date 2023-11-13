@@ -307,9 +307,9 @@ impl CommonState {
         }
 
         let mut stream =  self.streams.get_or_create(id, None).unwrap();
-        let header = stream.build_header(m.payload.len() as u16, 0);
+        let header = stream.build_header(m.payload.len() as u16);
         self.record_layer.set_conn_in_use(stream.attched_to);
-        let em = self.record_layer.encrypt_outgoing_zc(m, &header);
+        let em = self.record_layer.encrypt_outgoing_zc(m, &header, None);
         stream.send.append(em);
     }
 
@@ -617,7 +617,8 @@ impl CommonState {
         self.queued_key_update_message = Some(
             self.record_layer
                 .encrypt_outgoing_zc(message.borrow(),
-                                     &stream.build_header(message.payload.0.len() as u16, 0))
+                                     &stream.build_header(message.payload.0.len() as u16),
+                                     None)
         );
     }
 

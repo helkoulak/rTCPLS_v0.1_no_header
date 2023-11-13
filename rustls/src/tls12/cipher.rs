@@ -9,7 +9,7 @@ use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, OpaqueMe
 
 use ring::aead;
 use crate::recvbuf::RecvBuf;
-use crate::tcpls::frame::StreamFrameHeader;
+use crate::tcpls::frame::{Frame, TcplsHeader};
 
 const TLS12_AAD_SIZE: usize = 8 + 1 + 2 + 2;
 
@@ -143,7 +143,7 @@ impl MessageDecrypter for GcmMessageDecrypter {
         Ok(msg.into_plain_message())
     }
 
-    fn decrypt_zc(&self, msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, recv_buf: &mut RecvBuf, tcpls_header: &StreamFrameHeader) -> Result<PlainMessage, Error> {
+    fn decrypt_zc(&self, msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, recv_buf: &mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<PlainMessage, Error> {
         todo!()
     }
 
@@ -174,7 +174,7 @@ impl MessageEncrypter for GcmMessageEncrypter {
         Ok(payload)
     }
 
-    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: &StreamFrameHeader) -> Result<Vec<u8>, Error> {
+    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: &TcplsHeader, stream_frame_header: Option<Frame>) -> Result<Vec<u8>, Error> {
         todo!()
     }
 
@@ -264,7 +264,7 @@ impl MessageEncrypter for ChaCha20Poly1305MessageEncrypter {
         Ok(buf)
     }
 
-    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: &StreamFrameHeader) -> Result<Vec<u8>, Error> {
+    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: &TcplsHeader, stream_frame_header: Option<Frame>) -> Result<Vec<u8>, Error> {
         todo!()
     }
 

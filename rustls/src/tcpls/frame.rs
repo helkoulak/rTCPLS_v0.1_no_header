@@ -7,7 +7,11 @@ pub const TCPLS_HEADER_SIZE: usize = 8;
 
 pub const SAMPLE_PAYLOAD_LENGTH: usize = 16;
 
-pub const MAX_TCPLS_FRAGMENT_LEN: usize = MAX_FRAGMENT_LEN - TCPLS_HEADER_SIZE;
+pub const STREAM_FRAME_HEADER_SIZE: usize = 3;
+
+pub const MAX_TCPLS_FRAGMENT_LEN: usize = MAX_FRAGMENT_LEN - TCPLS_HEADER_SIZE - STREAM_FRAME_HEADER_SIZE;
+
+
 
 /*/// Payload max length for a TCPLS stream frame
 pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize =

@@ -16,7 +16,8 @@ use std::mem;
 use std::ops::{Deref, DerefMut};
 use crate::recvbuf::{RecvBuf, RecvBufMap};
 use crate::tcpls;
-use crate::tcpls::frame::StreamFrameHeader;
+use crate::tcpls::DEFAULT_CONNECTION_ID;
+use crate::tcpls::frame::TcplsHeader;
 use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
 /// A client or server connection.

@@ -184,7 +184,7 @@ impl TcplsSession {
                 .streams
                 .get_or_create(str_id, None)
                 .unwrap()
-                .build_header(chunk.len() as u16, fin_bit);
+                .build_header(chunk.len() as u16);
 
 
             // Close connection once we start to run out of
@@ -201,10 +201,14 @@ impl TcplsSession {
             let em = tls_connection
                 .record_layer
                 .encrypt_outgoing_zc(BorrowedPlainMessage {
-                    typ: ContentType::ApplicationData,
-                    version: ProtocolVersion::TLSv1_2,
-                    payload: chunk,
-                }, &header);
+                                    typ: ContentType::ApplicationData,
+                                    version: ProtocolVersion::TLSv1_2,
+                                    payload: chunk,
+                                }, &header,
+                                     Some(Frame::Stream {
+                                         length: chunk.len() as u16,
+                                         fin: fin_bit,
+                                     }));
 
             tls_connection
                 .streams
