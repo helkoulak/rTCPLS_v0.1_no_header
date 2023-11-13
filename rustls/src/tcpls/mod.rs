@@ -72,7 +72,7 @@ impl TcplsSession {
 
         let new_id = self.create_tcpls_connection_object(socket, is_server);
 
-        if new_id == 0 {
+        if new_id == DEFAULT_CONNECTION_ID {
             let client_conn = ClientConnection::new(tls_config, server_name)
                 .expect("Establishment of TLS session failed");
             let _ = self.tls_conn.insert(Connection::from(client_conn));
