@@ -208,25 +208,17 @@ impl RecordLayer {
         // Note that there's no reason to refuse to decrypt: the security
         // failure has already happened.
 
-        //TODO accordingly decryption of TCPLS header should happen at this point not before to avoid unnecessary processing
-        // in case data is already in plaintext
-        let conn_id = self.conn_in_use;
-        let want_close_before_decrypt = self.seq_map.as_ref(conn_id).read_seq == SEQ_SOFT_LIMIT;
-
+        let stream_id = tcpls_header.stream_id;
+        let want_close_before_decrypt = recv_buf.read_seq == SEQ_SOFT_LIMIT;
 
         let encrypted_len = encr.payload.len();
 
-        /// prepare crypto context for the specified connection
-        /// if IV already exists for the specified connection, the function does nothing
-        if !self.is_handshaking && conn_id != 0 {
-            self.message_decrypter.derive_dec_conn_iv(conn_id);
-        }
         match self
             .message_decrypter
-            .decrypt_zc(encr, self.seq_map.as_ref(conn_id).read_seq, conn_id, recv_buf, &tcpls_header)
+            .decrypt_zc(encr, recv_buf.read_seq, stream_id as u32, recv_buf, &tcpls_header)
         {
             Ok(plaintext) => {
-                self.seq_map.as_mut_ref(conn_id).read_seq += 1;
+                recv_buf.read_seq += 1;
                 if recv_buf.id > 0 {
                     recv_buf.next_recv_pkt_num += 1;
                 }
@@ -258,18 +250,18 @@ impl RecordLayer {
 
 }
 
-    /// The sequence number space for an open tcp connection
+    /*/// The sequence number space for an open tcp connection
     #[derive(Default)]
     pub(crate) struct RecSeqNumSpace {
-        connection_id: u32,
+        stream_id: u16,
         write_seq: u64,
         read_seq: u64,
-    }
+    }*/
 
-    impl RecSeqNumSpace {
-        pub(crate)  fn new(conn_id: u32) -> Self {
+    /*impl RecSeqNumSpace {
+        pub(crate)  fn new(stream_id: u16) -> Self {
             Self{
-                connection_id: conn_id,
+                stream_id,
                 ..Default::default()
             }
 
@@ -287,44 +279,44 @@ impl RecordLayer {
         /// Calling new creates the first seq num space along with the establishment of TLS session
         pub(crate) fn new() -> Self {
             let mut map = SimpleIdHashMap::default();
-            let seq = RecSeqNumSpace::new(0);
-            map.insert(0, seq);
+            let seq = RecSeqNumSpace::new(DEFAULT_STREAM_ID);
+            map.insert(DEFAULT_STREAM_ID as u64, seq);
             Self {
                 seq_num_map: map,
             }
         }
 
-        pub(crate) fn get_or_create(&mut self, conn_id: u32) -> &mut RecSeqNumSpace {
-            match self.seq_num_map.entry(conn_id as u64) {
+        pub(crate) fn get_or_create(&mut self, stream_id: u16) -> &mut RecSeqNumSpace {
+            match self.seq_num_map.entry(stream_id as u64) {
                 hash_map::Entry::Vacant(v) => {
-                    v.insert(RecSeqNumSpace::new(conn_id))
+                    v.insert(RecSeqNumSpace::new(stream_id))
                 },
                 hash_map::Entry::Occupied(v) => v.into_mut(),
             }
         }
 
         /// Creates a new sequence space or do nothing if already exists
-        pub(crate) fn create_new_seq_space(&mut self, conn_id: u32) {
-           if !self.seq_num_map.contains_key(&(conn_id as u64)){
-               self.seq_num_map.insert(conn_id as u64, RecSeqNumSpace::new(conn_id));
+        pub(crate) fn create_new_seq_space(&mut self, stream_id: u16) {
+           if !self.seq_num_map.contains_key(&(stream_id as u64)){
+               self.seq_num_map.insert(stream_id as u64, RecSeqNumSpace::new(stream_id));
            }
         }
 
-        pub(crate) fn as_ref(&self, conn_id: u32) -> & RecSeqNumSpace {
-            match self.seq_num_map.get(&(conn_id as u64)) {
+        pub(crate) fn as_ref(&self, stream_id: u16) -> & RecSeqNumSpace {
+            match self.seq_num_map.get(&(stream_id as u64)) {
                 Some(seq_space) => seq_space,
                 None => panic!("sequence space not found"),
             }
         }
 
-        pub(crate) fn as_mut_ref(&mut self, conn_id: u32) -> &mut RecSeqNumSpace {
-            match self.seq_num_map.get_mut(&(conn_id as u64)) {
+        pub(crate) fn as_mut_ref(&mut self, stream_id: u16) -> &mut RecSeqNumSpace {
+            match self.seq_num_map.get_mut(&(stream_id as u64)) {
                 Some(seq_space) => seq_space,
                 None => panic!("sequence space not found"),
             }
         }
 
-    }
+    }*/
 
 /// Result of decryption.
 #[derive(Debug)]
