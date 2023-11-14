@@ -61,6 +61,7 @@ pub struct Stream {
     /// The id of tcp connection the stream is attached to
     pub attched_to: u32,
     pub next_snd_pkt_num: u32,
+    pub write_seq: u64,
 }
 
 impl Stream {
@@ -72,6 +73,7 @@ impl Stream {
             send: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
             attched_to: 0,
             next_snd_pkt_num: 0,
+            write_seq: 0,
         }
     }
 

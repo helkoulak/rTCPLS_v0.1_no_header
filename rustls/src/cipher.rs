@@ -1,9 +1,5 @@
 #![allow(missing_docs)]
 
-
-use std::collections::HashMap;
-
-
 use crate::error::Error;
 use crate::msgs::codec;
 use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, PlainMessage};

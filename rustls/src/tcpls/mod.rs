@@ -139,15 +139,13 @@ impl TcplsSession {
         tls_connection.perhaps_write_key_update();
 
         // make sure you have the required stream
-        let (conn_id, cap) = match tls_connection.streams.get_or_create(str_id, attach_to) {
-            Ok(stream ) => {
-                (stream.attched_to, stream.send.apply_limit(input.len()))
-            },
+        let cap = match tls_connection.record_layer.streams.get_or_create(str_id) {
+            Ok(stream ) => stream.send.apply_limit(input.len()),
             Err(e) => return Err(e),
         } ;
 
         // set id of tcp connection to decide on crypto context and record seq space
-        tls_connection.record_layer.set_conn_in_use(conn_id);
+        tls_connection.record_layer.encrypt_for_stream(str_id);
 
         // we're respecting limit for plaintext data -- so we'll
         // be out by whatever the cipher+record overhead is.  That's a
@@ -181,8 +179,9 @@ impl TcplsSession {
             };
             // Build TCPLS header of record
             let mut header = tls_connection
+                .record_layer
                 .streams
-                .get_or_create(str_id, None)
+                .get_or_create(str_id)
                 .unwrap()
                 .build_header(chunk.len() as u16);
 
@@ -211,8 +210,9 @@ impl TcplsSession {
                                      }));
 
             tls_connection
+                .record_layer
                 .streams
-                .get_or_create(str_id, None)
+                .get_or_create(str_id)
                 .unwrap()
                 .send
                 .append(em);
@@ -238,12 +238,12 @@ impl TcplsSession {
             .get_mut(&(conn_id as u64))
             .unwrap()
             .socket;
-        let open_streams = tls_conn.streams.open_streams();
+        let open_streams = tls_conn.record_layer.streams.open_streams();
         for id in open_streams{
 
-            let stream = match tls_conn.streams.get_mut(id as u16) {
+            let stream = match tls_conn.record_layer.streams.get_mut(id as u16) {
                 Some(stream) => {
-                    if stream.attched_to != conn_id || stream.send.is_empty(){
+                    if stream.send.is_empty(){
                         continue
                     }
                     stream

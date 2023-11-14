@@ -18,6 +18,8 @@ pub struct RecvBuf {
     consumed: usize,
 
     pub next_recv_pkt_num: u32,
+
+    pub read_seq: u64,
 }
 
 impl RecvBuf {
