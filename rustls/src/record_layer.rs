@@ -28,7 +28,6 @@ enum DirectionState {
 pub struct RecordLayer {
     message_encrypter: Box<dyn MessageEncrypter>,
     message_decrypter: Box<dyn MessageDecrypter>,
-    seq_map: RecSeqNumMap,
     encrypt_state: DirectionState,
     decrypt_state: DirectionState,
     // id of currently used stream
@@ -48,7 +47,6 @@ impl RecordLayer {
         Self {
             message_encrypter: <dyn MessageEncrypter>::invalid(),
             message_decrypter: <dyn MessageDecrypter>::invalid(),
-            seq_map: RecSeqNumMap::new(),
             encrypt_state: DirectionState::Invalid,
             decrypt_state: DirectionState::Invalid,
             stream_in_use: 0,
@@ -181,60 +179,7 @@ impl RecordLayer {
         self.message_encrypter.get_tag_length()
     }
 
-    /// Decrypt a TLS message.
-    ///
-    /// `encr` is a decoded message allegedly received from the peer.
-    /// If it can be decrypted, its decryption is returned.  Otherwise,
-    /// an error is returned.
-    pub(crate) fn decrypt_incoming(
-        &mut self,
-        encr: BorrowedOpaqueMessage,
-    ) -> Result<Option<Decrypted>, Error> {
-        if self.decrypt_state != DirectionState::Active {
-            return Ok(Some(Decrypted {
-                want_close_before_decrypt: false,
-                plaintext: encr.into_plain_message(),
-            }));
-        }
 
-        // Set to `true` if the peer appears to getting close to encrypting
-        // too many messages with this key.
-        //
-        // Perhaps if we send an alert well before their counter wraps, a
-        // buggy peer won't make a terrible mistake here?
-        //
-        // Note that there's no reason to refuse to decrypt: the security
-        // failure has already happened.
-
-        let conn_id = self.conn_in_use;
-        let want_close_before_decrypt = self.seq_map.as_ref(conn_id).read_seq == SEQ_SOFT_LIMIT;
-
-
-        let encrypted_len = encr.payload.len();
-
-        /// prepare crypto context for the specified tcp connection
-        /// if IV already exists for the specified tcp connection, the function does nothing
-        if !self.is_handshaking && conn_id != 0 {
-            self.message_decrypter.derive_dec_conn_iv(conn_id);
-        }
-        match self
-            .message_decrypter
-            .decrypt(encr, self.seq_map.as_ref(conn_id).read_seq, conn_id)
-        {
-            Ok(plaintext) => {
-                self.seq_map.as_mut_ref(conn_id).read_seq += 1;
-                Ok(Some(Decrypted {
-                    want_close_before_decrypt,
-                    plaintext,
-                }))
-            }
-            Err(Error::DecryptError) if self.doing_trial_decryption(encrypted_len) => {
-                trace!("Dropping undecryptable message after aborted early_data");
-                Ok(None)
-            }
-            Err(err) => Err(err),
-        }
-    }
 
     /// Decrypt a TLS message.
     ///
