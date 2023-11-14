@@ -147,9 +147,9 @@ impl MessageDecrypter for GcmMessageDecrypter {
         todo!()
     }
 
-    fn derive_dec_conn_iv(&mut self, conn_id: u32) {
+   /* fn derive_dec_conn_iv(&mut self, stream_id: u16) {
         todo!()
-    }
+    }*/
 
     fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error> {
         todo!()
@@ -157,8 +157,8 @@ impl MessageDecrypter for GcmMessageDecrypter {
 }
 
 impl MessageEncrypter for GcmMessageEncrypter {
-    fn encrypt(&self, m: BorrowedPlainMessage, seq: u64, connection_id: u32) -> Result<Vec<u8>, Error> {
-        let nonce = make_nonce(&self.iv, seq);
+    fn encrypt(&self, m: BorrowedPlainMessage, seq: u64, stream_id: u32) -> Result<Vec<u8>, Error> {
+        let nonce = make_nonce(&self.iv, seq, stream_id);
         let aad = make_tls12_aad(seq, m.typ, m.version, m.payload.len());
 
         let total_len = m.payload.len() + self.enc_key.algorithm().tag_len();
@@ -178,9 +178,9 @@ impl MessageEncrypter for GcmMessageEncrypter {
         todo!()
     }
 
-    fn derive_enc_conn_iv(&mut self, conn_id: u32) {
+    /*fn derive_enc_conn_iv(&mut self, conn_id: u32) {
         todo!()
-    }
+    }*/
 
     fn get_tag_length(&self) -> usize {
         todo!()
@@ -239,9 +239,9 @@ impl MessageDecrypter for ChaCha20Poly1305MessageDecrypter {
         todo!()
     }
 
-    fn derive_dec_conn_iv(&mut self, conn_id: u32) {
+    /*fn derive_dec_conn_iv(&mut self, stream_id: u16) {
         todo!()
-    }
+    }*/
 
     fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error> {
         todo!()
@@ -249,8 +249,8 @@ impl MessageDecrypter for ChaCha20Poly1305MessageDecrypter {
 }
 
 impl MessageEncrypter for ChaCha20Poly1305MessageEncrypter {
-    fn encrypt(&self, m: BorrowedPlainMessage, seq: u64, connection_id: u32) -> Result<Vec<u8>, Error> {
-        let nonce = make_nonce(&self.enc_offset, seq);
+    fn encrypt(&self, m: BorrowedPlainMessage, seq: u64, stream_id: u32) -> Result<Vec<u8>, Error> {
+        let nonce = make_nonce(&self.enc_offset, seq, stream_id);
         let aad = make_tls12_aad(seq, m.typ, m.version, m.payload.len());
 
         let total_len = m.payload.len() + self.enc_key.algorithm().tag_len();
@@ -268,9 +268,9 @@ impl MessageEncrypter for ChaCha20Poly1305MessageEncrypter {
         todo!()
     }
 
-    fn derive_enc_conn_iv(&mut self, conn_id: u32) {
+    /*fn derive_enc_conn_iv(&mut self, conn_id: u32) {
         todo!()
-    }
+    }*/
 
     fn get_tag_length(&self) -> usize {
         todo!()

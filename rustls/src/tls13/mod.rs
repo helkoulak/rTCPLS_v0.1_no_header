@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-use crate::cipher::{make_nonce, Iv, MessageDecrypter, MessageEncrypter, derive_connection_iv, HeaderProtector};
+use crate::cipher::{make_nonce, Iv, MessageDecrypter, MessageEncrypter, HeaderProtector};
 use crate::enums::ContentType;
 use crate::enums::{CipherSuite, ProtocolVersion};
 use crate::error::{Error, PeerMisbehaved};
@@ -118,13 +117,13 @@ impl fmt::Debug for Tls13CipherSuite {
 
 struct Tls13MessageEncrypter {
     enc_key: aead::LessSafeKey,
-    iv: HashMap<u32, Iv>,
+    iv: Iv,
     header_encrypter: HeaderProtector,
 }
 
 struct Tls13MessageDecrypter {
     dec_key: aead::LessSafeKey,
-    iv: HashMap<u32, Iv>,
+    iv: Iv,
     header_decrypter: HeaderProtector,
 }
 
@@ -208,7 +207,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         let mut input = vec![0; payload_len];
         input.extend_from_slice(m.payload);
         m.typ.encode(&mut input);
-        let nonce = make_nonce(self.iv.get(&stream_id).unwrap(), seq);
+        let nonce = make_nonce(&self.iv, seq, stream_id);
 
         let aad = make_tls13_aad_no_header(record_payload_length);
 
@@ -235,7 +234,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         Ok(output)
     }
 
-    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: &TcplsHeader, stream_header: Option<Frame>) -> Result<Vec<u8>, Error> {
+    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, stream_id: u32, tcpls_header: &TcplsHeader, stream_header: Option<Frame>) -> Result<Vec<u8>, Error> {
         let stream_header_len =  match stream_header.as_ref() {
             Some(header) => STREAM_FRAME_HEADER_SIZE,
             None => 0,
@@ -256,12 +255,16 @@ impl MessageEncrypter for Tls13MessageEncrypter {
             Some(header) => {
                 header.encode(&mut b).unwrap();
                 b.put_u8(msg.typ.get_u8()).unwrap();
+                ()
             },
-            None => b.put_u8(msg.typ.get_u8()).unwrap(),
+            None => {
+                b.put_u8(msg.typ.get_u8()).unwrap();
+                ()
+            },
         }
 
 
-        let nonce = make_nonce(self.iv.get(&conn_id).unwrap(), seq);
+        let nonce = make_nonce(&self.iv, seq, stream_id);
 
        let mut output= prepare_output(&tcpls_header, record_payload_length).expect("output vector preparation failed");
 
@@ -285,11 +288,11 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         Ok(output)
     }
 
-    fn derive_enc_conn_iv(&mut self, conn_id: u32) {
+    /*fn derive_enc_conn_iv(&mut self, conn_id: u32) {
         if !self.iv.contains_key(&conn_id){
             derive_connection_iv(&mut self.iv, conn_id);
         }
-    }
+    }*/
 
     fn get_tag_length(&self) -> usize {
         self.enc_key.algorithm().tag_len()
@@ -303,7 +306,7 @@ impl MessageDecrypter for Tls13MessageDecrypter {
             return Err(Error::DecryptError);
         }
 
-        let nonce = make_nonce(self.iv.get(&stream_id).unwrap(), seq);
+        let nonce = make_nonce(&self.iv, seq, stream_id);
         let aad = make_tls13_aad_no_header(payload.len());
 
         let mut output = &mut vec![0; payload.len()];
@@ -343,13 +346,13 @@ impl MessageDecrypter for Tls13MessageDecrypter {
     }
 
 
-    fn decrypt_zc(&self, mut msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, recv_buf: &mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<PlainMessage, Error> {
+    fn decrypt_zc(&self, mut msg: BorrowedOpaqueMessage, seq: u64, stream_id: u32, recv_buf: &mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<PlainMessage, Error> {
         let payload = msg.payload;
         if payload.len() < self.dec_key.algorithm().tag_len() {
             return Err(Error::DecryptError);
         }
 
-        let nonce = make_nonce(self.iv.get(&conn_id).unwrap(), seq);
+        let nonce = make_nonce(&self.iv, seq, stream_id);
         let aad = make_tls13_aad_for_dec(payload.len(), &tcpls_header);
 
         // output buffer must be at least as big as the input buffer
@@ -371,7 +374,6 @@ impl MessageDecrypter for Tls13MessageDecrypter {
         if recv_buf.get_mut()[..plain_len].len() > MAX_FRAGMENT_LEN + 1 {
             return Err(Error::PeerSentOversizedRecord);
         }
-
 
         let mut new_size = 0;
         (msg.typ, new_size)  = unpad_tls13_from_slice(recv_buf.get_mut());
@@ -399,11 +401,11 @@ impl MessageDecrypter for Tls13MessageDecrypter {
         })
     }
 
-    fn derive_dec_conn_iv(&mut self, conn_id: u32) {
-        if !self.iv.contains_key(&conn_id) {
-            derive_connection_iv(&mut self.iv, conn_id);
+    /*fn derive_dec_conn_iv(&mut self, stream_id: u16) {
+        if !self.iv.contains_key(&stream_id) {
+            derive_connection_iv(&mut self.iv, stream_id);
         }
-    }
+    }*/
 
     fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error> {
         self.header_decrypter.decrypt_in_output(input, header)

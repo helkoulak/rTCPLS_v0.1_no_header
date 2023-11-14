@@ -12,29 +12,24 @@ use ring::{aead, hkdf};
 use ring::rand::SecureRandom;
 use siphasher::sip::SipHasher;
 
-
-
 use crate::recvbuf::RecvBuf;
 use crate::tcpls::frame::{Frame, TcplsHeader};
-
-
-
 
 /// Objects with this trait can decrypt TLS messages.
 pub trait MessageDecrypter: Send + Sync {
     /// Perform the decryption over the concerned TLS message.
 
     fn decrypt(&self, m: BorrowedOpaqueMessage, seq: u64, conn_id: u32) -> Result<PlainMessage, Error>;
-   fn decrypt_zc(&self, msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, recv_buf: &mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<PlainMessage, Error>;
-    fn derive_dec_conn_iv(&mut self, conn_id: u32);
+   fn decrypt_zc(&self, msg: BorrowedOpaqueMessage, seq: u64, stream_id: u32, recv_buf: &mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<PlainMessage, Error>;
+   /* fn derive_dec_conn_iv(&mut self, stream_id: u32);*/
     fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error>;
 }
 
 /// Objects with this trait can encrypt TLS messages.
 pub(crate) trait MessageEncrypter: Send + Sync {
-    fn encrypt(&self, m: BorrowedPlainMessage, seq: u64, conn_id: u32) -> Result<Vec<u8>, Error>;
-    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: &TcplsHeader, stream_header: Option<Frame>) -> Result<Vec<u8>, Error>;
-    fn derive_enc_conn_iv(&mut self, conn_id: u32);
+    fn encrypt(&self, m: BorrowedPlainMessage, seq: u64, stream_id: u32) -> Result<Vec<u8>, Error>;
+    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, stream_id: u32, tcpls_header: &TcplsHeader, stream_header: Option<Frame>) -> Result<Vec<u8>, Error>;
+    /*fn derive_enc_conn_iv(&mut self, stream_id: u32);*/
     fn get_tag_length(&self) -> usize;
 }
 
@@ -90,9 +85,10 @@ impl From<hkdf::Okm<'_, IvLen>> for Iv {
     }
 }
 
-pub(crate) fn make_nonce(iv: &Iv, seq: u64) -> ring::aead::Nonce {
+pub(crate) fn make_nonce(iv: &Iv, seq: u64, stream_id: u32) -> ring::aead::Nonce {
     let mut nonce = [0u8; ring::aead::NONCE_LEN];
     codec::put_u64(seq, &mut nonce[4..]);
+    codec::put_u32(stream_id,&mut nonce[..4]);
 
     nonce
         .iter_mut()
@@ -104,9 +100,9 @@ pub(crate) fn make_nonce(iv: &Iv, seq: u64) -> ring::aead::Nonce {
     aead::Nonce::assume_unique_for_key(nonce)
 }
 
-pub(crate) fn derive_connection_iv(iv: &mut HashMap<u32, Iv>, conn_id: u32){
+/*pub(crate) fn derive_connection_iv(iv: &mut HashMap<u32, Iv>, stream_id: u32){
         let mut id = [0u8; aead::NONCE_LEN];
-        codec::put_u32(conn_id, &mut id[..4]);
+        codec::put_u32(stream_id, &mut id[..4]);
 
         id
             .iter_mut()
@@ -114,8 +110,8 @@ pub(crate) fn derive_connection_iv(iv: &mut HashMap<u32, Iv>, conn_id: u32){
             .for_each(|(id, iv)| {
                 *id ^= *iv;
             });
-        iv.insert(conn_id, Iv::copy(&id));
-    }
+        iv.insert(stream_id, Iv::copy(&id));
+    }*/
 
 pub(crate) struct HeaderProtector{
     key: [u8;16],
@@ -219,7 +215,7 @@ impl MessageEncrypter for InvalidMessageEncrypter {
     fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, conn_id: u32, tcpls_header: &TcplsHeader, stream_frame_header: Option<Frame>) -> Result<Vec<u8>, Error> {
         todo!()
     }
-    fn derive_enc_conn_iv(&mut self, conn_id: u32) {}
+   /* fn derive_enc_conn_iv(&mut self, conn_id: u32) {}*/
 
     fn get_tag_length(&self) -> usize {
         todo!()
@@ -238,9 +234,9 @@ impl MessageDecrypter for InvalidMessageDecrypter {
         todo!()
     }
 
-    fn derive_dec_conn_iv(&mut self, stream_id: u32) {
+   /* fn derive_dec_conn_iv(&mut self, stream_id: u16) {
 
-    }
+    }*/
 
     fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error> {
         todo!()
