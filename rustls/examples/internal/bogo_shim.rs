@@ -22,6 +22,7 @@ use std::io::{self, BufReader, Read, Write};
 use std::sync::Arc;
 use std::time::{self, SystemTime};
 use std::{env, fs, net, process, thread};
+use rustls::tcpls::DEFAULT_CONNECTION_ID;
 
 static BOGO_NACK: i32 = 89;
 

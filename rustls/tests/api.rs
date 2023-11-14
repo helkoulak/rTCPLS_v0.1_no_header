@@ -4050,6 +4050,7 @@ use rustls::internal::msgs::{
     handshake::ClientExtension, handshake::HandshakePayload, message::Message,
     message::MessagePayload,
 };
+use rustls::tcpls::DEFAULT_CONNECTION_ID;
 
 #[test]
 fn test_server_rejects_duplicate_sni_names() {
