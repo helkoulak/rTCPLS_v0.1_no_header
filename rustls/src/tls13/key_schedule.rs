@@ -107,10 +107,10 @@ impl KeyScheduleEarly {
         match common.side {
             Side::Client => self
                 .ks
-                .set_encrypter(&client_early_traffic_secret, common, true),
+                .set_encrypter(&client_early_traffic_secret, common),
             Side::Server => self
                 .ks
-                .set_decrypter(&client_early_traffic_secret, common, true),
+                .set_decrypter(&client_early_traffic_secret, common),
         }
 
         #[cfg(feature = "quic")]
@@ -182,12 +182,12 @@ impl KeyScheduleHandshakeStart {
 
         // Decrypt with the peer's key, encrypt with our own key
         new.ks
-            .set_decrypter(&new.server_handshake_traffic_secret, common, true);
+            .set_decrypter(&new.server_handshake_traffic_secret, common);
 
         if !early_data_enabled {
             // Set the client encryption key for handshakes if early data is not used
             new.ks
-                .set_encrypter(&new.client_handshake_traffic_secret, common, true);
+                .set_encrypter(&new.client_handshake_traffic_secret, common);
         }
 
         new
@@ -207,7 +207,7 @@ impl KeyScheduleHandshakeStart {
         // If not doing early_data after all, this is corrected later to the handshake
         // keys (now stored in key_schedule).
         new.ks
-            .set_encrypter(&new.server_handshake_traffic_secret, common, true);
+            .set_encrypter(&new.server_handshake_traffic_secret, common);
         new
     }
 
@@ -266,7 +266,7 @@ impl KeyScheduleHandshake {
     pub(crate) fn set_handshake_encrypter(&self, common: &mut CommonState) {
         debug_assert_eq!(common.side, Side::Client);
         self.ks
-            .set_encrypter(&self.client_handshake_traffic_secret, common, true);
+            .set_encrypter(&self.client_handshake_traffic_secret, common);
     }
 
     pub(crate) fn set_handshake_decrypter(
@@ -277,12 +277,12 @@ impl KeyScheduleHandshake {
         debug_assert_eq!(common.side, Side::Server);
         let secret = &self.client_handshake_traffic_secret;
         match skip_requested {
-            None => self.ks.set_decrypter(secret, common, true),
+            None => self.ks.set_decrypter(secret, common),
             Some(max_early_data_size) => common
                 .record_layer
                 .set_message_decrypter_with_trial_decryption(
                     self.ks
-                        .derive_decrypter(&self.client_handshake_traffic_secret, true),
+                        .derive_decrypter(&self.client_handshake_traffic_secret),
                     max_early_data_size,
                 ),
         }
@@ -305,7 +305,7 @@ impl KeyScheduleHandshake {
 
         traffic
             .ks
-            .set_encrypter(server_secret, common, true);
+            .set_encrypter(server_secret, common);
 
         #[cfg(feature = "quic")]
         if common.is_quic() {
@@ -356,10 +356,10 @@ impl KeyScheduleClientBeforeFinished {
 
         self.traffic
             .ks
-            .set_decrypter(server_secret, common, true);
+            .set_decrypter(server_secret, common);
         self.traffic
             .ks
-            .set_encrypter(client_secret, common, true);
+            .set_encrypter(client_secret, common);
 
         #[cfg(feature = "quic")]
         if common.is_quic() {
@@ -388,7 +388,7 @@ impl KeyScheduleTrafficWithClientFinishedPending {
         debug_assert_eq!(common.side, Side::Server);
         self.traffic
             .ks
-            .set_decrypter(&self.handshake_client_traffic_secret, common, true);
+            .set_decrypter(&self.handshake_client_traffic_secret, common);
     }
 
     pub(crate) fn sign_client_finish(
@@ -407,8 +407,7 @@ impl KeyScheduleTrafficWithClientFinishedPending {
             &self
                 .traffic
                 .current_client_traffic_secret,
-            common,
-            true,
+            common
         );
 
         (self.traffic, tag)
@@ -465,12 +464,12 @@ impl KeyScheduleTraffic {
     pub(crate) fn update_encrypter_and_notify(&mut self, common: &mut CommonState) {
         let secret = self.next_application_traffic_secret(common.side);
         common.enqueue_key_update_notification();
-        self.ks.set_encrypter(&secret, common, true);
+        self.ks.set_encrypter(&secret, common);
     }
 
     pub(crate) fn update_decrypter(&mut self, common: &mut CommonState) {
         let secret = self.next_application_traffic_secret(common.side.peer());
-        self.ks.set_decrypter(&secret, common, true);
+        self.ks.set_decrypter(&secret, common);
     }
 
     pub(crate) fn next_application_traffic_secret(&mut self, side: Side) -> hkdf::Prk {
