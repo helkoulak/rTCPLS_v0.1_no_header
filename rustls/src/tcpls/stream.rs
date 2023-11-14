@@ -225,7 +225,6 @@ impl StreamMap {
     /// error is returned.
     pub fn get_or_create(
         &mut self, stream_id: u16,
-        attach_to: Option<u32>,
     ) -> Result<&mut Stream, Error> {
         let (stream, is_new_and_writable) = match self.streams.entry(stream_id as u64) {
             hash_map::Entry::Vacant(v) => {
@@ -235,10 +234,6 @@ impl StreamMap {
                 }
 
                 let mut s = Stream::new(stream_id);
-                s.attched_to = match attach_to {
-                    Some(id) => id,
-                    None => 0, // By default the stream is attached to connection 0
-                };
 
                 let is_writable = s.is_writable();
 
@@ -250,7 +245,7 @@ impl StreamMap {
 
 
         if is_new_and_writable {
-            self.writable.insert((stream_id as u64));
+            self.writable.insert(stream_id as u64);
         }
 
         Ok(stream)
@@ -396,6 +391,6 @@ impl ExactSizeIterator for StreamIter {
 
 fn test_create_stream(){
     let mut map = StreamMap::new();
-    let stream = map.get_or_create(55, None).unwrap();
+    let stream = map.get_or_create(55).unwrap();
     assert_eq!(stream.send.is_empty(), true)
 }

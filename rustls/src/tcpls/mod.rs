@@ -119,13 +119,11 @@ impl TcplsSession {
                 .expect("Establishing a TLS session has failed");
             let _ = self.tls_conn.insert(Connection::from(server_conn));
             let _ = self.tls_config.insert(TlsConfig::from(config));
-        }else {
-            self.tls_conn.as_mut().unwrap().record_layer.create_new_seq_space(conn_id);
         }
         Ok(conn_id)
     }
 
-    pub fn stream_send(&mut self, str_id: u16, input: &[u8], fin: bool, attach_to: Option<u32>) -> Result<usize, Error> {
+    pub fn stream_send(&mut self, str_id: u16, input: &[u8], fin: bool) -> Result<usize, Error> {
 
         let mut tls_connection = self.tls_conn.as_mut().unwrap();
 
