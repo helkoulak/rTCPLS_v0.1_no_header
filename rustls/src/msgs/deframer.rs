@@ -10,7 +10,7 @@ use crate::error::{Error, InvalidMessage, PeerMisbehaved};
 use crate::msgs::{codec, message};
 use crate::msgs::message::{BorrowedOpaqueMessage, MessageError};
 use crate::record_layer::{Decrypted, RecordLayer};
-use crate::recvbuf::{RecvBuf, RecvBufMap};
+use crate::recvbuf::RecvBufMap;
 use crate::tcpls::frame::{TcplsHeader, TCPLS_HEADER_SIZE};
 use crate::tcpls::stream::SimpleIdHashMap;
 
@@ -555,7 +555,7 @@ impl MessageDeframerMap {
 #[cfg(test)]
 mod tests {
     use super::MessageDeframer;
-    use crate::msgs::message::{MAX_WIRE_SIZE, Message, PlainMessage};
+    use crate::msgs::message::{MAX_WIRE_SIZE, Message};
     use crate::record_layer::RecordLayer;
     use crate::{ContentType, Error, InvalidMessage};
 

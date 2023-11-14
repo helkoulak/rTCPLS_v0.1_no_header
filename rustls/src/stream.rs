@@ -2,7 +2,7 @@ use crate::conn::{ConnectionCommon, SideData};
 
 use std::io::{IoSlice, Read, Result, Write};
 use std::ops::{Deref, DerefMut};
-use crate::recvbuf::{RecvBuf, RecvBufMap};
+use crate::recvbuf::RecvBufMap;
 
 /// This type implements `io::Read` and `io::Write`, encapsulating
 /// a Connection `C` and an underlying transport `T`, such as a socket.

@@ -12,12 +12,12 @@ use crate::suites::{BulkAlgorithm, CipherSuiteCommon, SupportedCipherSuite};
 use ring::aead;
 
 use std::fmt;
-use std::io::Read;
+
 use ring::rand::SecureRandom;
 use octets::BufferError;
-use crate::msgs::codec::ListLength::U16;
+
 use crate::recvbuf::RecvBuf;
-use crate::tcpls::frame::{TCPLS_HEADER_SIZE, TcplsHeader, SAMPLE_PAYLOAD_LENGTH, Frame, STREAM_FRAME_HEADER_SIZE};
+use crate::tcpls::frame::{TCPLS_HEADER_SIZE, TcplsHeader, Frame, STREAM_FRAME_HEADER_SIZE};
 
 pub(crate) mod key_schedule;
 

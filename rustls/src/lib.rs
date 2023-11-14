@@ -201,6 +201,7 @@
 //! # }
 //! use std::io;
 //! use rustls::Connection;
+//! use rustls::tcpls::DEFAULT_CONNECTION_ID;
 //!
 //! client.writer().write(b"GET / HTTP/1.0\r\n\r\n").unwrap();
 //! let mut socket = connect("example.com", 443);

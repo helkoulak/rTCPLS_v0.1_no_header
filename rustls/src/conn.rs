@@ -3,7 +3,7 @@ use crate::enums::{AlertDescription, ContentType};
 use crate::error::{Error, PeerMisbehaved};
 #[cfg(feature = "logging")]
 use crate::log::trace;
-use crate::msgs::deframer::{Deframed, MessageDeframer};
+use crate::msgs::deframer::Deframed;
 use crate::msgs::handshake::Random;
 use crate::msgs::message::{Message, MessagePayload, PlainMessage};
 #[cfg(feature = "secret_extraction")]
@@ -14,10 +14,10 @@ use std::fmt::Debug;
 use std::io;
 use std::mem;
 use std::ops::{Deref, DerefMut};
-use crate::recvbuf::{RecvBuf, RecvBufMap};
-use crate::tcpls;
-use crate::tcpls::DEFAULT_CONNECTION_ID;
-use crate::tcpls::frame::TcplsHeader;
+use crate::recvbuf::RecvBufMap;
+
+
+
 use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
 /// A client or server connection.

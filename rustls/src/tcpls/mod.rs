@@ -21,7 +21,7 @@ use crate::msgs::message::BorrowedPlainMessage;
 use crate::recvbuf::RecvBufMap;
 use crate::tcpls::frame::{Frame, MAX_TCPLS_FRAGMENT_LEN};
 use crate::tcpls::network_address::AddressMap;
-use crate::tcpls::stream::{SimpleIdHashMap, SimpleIdHashSet};
+use crate::tcpls::stream::SimpleIdHashMap;
 use crate::verify::{
     AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
 };

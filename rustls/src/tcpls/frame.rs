@@ -1,5 +1,5 @@
-use octets::{Octets, varint_len};
-use crate::{Error, InvalidMessage, rand};
+use octets::varint_len;
+use crate::{Error, InvalidMessage};
 use crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
 
 /// chunk_num = 4 Bytes + Offset_step = 2 Bytes + Stream Id = 2 Bytes.

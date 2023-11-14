@@ -19,7 +19,7 @@ use crate::record_layer;
 use crate::suites::PartiallyExtractedSecrets;
 use crate::suites::SupportedCipherSuite;
 
-use crate::tcpls::stream::{DEFAULT_STREAM_ID, StreamMap};
+use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
 #[cfg(feature = "tls12")]
 use crate::tls12::ConnectionSecrets;

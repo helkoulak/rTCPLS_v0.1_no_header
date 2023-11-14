@@ -2,10 +2,10 @@ use crate::cipher::{make_nonce, Iv, MessageDecrypter, MessageEncrypter};
 use crate::enums::ContentType;
 use crate::enums::ProtocolVersion;
 use crate::error::Error;
-use crate::msgs::base::Payload;
+
 use crate::msgs::codec;
-use crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
-use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, OpaqueMessage, PlainMessage};
+
+use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, PlainMessage};
 
 use ring::aead;
 use crate::recvbuf::RecvBuf;
