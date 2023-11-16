@@ -88,7 +88,7 @@ impl TcplsSession {
         tcp_conn.local_address_id = self.address_map.next_local_address_id;
         tcp_conn.remote_address_id = self.address_map.next_peer_address_id;
 
-        if tcp_conn.connection_id == 0 {
+        if tcp_conn.connection_id == DEFAULT_CONNECTION_ID {
             tcp_conn.is_primary = true;
         }
 
