@@ -140,15 +140,16 @@ impl TcplsSession {
             Err(e) => return Err(e),
         } ;
 
-        // set id of tcp connection to decide on crypto context and record seq space
-        tls_connection.record_layer.encrypt_for_stream(str_id);
-
         // we're respecting limit for plaintext data -- so we'll
         // be out by whatever the cipher+record overhead is.  That's a
         // constant and predictable amount.
         if cap == 0 && !input.is_empty() {
+            tls_connection.record_layer.streams.remove_writable(str_id  as u64);
             return Err(Error::Done);
         }
+
+        // set id of stream to decide on crypto context and record seq space
+        tls_connection.record_layer.encrypt_for_stream(str_id);
 
         let (buf, fin) = if cap < input.len() {
             (&input[..cap], false)
@@ -177,7 +178,7 @@ impl TcplsSession {
             let mut header = tls_connection
                 .record_layer
                 .streams
-                .get_or_create(str_id)
+                .get_mut(str_id)
                 .unwrap()
                 .build_header(chunk.len() as u16);
 
@@ -208,13 +209,17 @@ impl TcplsSession {
             tls_connection
                 .record_layer
                 .streams
-                .get_or_create(str_id)
+                .get_mut(str_id)
                 .unwrap()
                 .send
                 .append(em);
 
             buffered += chunk.len();
         }
+
+        tls_connection
+            .record_layer
+            .streams.insert_flushable(str_id as u64);
 
         Ok(buffered)
     }
