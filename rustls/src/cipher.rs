@@ -24,7 +24,7 @@ pub trait MessageDecrypter: Send + Sync {
 /// Objects with this trait can encrypt TLS messages.
 pub(crate) trait MessageEncrypter: Send + Sync {
     fn encrypt(&self, m: BorrowedPlainMessage, seq: u64, stream_id: u32) -> Result<Vec<u8>, Error>;
-    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, stream_id: u32, tcpls_header: &TcplsHeader, stream_header: Option<Frame>) -> Result<Vec<u8>, Error>;
+    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, stream_id: u32, tcpls_header: &TcplsHeader, frame_header: Option<Frame>) -> Result<Vec<u8>, Error>;
     /*fn derive_enc_conn_iv(&mut self, stream_id: u32);*/
     fn get_tag_length(&self) -> usize;
 }

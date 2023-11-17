@@ -234,8 +234,8 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         Ok(output)
     }
 
-    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, stream_id: u32, tcpls_header: &TcplsHeader, stream_header: Option<Frame>) -> Result<Vec<u8>, Error> {
-        let stream_header_len =  match stream_header.as_ref() {
+    fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, stream_id: u32, tcpls_header: &TcplsHeader, frame_header: Option<Frame>) -> Result<Vec<u8>, Error> {
+        let stream_header_len =  match frame_header.as_ref() {
             Some(header) => STREAM_FRAME_HEADER_SIZE,
             None => 0,
         };
@@ -251,7 +251,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
 
         b.put_bytes(msg.payload).unwrap();
 
-        match stream_header {
+        match frame_header {
             Some(header) => {
                 header.encode(&mut b).unwrap();
                 b.put_u8(msg.typ.get_u8()).unwrap();
