@@ -254,8 +254,10 @@ impl StreamMap {
     /// Adds the stream ID to the readable streams set.
     ///
     /// If the stream was already in the list, this does nothing.
-    pub fn insert_readable(&mut self, stream_id: u64) {
-        self.readable.insert(stream_id);
+    pub fn insert_readable(&mut self, id: u64) {
+        if !self.readable.contains(&id) {
+            self.readable.insert(id);
+        }
     }
 
     /// Removes the stream ID from the readable streams set.
@@ -269,8 +271,10 @@ impl StreamMap {
     /// to when an existing stream becomes writable.
     ///
     /// If the stream was already in the list, this does nothing.
-    pub fn insert_writable(&mut self, stream_id: u64) {
-        self.writable.insert(stream_id);
+    pub fn insert_writable(&mut self, id: u64) {
+        if !self.writable.contains(&id) {
+            self.writable.insert(id);
+        }
     }
 
     /// Removes the stream ID from the writable streams set.
@@ -284,7 +288,11 @@ impl StreamMap {
     /// Adds the stream ID to the flushable streams set.
     ///
     /// If the stream was already in the list, this does nothing.
-    pub fn insert_flushable(&mut self, stream_id: u64) { self.flushable.insert(stream_id); }
+    pub fn insert_flushable(&mut self, id: u64) {
+        if !self.flushable.contains(&id) {
+            self.flushable.insert(id);
+        }
+    }
 
     /// Removes the stream ID from the flushable streams set.
     pub fn remove_flushable(&mut self, stream_id: u64) { self.flushable.remove(&stream_id); }
@@ -292,7 +300,11 @@ impl StreamMap {
     /// Adds the stream ID to the collected streams set.
     ///
     /// If the stream was already in the list, this does nothing.
-    pub fn insert_collected(&mut self, stream_id: u64) { self.collected.insert(stream_id); }
+    pub fn insert_collected(&mut self, id: u64) {
+        if !self.collected.contains(&id) {
+            self.collected.insert(id);
+        }
+    }
 
     /// Removes the stream ID from the collected streams set.
     pub fn remove_collected(&mut self, stream_id: u64) { self.collected.remove(&stream_id); }
