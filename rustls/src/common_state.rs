@@ -289,16 +289,15 @@ impl CommonState {
             fin = false;
         }
 
-        let iter = self.message_fragmenter.fragment_slice(
+        let (iter, mut count) = self.message_fragmenter.fragment_slice(
             ContentType::ApplicationData,
             ProtocolVersion::TLSv1_2,
             &payload[..len],
         );
-        let mut num_of_chunks = iter.len();
         for m in iter {
-            num_of_chunks -= 1;
+            count -= 1;
             //consider flag fin when reaching last chunk
-            let finish = if num_of_chunks == 0 {
+            let finish = if count == 0 {
                 fin
             } else {
                 false

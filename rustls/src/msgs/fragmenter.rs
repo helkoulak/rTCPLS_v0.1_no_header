@@ -30,7 +30,8 @@ impl MessageFragmenter {
         &self,
         msg: &'a PlainMessage,
     ) -> impl Iterator<Item = BorrowedPlainMessage<'a>> + 'a {
-        self.fragment_slice(msg.typ, msg.version, &msg.payload.0)
+        let (iter, count) = self.fragment_slice(msg.typ, msg.version, &msg.payload.0);
+        iter
     }
 
     /// Enqueue borrowed fragments of (version, typ, payload) which
@@ -40,14 +41,15 @@ impl MessageFragmenter {
         typ: ContentType,
         version: ProtocolVersion,
         payload: &'a [u8],
-    ) -> impl Iterator<Item = BorrowedPlainMessage<'a>> + 'a {
-        payload
+    ) -> (impl Iterator<Item = BorrowedPlainMessage<'a>> + 'a, usize) {
+        let count = payload.chunks(MAX_TCPLS_FRAGMENT_LEN).len();
+        (payload
             .chunks(MAX_TCPLS_FRAGMENT_LEN)
             .map(move |c| BorrowedPlainMessage {
                 typ,
                 version,
                 payload: c,
-            })
+            }), count)
     }
 
     /// Set the maximum fragment size that will be produced.
