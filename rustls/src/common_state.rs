@@ -323,18 +323,10 @@ impl CommonState {
             // plaintext to send once we do.
             let len = match limit {
                 Limit::Yes => self
-                    .record_layer
-                    .streams
-                    .get_or_create(id)
-                    .unwrap()
-                    .send
+                    .sendable_plaintext
                     .append_limited_copy(data),
                 Limit::No => self
-                    .record_layer
-                    .streams
-                    .get_or_create(id)
-                    .unwrap()
-                    .send
+                    .sendable_plaintext
                     .append(data.to_vec()),
             };
             return len;
