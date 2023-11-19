@@ -335,7 +335,7 @@ impl CommonState {
         let stream_frame_header = match m.typ {
             ContentType::ApplicationData => {
                 Some(Frame::Stream {
-                    length: chunk.len() as u16,
+                    length: m.payload.len() as u16,
                     fin: fin.into(),
                 })
             },
