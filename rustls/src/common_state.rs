@@ -104,8 +104,8 @@ impl CommonState {
     /// Returns true if the caller should call [`Connection::write_tls`] as soon as possible.
     ///
     /// [`Connection::write_tls`]: crate::Connection::write_tls
-    pub fn wants_write(&self, id: u16) -> bool { /// TODO: change logic to check all open streams
-        !self.record_layer.streams.get(id).unwrap().send.is_empty()
+    pub fn wants_write(&self) -> bool {
+        self.record_layer.streams.has_flushable()
     }
 
 
@@ -600,9 +600,9 @@ impl CommonState {
         //
         // In the handshake case we don't have readable plaintext before the handshake has
         // completed, but also don't want to read if we still have sendable tls.
-        self.received_plaintext.is_empty()
+        !self.deframers_map.has_data_to_process()
             && !self.has_received_close_notify
-            && (self.may_send_application_data || self.record_layer.streams.get(DEFAULT_STREAM_ID).unwrap().send.is_empty())
+            && (self.may_send_application_data || !self.wants_write())
     }
 
     pub(crate) fn current_io_state(&self, id: u16) -> IoState {

@@ -547,6 +547,15 @@ impl MessageDeframerMap {
         }
     }
 
+    pub(crate) fn has_data_to_process(&self) -> bool {
+        let mut has_data = false;
+        let itr = self.deframers.iter();
+        for deframer in itr {
+            has_data |= deframer.1.has_pending();
+        }
+        has_data
+    }
+
 
 }
 

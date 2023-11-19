@@ -36,7 +36,7 @@ where
             self.conn.complete_io(self.sock)?;
         }
 
-        if self.conn.wants_write(0) {
+        if self.conn.wants_write() {
             self.conn.complete_io(self.sock)?;
         }
 
@@ -139,7 +139,7 @@ where
         self.complete_prior_io()?;
 
         self.conn.writer().flush()?;
-        if self.conn.wants_write(0) {
+        if self.conn.wants_write() {
             self.conn.complete_io(self.sock)?;
         }
         Ok(())

@@ -388,7 +388,7 @@ impl<Data> ConnectionCommon<Data> {
         let mut rdlen = 0;
 
         loop {
-            while self.wants_write(DEFAULT_STREAM_ID) {
+            while self.wants_write() {
                 wrlen += self.write_tls(io, DEFAULT_STREAM_ID)?;
             }
 
