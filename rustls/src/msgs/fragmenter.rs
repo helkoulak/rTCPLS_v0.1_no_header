@@ -2,7 +2,7 @@ use crate::enums::ContentType;
 use crate::enums::ProtocolVersion;
 use crate::msgs::message::{BorrowedPlainMessage, PlainMessage};
 use crate::Error;
-
+use crate::tcpls::frame::MAX_TCPLS_FRAGMENT_LEN;
 
 
 pub const MAX_FRAGMENT_LEN: usize = 16384;
@@ -42,7 +42,7 @@ impl MessageFragmenter {
         payload: &'a [u8],
     ) -> impl Iterator<Item = BorrowedPlainMessage<'a>> + 'a {
         payload
-            .chunks(self.max_frag)
+            .chunks(MAX_TCPLS_FRAGMENT_LEN)
             .map(move |c| BorrowedPlainMessage {
                 typ,
                 version,

@@ -18,6 +18,7 @@ use crate::record_layer;
 #[cfg(feature = "secret_extraction")]
 use crate::suites::PartiallyExtractedSecrets;
 use crate::suites::SupportedCipherSuite;
+use crate::tcpls::frame::Frame;
 
 use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
@@ -214,9 +215,9 @@ impl CommonState {
     ///
     /// If internal buffers are too small, this function will not accept
     /// all the data.
-    pub(crate) fn send_some_plaintext(&mut self, data: &[u8], id: u16) -> usize {
+    pub(crate) fn send_some_plaintext(&mut self, data: &[u8], id: u16, fin: bool) -> usize {
         self.perhaps_write_key_update();
-        self.send_plain(data, Limit::Yes, id)
+        self.send_plain(data, Limit::Yes, id, fin)
     }
 
     pub(crate) fn send_early_plaintext(&mut self, data: &[u8], id: u16) -> usize {
@@ -228,7 +229,7 @@ impl CommonState {
             return 0;
         }
 
-        self.send_appdata_encrypt(data, Limit::Yes, id)
+        self.send_appdata_encrypt(data, Limit::Yes, id, false)
     }
 
     // Changing the keys must not span any fragmented handshake
@@ -256,12 +257,12 @@ impl CommonState {
             .message_fragmenter
             .fragment_message(&m);
         for m in iter {
-            self.send_single_fragment(m, id);
+            self.send_single_fragment(m, id, false);
         }
     }
 
     /// Like send_msg_encrypt, but operate on an appdata directly.
-    fn send_appdata_encrypt(&mut self, payload: &[u8], limit: Limit, id: u16) -> usize {
+    fn send_appdata_encrypt(&mut self, payload: &[u8], limit: Limit, id: u16, mut fin: bool) -> usize {
         // Here, the limit on sendable_tls applies to encrypted data,
         // but we're respecting it for plaintext data -- so we'll
         // be out by whatever the cipher+record overhead is.  That's a
@@ -278,21 +279,40 @@ impl CommonState {
             Limit::No => payload.len(),
         };
 
+        if len == 0 {
+            self.record_layer.streams.remove_writable(id as u64);
+            // Send buffer is full.
+            return 0;
+        }
+
+        if len < payload.len() {
+            fin = false;
+        }
+
         let iter = self.message_fragmenter.fragment_slice(
             ContentType::ApplicationData,
             ProtocolVersion::TLSv1_2,
             &payload[..len],
         );
+        let mut num_of_chunks = iter.len();
         for m in iter {
-            self.send_single_fragment(m, id);
+            num_of_chunks -= 1;
+            //consider flag fin when reaching last chunk
+            let finish = if num_of_chunks == 0 {
+                fin
+            } else {
+                false
+            };
+            self.send_single_fragment(m, id, finish);
         }
 
         len
     }
 
-    fn send_single_fragment(&mut self, m: BorrowedPlainMessage, id: u16) {
+    fn send_single_fragment(&mut self, m: BorrowedPlainMessage, id: u16, fin: bool) {
 
         self.record_layer.streams.get_or_create(id).unwrap();
+        // set id of stream to decide on crypto context and record seq space
         self.record_layer.encrypt_for_stream(id);
         // Close connection once we start to run out of
         // sequence space.
@@ -307,8 +327,23 @@ impl CommonState {
             return;
         }
 
-        let header = self.record_layer.streams.get_mut(id).unwrap().build_header(m.payload.len() as u16);
-        let em = self.record_layer.encrypt_outgoing_zc(m, &header, None);
+        let tcpls_header = self.record_layer
+            .streams
+            .get_mut(id)
+            .unwrap()
+            .build_header(m.payload.len() as u16);
+
+        let stream_frame_header = match m.typ {
+            ContentType::ApplicationData => {
+                Some(Frame::Stream {
+                    length: chunk.len() as u16,
+                    fin: fin.into(),
+                })
+            },
+            _ => None,
+        };
+        let em = self.record_layer
+            .encrypt_outgoing_zc(m, &tcpls_header, stream_frame_header);
         self.queue_message(em, id);
     }
 
@@ -317,7 +352,7 @@ impl CommonState {
     ///
     /// Returns the number of bytes written from `data`: this might
     /// be less than `data.len()` if buffer limits were exceeded.
-    fn send_plain(&mut self, data: &[u8], limit: Limit, id: u16) -> usize {
+    fn send_plain(&mut self, data: &[u8], limit: Limit, id: u16, fin: bool) -> usize {
         if !self.may_send_application_data {
             // If we haven't completed handshaking, buffer
             // plaintext to send once we do.
@@ -339,7 +374,7 @@ impl CommonState {
             return 0;
         }
 
-        self.send_appdata_encrypt(data, limit, id)
+        self.send_appdata_encrypt(data, limit, id, fin)
     }
 
     pub(crate) fn start_outgoing_traffic(&mut self) {
@@ -409,7 +444,7 @@ impl CommonState {
         }
 
         while let Some(buf) = self.sendable_plaintext.pop() {
-            self.send_plain(&buf, Limit::No, DEFAULT_STREAM_ID);
+            self.send_plain(&buf, Limit::No, DEFAULT_STREAM_ID, false);
         }
     }
 

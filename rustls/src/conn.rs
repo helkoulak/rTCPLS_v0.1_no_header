@@ -239,13 +239,13 @@ pub(crate) trait PlaintextSink {
 
 impl<T> PlaintextSink for ConnectionCommon<T> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        Ok(self.send_some_plaintext(buf, 0))
+        Ok(self.send_some_plaintext(buf, DEFAULT_STREAM_ID, false))
     }
 
     fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
         let mut sz = 0;
         for buf in bufs {
-            sz += self.send_some_plaintext(buf, 0);
+            sz += self.send_some_plaintext(buf, DEFAULT_STREAM_ID, false);
         }
         Ok(sz)
     }
