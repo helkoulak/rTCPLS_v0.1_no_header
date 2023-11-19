@@ -309,7 +309,7 @@ impl CommonState {
 
         let header = self.record_layer.streams.get_mut(id).unwrap().build_header(m.payload.len() as u16);
         let em = self.record_layer.encrypt_outgoing_zc(m, &header, None);
-        self.record_layer.streams.get_mut(id).unwrap().send.append(em);
+        self.queue_message(em, id);
     }
 
     /// Encrypt and send some plaintext `data`.  `limit` controls
@@ -414,8 +414,9 @@ impl CommonState {
     }
 
     // Put m into sendable_tls for writing.
-    fn queue_tls_message(&mut self, m: OpaqueMessage, id: u16) {
-        self.record_layer.streams.get_or_create(id).unwrap().send.append(m.encode());
+    pub(crate) fn queue_message(&mut self, msg: Vec<u8>, id: u16) {
+        self.record_layer.streams.get_or_create(id).unwrap().send.append(msg);
+        self.record_layer.streams.insert_flushable(id as u64);
     }
 
     /// Send a raw TLS message, fragmenting it if needed.
@@ -445,7 +446,7 @@ impl CommonState {
                 .message_fragmenter
                 .fragment_message(msg);
             for m in iter {
-                self.queue_tls_message(m.to_unencrypted_opaque(), id);
+                self.queue_message(m.to_unencrypted_opaque().encode(), id);
             }
         } else {
             self.send_msg_encrypt(m.into(), id);
@@ -623,7 +624,7 @@ impl CommonState {
 
     pub(crate) fn perhaps_write_key_update(&mut self) {
         if let Some(message) = self.queued_key_update_message.take() {
-            self.record_layer.streams.get_or_create(DEFAULT_STREAM_ID).unwrap().send.append(message);
+            self.queue_message(message, DEFAULT_STREAM_ID);
         }
     }
 }
