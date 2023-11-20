@@ -318,6 +318,9 @@ impl StreamMap {
     /// Creates an iterator over streams that can be written to.
     pub fn writable(&self) -> StreamIter { StreamIter::from(&self.writable) }
 
+    /// Creates an iterator over streams that have data to send.
+    pub fn flushable(&self) -> StreamIter { StreamIter::from(&self.flushable) }
+
     /// Creates an iterator over streams that have been collected.
     pub fn collected(&self) -> StreamIter { StreamIter::from(&self.collected) }
 
