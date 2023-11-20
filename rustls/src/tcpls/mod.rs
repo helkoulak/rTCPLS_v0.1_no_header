@@ -21,7 +21,8 @@ use crate::msgs::message::BorrowedPlainMessage;
 use crate::recvbuf::RecvBufMap;
 use crate::tcpls::frame::{Frame, MAX_TCPLS_FRAGMENT_LEN};
 use crate::tcpls::network_address::AddressMap;
-use crate::tcpls::stream::SimpleIdHashMap;
+use crate::tcpls::stream::{INVALID_ID, SimpleIdHashMap};
+use crate::tcpls::TcplsConnectionState::INITIALIZED;
 use crate::verify::{
     AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
 };
@@ -181,10 +182,7 @@ impl TcplsSession {
             Some(conn) => &mut conn.socket,
             None => panic!("Socket of specified TCP connection does not exist")
         };
-       self.tls_conn.as_mut().unwrap()
-           .deframers_map
-           .get_or_create_deframer(conn_id as u64)
-           .read(socket)
+       self.tls_conn.as_mut().unwrap().read_tls(socket)
     }
 
 
