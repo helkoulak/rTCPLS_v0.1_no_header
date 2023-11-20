@@ -3,7 +3,7 @@ use crate::enums::{AlertDescription, ContentType};
 use crate::error::{Error, PeerMisbehaved};
 #[cfg(feature = "logging")]
 use crate::log::trace;
-use crate::msgs::deframer::Deframed;
+use crate::msgs::deframer::{Deframed, MessageDeframer};
 use crate::msgs::handshake::Random;
 use crate::msgs::message::{Message, MessagePayload, PlainMessage};
 #[cfg(feature = "secret_extraction")]
@@ -331,13 +331,12 @@ impl<Data> ConnectionCommon<Data> {
     /// Returns an object that allows reading plaintext.
     pub fn reader(&mut self) -> Reader {
         let common = &mut self.core.common_state;
-        let active_connection = common.conn_in_use;
         Reader {
             received_plaintext: &mut common.received_plaintext,
             // Are we done? i.e., have we processed all received messages, and received a
             // close_notify to indicate that no new messages will arrive?
             peer_cleanly_closed: common.has_received_close_notify
-                && !common.deframers_map.get_or_create_deframer(active_connection as u64).has_pending(),
+                && !self.core.message_deframer.has_pending(),
             has_seen_eof: common.has_seen_eof,
         }
     }
@@ -502,7 +501,6 @@ impl<Data> ConnectionCommon<Data> {
     /// [`process_new_packets()`]: ConnectionCommon::process_new_packets
     /// [`reader()`]: ConnectionCommon::reader
     pub fn read_tls(&mut self, rd: &mut dyn io::Read) -> Result<usize, io::Error> {
-        let active_conn = self.conn_in_use;
         if self.received_plaintext.is_full() {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
@@ -510,7 +508,7 @@ impl<Data> ConnectionCommon<Data> {
             ));
         }
 
-        let res = self.deframers_map.get_or_create_deframer(active_conn as u64).read(rd);
+        let res = self.core.message_deframer.read(rd);
         if let Ok(0) = res {
             self.has_seen_eof = true;
         }
@@ -606,6 +604,7 @@ pub(crate) struct ConnectionCore<Data> {
     pub(crate) state: Result<Box<dyn State<Data>>, Error>,
     pub(crate) data: Data,
     pub(crate) common_state: CommonState,
+    pub(crate) message_deframer: MessageDeframer,
 }
 
 impl<Data> ConnectionCore<Data> {
@@ -614,6 +613,7 @@ impl<Data> ConnectionCore<Data> {
             state: Ok(state),
             data,
             common_state,
+            message_deframer: MessageDeframer::default(),
         }
     }
 
@@ -646,11 +646,8 @@ impl<Data> ConnectionCore<Data> {
 
     /// Pull a message out of the deframer and send any messages that need to be sent as a result.
     fn deframe(&mut self, app_buffers: &mut RecvBufMap) -> Result<Option<PlainMessage>, Error> {
-        let conn_in_use = self.common_state.conn_in_use;
         match self
-            .common_state
-            .deframers_map
-            .get_or_create_deframer(conn_in_use as u64)
+            .message_deframer
             .pop(&mut self.common_state.record_layer, app_buffers)
         {
             Ok(Some(Deframed {

@@ -49,11 +49,6 @@ pub struct CommonState {
     pub(crate) received_plaintext: ChunkVecBuffer,
     sendable_plaintext: ChunkVecBuffer,
 
-    /// id of currently used tcp connection
-    pub conn_in_use: u32,
-
-
-
     queued_key_update_message: Option<Vec<u8>>,
 
     #[allow(dead_code)] // only read for QUIC
@@ -88,7 +83,6 @@ impl CommonState {
             sendable_plaintext: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
             deframers_map: MessageDeframerMap::new(),
 
-            conn_in_use: 0,
             queued_key_update_message: None,
 
             protocol: Protocol::Tcp,
@@ -108,11 +102,6 @@ impl CommonState {
         self.record_layer.streams.has_flushable()
     }
 
-
-    /// sets the id of the currently active tcp connection
-    pub(crate) fn set_connection_in_use(&mut self, conn_id: u32) {
-        self.conn_in_use = conn_id;
-    }
 
    /* /// sets the id of the currently active stream
     pub(crate) fn set_stream_in_use(&mut self, stream_id: u32) {

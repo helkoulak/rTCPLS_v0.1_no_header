@@ -20,8 +20,6 @@ use crate::tcpls::stream::SimpleIdHashMap;
 /// QUIC connections will call `push()` to append handshake payload data directly.
 #[derive(Default)]
 pub struct MessageDeframer {
-    /// Id of active TCP connection
-    id: u64,
 
     /// Set if the peer is not talking TLS, but some other
     /// protocol.  The caller should abort the connection, because
@@ -42,12 +40,6 @@ pub struct MessageDeframer {
 
 impl MessageDeframer {
 
-    pub fn new(id: u64) -> MessageDeframer {
-        MessageDeframer{
-            id,
-            ..Default::default()
-        }
-    }
     /// Return any decrypted messages that the deframer has been able to parse.
     ///
     /// Returns an `Error` if the deframer failed to parse some message contents or if decryption

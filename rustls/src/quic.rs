@@ -330,8 +330,8 @@ impl<Data: SideData> ConnectionCommon<Data> {
     ///
     /// Handshake data obtained from separate encryption levels should be supplied in separate calls.
     pub fn read_hs(&mut self, plaintext: &[u8]) -> Result<(), Error> {
-        self.deframers_map
-            .get_or_create_deframer(0)
+        self.core
+            .message_deframer
             .push(ProtocolVersion::TLSv1_3, plaintext)?;
         self.core.process_received()?;
         Ok(())
