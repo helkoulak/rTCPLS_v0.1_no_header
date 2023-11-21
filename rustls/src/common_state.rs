@@ -6,7 +6,7 @@ use crate::key;
 use crate::log::{debug, error, warn};
 use crate::msgs::alert::AlertMessagePayload;
 use crate::msgs::base::Payload;
-use crate::msgs::deframer::MessageDeframerMap;
+use crate::msgs::deframer::MessageDeframer;
 use crate::msgs::enums::{AlertLevel, KeyUpdateRequest};
 use crate::msgs::fragmenter::MessageFragmenter;
 use crate::msgs::message::{BorrowedPlainMessage, Message, OpaqueMessage, PlainMessage};
@@ -44,7 +44,7 @@ pub struct CommonState {
     pub(crate) received_middlebox_ccs: u8,
     pub(crate) peer_certificates: Option<Vec<key::Certificate>>,
     message_fragmenter: MessageFragmenter,
-    pub(crate) deframers_map: MessageDeframerMap,
+    pub(crate) message_deframer: MessageDeframer,
 
     pub(crate) received_plaintext: ChunkVecBuffer,
     sendable_plaintext: ChunkVecBuffer,
@@ -81,7 +81,7 @@ impl CommonState {
 
             received_plaintext: ChunkVecBuffer::new(Some(DEFAULT_RECEIVED_PLAINTEXT_LIMIT)),
             sendable_plaintext: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
-            deframers_map: MessageDeframerMap::new(),
+            message_deframer: MessageDeframer::default(),
 
             queued_key_update_message: None,
 
@@ -588,7 +588,7 @@ impl CommonState {
         //
         // In the handshake case we don't have readable plaintext before the handshake has
         // completed, but also don't want to read if we still have sendable tls.
-        !self.deframers_map.has_data_to_process()
+        !self.message_deframer.has_pending()
             && !self.has_received_close_notify
             && (self.may_send_application_data || !self.wants_write())
     }
