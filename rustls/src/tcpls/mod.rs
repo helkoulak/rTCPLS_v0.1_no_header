@@ -21,7 +21,7 @@ use crate::msgs::message::BorrowedPlainMessage;
 use crate::recvbuf::RecvBufMap;
 use crate::tcpls::frame::{Frame, MAX_TCPLS_FRAGMENT_LEN};
 use crate::tcpls::network_address::AddressMap;
-use crate::tcpls::stream::{INVALID_ID, SimpleIdHashMap};
+use crate::tcpls::stream::SimpleIdHashMap;
 use crate::tcpls::TcplsConnectionState::INITIALIZED;
 use crate::verify::{
     AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
@@ -135,10 +135,13 @@ impl TcplsSession {
     pub fn send_on_connection(&mut self, conn_id: u32) -> Result<usize, Error> {
         let tls_conn = self.tls_conn.as_mut().unwrap();
 
-        if tls_conn.is_handshaking() {
-            return Err(Error::HandshakeNotComplete);
-        }
+        let (has_pending, pending_at) = match tls_conn.record_layer.streams.has_pending {
+            Some(id) => (true, id),
+            None => (false, 0),
+        };
 
+        // Iterator over flushable streams. If applicable, Start with the stream that has a remainder of a partially sent record
+        let flushable_streams = tls_conn.record_layer.streams.flushable().skip_while(|&id| id != pending_at as u64 && has_pending);
 
         let mut done = 0;
         let socket = &mut self
@@ -146,14 +149,11 @@ impl TcplsSession {
             .get_mut(&(conn_id as u64))
             .unwrap()
             .socket;
-        let open_streams = tls_conn.record_layer.streams.open_streams();
-        for id in open_streams{
+
+        for id in flushable_streams {
 
             let stream = match tls_conn.record_layer.streams.get_mut(id as u16) {
                 Some(stream) => {
-                    if stream.send.is_empty(){
-                        continue
-                    }
                     stream
                 },
                 None => return Err(Error::BufNotFound),
@@ -163,13 +163,29 @@ impl TcplsSession {
             let mut sent = 0;
             while len > 0 {
                 let chunk = stream.send.pop().unwrap();
+                let chunk_len = chunk.len();
 
                 sent = socket
                     .write(chunk.as_slice())
                     .unwrap();
-                stream.send.consume_chunk(sent, chunk);
                 len -= sent;
                 done += sent;
+                stream.send.consume_chunk(sent, chunk);
+                // In case the chunk was partially sent, by the next call
+                // to send on the same connection this stream should be chosen as first
+                if sent != chunk_len {
+                    tls_conn.record_layer.streams.has_pending = Some(id as u16);
+                    return Ok(done);
+                }
+
+            }
+            // The remainder of the partially sent record was sent successfully
+            if has_pending && id == pending_at as u64 {
+                tls_conn.record_layer.streams.has_pending = None;
+            }
+            if len == 0 {
+                tls_conn.record_layer.streams.remove_flushable(id);
+                tls_conn.record_layer.streams.insert_writable(id);
             }
         }
 

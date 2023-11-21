@@ -191,12 +191,16 @@ pub struct StreamMap {
     /// streams to save memory, but we still need to keep track of previously
     /// created streams, to prevent peers from re-creating them.
     collected: SimpleIdHashSet,
+
+    //Id of the stream that was last sent from and has a partially sent record
+    pub has_pending: Option<u16>,
 }
 
 impl StreamMap {
     pub fn new() -> Self {
         Self {
             streams: SimpleIdHashMap::default(),
+            has_pending: None ,
             ..StreamMap::default()
         }
     }
