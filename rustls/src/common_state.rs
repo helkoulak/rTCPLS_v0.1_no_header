@@ -9,7 +9,7 @@ use crate::msgs::base::Payload;
 use crate::msgs::deframer::MessageDeframer;
 use crate::msgs::enums::{AlertLevel, KeyUpdateRequest};
 use crate::msgs::fragmenter::MessageFragmenter;
-use crate::msgs::message::{BorrowedPlainMessage, Message, OpaqueMessage, PlainMessage};
+use crate::msgs::message::{BorrowedPlainMessage, Message, PlainMessage};
 #[cfg(feature = "quic")]
 use crate::msgs::message::MessagePayload;
 #[cfg(feature = "quic")]

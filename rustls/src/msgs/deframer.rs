@@ -1,4 +1,4 @@
-use std::collections::hash_map;
+
 use std::io;
 use std::ops::Range;
 
@@ -12,7 +12,7 @@ use crate::msgs::message::{BorrowedOpaqueMessage, MessageError};
 use crate::record_layer::{Decrypted, RecordLayer};
 use crate::recvbuf::RecvBufMap;
 use crate::tcpls::frame::{TcplsHeader, TCPLS_HEADER_SIZE};
-use crate::tcpls::stream::SimpleIdHashMap;
+
 
 /// This deframer works to reconstruct TLS messages from a stream of arbitrary-sized reads.
 ///

@@ -3,7 +3,7 @@ use crate::enums::{AlertDescription, ContentType};
 use crate::error::{Error, PeerMisbehaved};
 #[cfg(feature = "logging")]
 use crate::log::trace;
-use crate::msgs::deframer::{Deframed, MessageDeframer};
+use crate::msgs::deframer::Deframed;
 use crate::msgs::handshake::Random;
 use crate::msgs::message::{Message, MessagePayload, PlainMessage};
 #[cfg(feature = "secret_extraction")]
