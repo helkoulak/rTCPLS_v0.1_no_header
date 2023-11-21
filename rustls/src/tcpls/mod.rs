@@ -197,8 +197,6 @@ impl TcplsSession {
         if tls_conn.is_handshaking() {
             return Err(Error::HandshakeNotComplete);
         }
-        // Set deframer buffer to use
-        tls_conn.set_connection_in_use(conn_id);
 
             match tls_conn.process_new_packets(app_buffers) {
                 Ok(_) => {},

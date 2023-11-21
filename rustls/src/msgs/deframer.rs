@@ -518,40 +518,6 @@ const MAX_HANDSHAKE_SIZE: u32 = 0xffff;
 
 const READ_SIZE: usize = 4096;
 
-#[derive(Default)]
-pub struct MessageDeframerMap {
-    deframers: SimpleIdHashMap<MessageDeframer>,
-}
-
-impl MessageDeframerMap {
-    pub fn new() -> MessageDeframerMap {
-        MessageDeframerMap {
-            ..Default::default()
-        }
-    }
-
-    pub(crate) fn get_or_create_deframer(&mut self, connection_id: u64) -> &mut MessageDeframer {
-        match self.deframers.entry(connection_id) {
-            hash_map::Entry::Vacant(v) => {
-                v.insert(MessageDeframer::new(connection_id))
-            },
-            hash_map::Entry::Occupied(v) => v.into_mut(),
-        }
-    }
-
-    pub(crate) fn has_data_to_process(&self) -> bool {
-        let mut has_data = false;
-        let itr = self.deframers.iter();
-        for deframer in itr {
-            has_data |= deframer.1.has_pending();
-        }
-        has_data
-    }
-
-
-}
-
-
 
 #[cfg(test)]
 mod tests {
@@ -561,7 +527,6 @@ mod tests {
     use crate::{ContentType, Error, InvalidMessage};
 
     use std::io;
-    use crate::msgs::deframer::MessageDeframerMap;
     use crate::recvbuf::RecvBufMap;
 
     const FIRST_MESSAGE: &[u8] = include_bytes!("../testdata/deframer-test.1.bin");
@@ -655,8 +620,7 @@ mod tests {
 
     #[test]
     fn check_incremental() {
-        let mut deframers = MessageDeframerMap::new();
-        let mut d = deframers.get_or_create_deframer(999);
+        let mut d = MessageDeframer::default();
         assert!(!d.has_pending());
         input_whole_incremental(&mut d, FIRST_MESSAGE);
         assert!(d.has_pending());
@@ -669,8 +633,7 @@ mod tests {
 
     #[test]
     fn check_incremental_2() {
-        let mut deframers = MessageDeframerMap::new();
-        let mut d = deframers.get_or_create_deframer(999);
+        let mut d = MessageDeframer::default();
         assert!(!d.has_pending());
         input_whole_incremental(&mut d, FIRST_MESSAGE);
         assert!(d.has_pending());
