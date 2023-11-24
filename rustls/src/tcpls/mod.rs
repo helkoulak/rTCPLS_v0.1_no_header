@@ -202,23 +202,18 @@ impl TcplsSession {
 
     pub fn stream_recv(
         &mut self,
-        conn_id: u32,
         app_buffers: &mut RecvBufMap,
-    ) -> Result<usize, Error> {
+    ) -> Result<IoState, Error> {
 
         let tls_conn = self.tls_conn.as_mut().unwrap();
-
-        if tls_conn.is_handshaking() {
-            return Err(Error::HandshakeNotComplete);
-        }
-
-            match tls_conn.process_new_packets(app_buffers) {
-                Ok(_) => {},
+        
+            let io_state = match tls_conn.process_new_packets(app_buffers) {
+                Ok(io_state) => io_state,
                 Err(err) => return Err(err),
-            }
+            };
 
 
-        Ok(0)
+        Ok(io_state)
     }
 }
 
