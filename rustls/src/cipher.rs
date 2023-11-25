@@ -115,11 +115,13 @@ pub(crate) struct HeaderProtector{
 }
 
 impl HeaderProtector {
-    pub(crate) fn new(aead_algorithm: &'static aead::Algorithm, secret: &hkdf::Prk) -> Self {
+    pub(crate) fn new(secret: &hkdf::Prk, aead_algorithm: &'static aead::Algorithm) -> Self {
 
-        let mut key= [0; 16];
+        let mut derived_key= [0; 32];
         let x = secret.expand(&[b"tcpls header protection"],aead_algorithm).unwrap();
-        x.fill(&mut key).unwrap();
+        x.fill(&mut derived_key).unwrap();
+        let mut key = [0; 16];
+        key.copy_from_slice(&derived_key[..16]);
         Self{
             key,
             sip_hasher: SipHasher::new_with_key(&key),
@@ -214,7 +216,7 @@ impl MessageEncrypter for InvalidMessageEncrypter {
    /* fn derive_enc_conn_iv(&mut self, conn_id: u32) {}*/
 
     fn get_tag_length(&self) -> usize {
-        todo!()
+        0
     }
 }
 

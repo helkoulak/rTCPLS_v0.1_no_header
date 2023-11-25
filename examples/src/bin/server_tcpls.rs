@@ -26,7 +26,8 @@ use rustls::server::{
     AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
 };
 use rustls::{self, Connection, RootCertStore, ServerConnection, tcpls};
-use rustls::tcpls::{load_certs, load_private_key, lookup_suites, lookup_versions, server_create_listener, TcplsSession};
+use rustls::recvbuf::RecvBufMap;
+use rustls::tcpls::{DEFAULT_CONNECTION_ID, load_certs, load_private_key, lookup_suites, lookup_versions, server_create_listener, TcplsSession};
 
 // Token for our listening socket.
 const LISTENER: mio::Token = mio::Token(0);
@@ -80,7 +81,9 @@ impl TlsServer {
                     let token = mio::Token(self.next_id);
                     self.next_id += 1;
 
-                    let mut connection = OpenConnection::new(socket, token, mode, tls_conn);
+                    let mut connection = OpenConnection::new(token, mode);
+                    connection.tcpls_session.create_tcpls_connection_object(socket, true);
+                    connection.tcpls_session.tls_conn = Some(tls_conn);
                     connection.register(registry);
                     self.connections
                         .insert(token, connection);
@@ -97,14 +100,14 @@ impl TlsServer {
         }
     }
 
-    fn conn_event(&mut self, registry: &mio::Registry, event: &mio::event::Event) {
+    fn conn_event(&mut self, registry: &mio::Registry, event: &mio::event::Event, recv_map: &mut RecvBufMap) {
         let token = event.token();
 
         if self.connections.contains_key(&token) {
             self.connections
                 .get_mut(&token)
                 .unwrap()
-                .handle_event(registry, event);
+                .handle_event(registry, event, recv_map);
 
             if self.connections[&token].is_closed() {
                 self.connections.remove(&token);
@@ -119,12 +122,10 @@ impl TlsServer {
 /// It has a TCP-level stream, a TLS-level connection state, and some
 /// other state/metadata.
 struct OpenConnection {
-    socket: TcpStream,
     token: mio::Token,
     closing: bool,
     closed: bool,
     mode: ServerMode,
-    tls_conn: Connection,
     back: Option<TcpStream>,
     sent_http_response: bool,
     tcpls_session: TcplsSession,
@@ -160,19 +161,15 @@ fn try_read(r: io::Result<usize>) -> io::Result<Option<usize>> {
 
 impl OpenConnection {
     fn new(
-        socket: TcpStream,
         token: mio::Token,
         mode: ServerMode,
-        tls_conn: Connection,
     ) -> Self {
         let back = open_back(&mode);
         Self {
-            socket,
             token,
             closing: false,
             closed: false,
             mode,
-            tls_conn,
             back,
             sent_http_response: false,
             tcpls_session: TcplsSession::new(true),
@@ -181,20 +178,22 @@ impl OpenConnection {
     }
 
     /// We're a connection, and we have something to do.
-    fn handle_event(&mut self, registry: &mio::Registry, ev: &mio::event::Event) {
+    fn handle_event(&mut self, registry: &mio::Registry, ev: &mio::event::Event, recv_map: &mut RecvBufMap) {
         // If we're readable: read some TLS.  Then
         // see if that yielded new plaintext.  Then
         // see if the backend is readable too.
-        if ev.is_readable() && !self.tls_conn.is_handshaking() {
+        if ev.is_readable() && !self.tcpls_session.tls_conn.as_mut().unwrap().is_handshaking() {
             self.do_tls_read();
+            self.tcpls_session.stream_recv(recv_map).expect("TODO: panic message");
             self.try_back_read();
 
         }
 
 
-        if ev.is_readable() && self.tls_conn.is_handshaking(){
+        if ev.is_readable() && self.tcpls_session.tls_conn.as_mut().unwrap().is_handshaking(){
 
            self.do_tls_read();
+            self.tcpls_session.stream_recv(recv_map).expect("TODO: panic message");
             self.try_back_read();
         }
 
@@ -208,6 +207,10 @@ impl OpenConnection {
         if self.closing {
             self.verify_received();
             let _ = self
+                .tcpls_session
+                .tcp_connections
+                .get_mut(&0)
+                .unwrap()
                 .socket
                 .shutdown(net::Shutdown::Both);
             self.close_back();
@@ -327,7 +330,10 @@ impl OpenConnection {
                 self.closing = true;
             }
             Some(len) => {
-                self.tls_conn
+                self.tcpls_session.
+                    tls_conn
+                    .as_mut()
+                    .unwrap()
                     .writer()
                     .write_all(&buf[..len])
                     .unwrap();
@@ -340,7 +346,10 @@ impl OpenConnection {
     fn incoming_plaintext(&mut self, buf: &[u8]) {
         match self.mode {
             ServerMode::Echo => {
-                self.tls_conn
+                self.tcpls_session
+                    .tls_conn
+                    .as_mut()
+                    .unwrap()
                     .writer()
                     .write_all(buf)
                     .unwrap();
@@ -362,18 +371,25 @@ impl OpenConnection {
         let response =
             b"HTTP/1.0 200 OK\r\nConnection: close\r\n\r\nHello world from rustls tlsserver\r\n";
         if !self.sent_http_response {
-            self.tls_conn
+            self.tcpls_session
+                .tls_conn
+                .as_mut()
+                .unwrap()
                 .writer()
                 .write_all(response)
                 .unwrap();
             self.sent_http_response = true;
-            self.tls_conn.send_close_notify();
+            self.tcpls_session
+                .tls_conn
+                .as_mut()
+                .unwrap()
+                .send_close_notify();
         }
     }
 
     fn tls_write(&mut self) -> io::Result<usize> {
-        self.tls_conn
-            .write_tls(&mut self.socket, 0)
+        self.tcpls_session.tls_conn.as_mut().unwrap()
+            .write_tls(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket, 0)
     }
 
     fn do_tls_write_and_handle_error(&mut self) {
@@ -387,7 +403,7 @@ impl OpenConnection {
     fn register(&mut self, registry: &mio::Registry) {
         let event_set = self.event_set();
         registry
-            .register(&mut self.socket, self.token, event_set)
+            .register(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket, self.token, event_set)
             .unwrap();
 
         if self.back.is_some() {
@@ -404,13 +420,13 @@ impl OpenConnection {
     fn reregister(&mut self, registry: &mio::Registry) {
         let event_set = self.event_set();
         registry
-            .reregister(&mut self.socket, self.token, event_set)
+            .reregister(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket, self.token, event_set)
             .unwrap();
     }
 
     fn deregister(&mut self, registry: &mio::Registry) {
         registry
-            .deregister(&mut self.socket)
+            .deregister(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket)
             .unwrap();
 
         if self.back.is_some() {
@@ -423,8 +439,8 @@ impl OpenConnection {
     /// What IO events we're currently waiting for,
     /// based on wants_read/wants_write.
     fn event_set(&self) -> mio::Interest {
-        let rd = self.tls_conn.wants_read();
-        let wr = self.tls_conn.wants_write();
+        let rd = self.tcpls_session.tls_conn.as_ref().unwrap().wants_read();
+        let wr = self.tcpls_session.tls_conn.as_ref().unwrap().wants_write();
 
         if rd && wr {
             mio::Interest::READABLE | mio::Interest::WRITABLE
@@ -532,12 +548,13 @@ fn main() {
             .init();
     }
 
+    let mut recv_map = RecvBufMap::new();
     let config = build_tls_server_config_args(&args);
 
     let mut listener = server_create_listener("0.0.0.0:443", args.flag_port.unwrap());
     let mut poll = mio::Poll::new().unwrap();
     poll.registry()
-        .register(&mut listener, LISTENER, mio::Interest::READABLE | mio::Interest::WRITABLE)
+        .register(&mut listener, LISTENER, mio::Interest::READABLE)
         .unwrap();
 
     let mode = if args.cmd_echo {
@@ -548,21 +565,20 @@ fn main() {
         ServerMode::Forward(args.arg_fport.expect("fport required"))
     };
 
-    let mut tlsserv = TlsServer::new(listener, mode, config);
+    let mut tcpls_server = TlsServer::new(listener, mode, config);
 
     let mut events = mio::Events::with_capacity(256);
-    let timeout = Duration::new(5, 0);
     loop {
-        poll.poll(&mut events, Option::from(timeout)).unwrap();
+        poll.poll(&mut events, None).unwrap();
 
         for event in events.iter() {
             match event.token() {
                 LISTENER => {
-                    tlsserv
+                    tcpls_server
                         .accept(poll.registry())
                         .expect("error accepting socket");
                 }
-                _ => tlsserv.conn_event(poll.registry(), event),
+                _ => tcpls_server.conn_event(poll.registry(), event, &mut recv_map),
             }
         }
     }

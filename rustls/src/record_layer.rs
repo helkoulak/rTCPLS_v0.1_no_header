@@ -219,10 +219,7 @@ impl RecordLayer {
         {
             Ok(plaintext) => {
                 recv_buf.read_seq += 1;
-                if recv_buf.id > 0 {
-                    recv_buf.next_recv_pkt_num += 1;
-                }
-
+                recv_buf.next_recv_pkt_num += 1;
                 Ok(Some(Decrypted {
                     want_close_before_decrypt,
                     plaintext,

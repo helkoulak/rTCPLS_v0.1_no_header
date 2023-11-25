@@ -347,7 +347,7 @@ impl MessageDecrypter for Tls13MessageDecrypter {
 
 
     fn decrypt_zc(&self, mut msg: BorrowedOpaqueMessage, seq: u64, stream_id: u32, recv_buf: &mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<PlainMessage, Error> {
-        let payload = msg.payload;
+        let payload = &msg.payload[TCPLS_HEADER_SIZE..];
         if payload.len() < self.dec_key.algorithm().tag_len() {
             return Err(Error::DecryptError);
         }
@@ -392,11 +392,11 @@ impl MessageDecrypter for Tls13MessageDecrypter {
             typ: msg.typ,
             version: ProtocolVersion::TLSv1_3,
             payload: match msg.typ {
-                ContentType::ApplicationData => Payload::new(Vec::new()),
-                _ => {
-                    recv_buf.offset -= recv_buf.get_mut()[..new_size].len() as u64; // reduce offset as non app data will be overwritten
-                    Payload::new_from_vec(recv_buf.get_mut()[..new_size].to_vec())
+                ContentType::ApplicationData => {
+                    recv_buf.offset += tcpls_header.offset_step as u64;
+                    Payload::new(Vec::new())
                 },
+                _ => Payload::new_from_vec(recv_buf.get_mut()[..new_size].to_vec()),
             },
         })
     }

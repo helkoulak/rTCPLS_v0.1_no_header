@@ -15,6 +15,7 @@ use crate::msgs::message::MessagePayload;
 #[cfg(feature = "quic")]
 use crate::quic;
 use crate::record_layer;
+use crate::recvbuf::RecvBufMap;
 #[cfg(feature = "secret_extraction")]
 use crate::suites::PartiallyExtractedSecrets;
 use crate::suites::SupportedCipherSuite;
@@ -480,6 +481,17 @@ impl CommonState {
         self.received_plaintext.append(bytes.0);
     }
 
+    fn process_tcpls_payload(&mut self, app_buffers: &mut RecvBufMap) {
+        /* let mut output = app_buffers.get_or_create_recv_buffer(self
+                                                                    .common_state
+                                                                    .record_layer
+                                                                    .get__in_use(), None);
+          let mut b = octets::Octets::with_slice_reverse(output.as_ref());
+          let header_len = StreamFrameHeader::get_header_size_reverse(&mut b);
+          output.truncate_processed(header_len);
+  */
+    }
+
     #[cfg(feature = "tls12")]
     pub(crate) fn start_encryption_tls12(&mut self, secrets: &ConnectionSecrets, side: Side) {
         let (dec, enc) = secrets.make_cipher_pair(side);
@@ -593,9 +605,9 @@ impl CommonState {
             && (self.may_send_application_data || !self.wants_write())
     }
 
-    pub(crate) fn current_io_state(&self, id: u16) -> IoState {
+    pub(crate) fn current_io_state(&self) -> IoState {
         IoState {
-            tls_bytes_to_write: self.record_layer.streams.get(id).unwrap().send.len(),
+            tls_bytes_to_write: self.record_layer.streams.total_to_write(),
             plaintext_bytes_to_read: self.received_plaintext.len(),
             peer_has_closed: self.has_received_close_notify,
         }

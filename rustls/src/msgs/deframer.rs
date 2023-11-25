@@ -123,17 +123,16 @@ impl MessageDeframer {
                     }));
                 }
 
-
-
+            // Consider header protection in case dec/enc state is active
+            if tag_len != 0 {
                 // Take the LSBs of calculated tag as input sample for hash function
                 let sample = m.payload.rchunks(tag_len).next().unwrap();
                 // process tcpls header and choose recv_buf accordingly
                 header_decoded = TcplsHeader::decode_tcpls_header_from_slice(&record_layer.decrypt_header(sample, &m.payload[..TCPLS_HEADER_SIZE]).expect("decrypting header failed"));
+            }
                 let mut recv_buf = app_buffers.get_or_create_recv_buffer(header_decoded.stream_id as u64, None);
                 if recv_buf.next_recv_pkt_num != header_decoded.chunk_num {
                     continue
-                }else {
-                    recv_buf.offset += header_decoded.offset_step as u64;
                 }
 
 

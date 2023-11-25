@@ -367,6 +367,15 @@ impl StreamMap {
     pub fn rewind_recv_buf(&mut self, _stream_id: u64, _num: usize) -> Result<(), Error> {
         Ok(())
     }
+
+    /// The current total number of bytes to be written to socket.
+    pub fn total_to_write(&self) -> usize {
+        let mut len = 0;
+        for stream in &self.streams {
+            len += stream.1.send.len();
+        }
+        len
+    }
 }
 
 

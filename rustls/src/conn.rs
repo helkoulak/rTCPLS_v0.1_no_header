@@ -639,7 +639,7 @@ impl<Data> ConnectionCore<Data> {
         }
 
         self.state = Ok(state);
-        Ok(self.common_state.current_io_state(DEFAULT_STREAM_ID))
+        Ok(self.common_state.current_io_state())
     }
 
     /// Pull a message out of the deframer and send any messages that need to be sent as a result.

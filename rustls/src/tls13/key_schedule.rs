@@ -603,7 +603,7 @@ impl KeySchedule {
             .set_message_encrypter(Box::new(Tls13MessageEncrypter {
                 enc_key: aead::LessSafeKey::new(key),
                 iv,
-                header_encrypter: HeaderProtector::new(self.suite.common.aead_algorithm, secret),
+                header_encrypter: HeaderProtector::new( secret, self.suite.common.aead_algorithm),
             }));
     }
 
@@ -619,7 +619,7 @@ impl KeySchedule {
         Box::new(Tls13MessageDecrypter {
             dec_key: aead::LessSafeKey::new(key),
             iv,
-            header_decrypter: HeaderProtector::new(self.suite.common.aead_algorithm, secret),
+            header_decrypter: HeaderProtector::new(secret, self.suite.common.aead_algorithm),
         })
     }
 

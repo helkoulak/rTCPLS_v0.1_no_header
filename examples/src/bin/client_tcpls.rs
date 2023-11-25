@@ -17,7 +17,8 @@ use env_logger::fmt::Color::White;
 use ring::digest;
 
 use rustls::{client, OwnedTrustAnchor, RootCertStore, };
-use rustls::tcpls::{build_tls_client_config, lookup_address, TcplsSession};
+use rustls::recvbuf::RecvBufMap;
+use rustls::tcpls::{build_tls_client_config, DEFAULT_CONNECTION_ID, lookup_address, TcplsSession};
 use rustls::tcpls::TlsConfig::Client;
 
 const CLIENT: mio::Token = mio::Token(0);
@@ -36,17 +37,18 @@ impl TlsClient {
         Self {
             closing: false,
             clean_closure: false,
-            tcpls_session: TcplsSession::new(),
+            tcpls_session: TcplsSession::new(false),
         }
     }
 
     /// Handles events sent to the TlsClient by mio::Poll
-    fn handle_event(&mut self, ev: &mio::event::Event) {
+    fn handle_event(&mut self, ev: &mio::event::Event, recv_map: &mut RecvBufMap) {
 
         assert_eq!(ev.token(), CLIENT);
 
         if ev.is_readable() && self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking(){
-            self.do_read();
+            self.tcpls_session.recv_on_connection(0).unwrap();
+            self.tcpls_session.stream_recv(recv_map).unwrap();
         }
 
         if ev.is_writable() && self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking(){
@@ -55,22 +57,24 @@ impl TlsClient {
 
         if ev.is_writable() && ! self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() {
 
-           // self.send_file();
+           self.send_file().expect("");
+            self.tcpls_session.send_on_connection(0).expect("sending on socket has failed");
 
-            let mut done = 0;
+            /*let mut done = 0;
             let mut left = buf.len();
             while left > 0 {
               let written  =  self.tcpls_session.tls_conn.as_mut().unwrap().writer().write(& buf[done..done + left]).unwrap();
                 self.do_write();
                 done += written;
                 left -= written;
-            }
+            }*/
 
         }
 
 
         if ev.is_readable() && ! self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() {
-            self.do_read();
+            self.tcpls_session.recv_on_connection(0).unwrap();
+            self.tcpls_session.stream_recv(recv_map).unwrap();
         }
 
         if self.is_closed() {
@@ -91,7 +95,7 @@ impl TlsClient {
         // Read TLS data.  This fails if the underlying TCP connection
         // is broken.
 
-        match self.tcpls_session.tls_conn.as_mut().unwrap().read_tls(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket) {
+        match self.tcpls_session.recv_on_connection(0) {
             Err(error) => {
                 if error.kind() == io::ErrorKind::WouldBlock {
                     return;
@@ -115,7 +119,7 @@ impl TlsClient {
         // Reading some TLS data might have yielded new TLS
         // messages to process.  Errors from this indicate
         // TLS protocol problems and are fatal.
-        let io_state = match self.tcpls_session.tls_conn.as_mut().unwrap().process_new_packets() {
+        let io_state = match self.tcpls_session.stream_recv(&mut RecvBufMap::new()) {
             Ok(io_state) => io_state,
             Err(err) => {
                 println!("TLS error: {:?}", err);
@@ -128,12 +132,12 @@ impl TlsClient {
         // we might have new plaintext as a result.
         //
         // Read it and then write it to stdout.
-        if io_state.plaintext_bytes_to_read() > 0 {
+        /*if io_state.plaintext_bytes_to_read() > 0 {
             let mut plaintext = Vec::new();
             plaintext.resize(io_state.plaintext_bytes_to_read(), 0u8);
             self.tcpls_session.tls_conn.as_mut().unwrap().reader().read_exact(&mut plaintext).unwrap();
             io::stdout().write_all(&plaintext).unwrap();
-        }
+        }*/
 
         // If wethat fails, the peer might have started a clean TLS-level
         // session closure.
@@ -145,8 +149,7 @@ impl TlsClient {
 
     fn do_write(&mut self) {
 
-        self.tcpls_session.tls_conn.as_mut().unwrap().write_tls(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket, 0)
-            .unwrap();
+        self.tcpls_session.send_on_connection(0).unwrap();
     }
 
     /// Registers self as a 'listener' in mio::Registry
@@ -208,7 +211,7 @@ impl TlsClient {
         // Print the hash as a hexadecimal string
         println!("\n \n File bytes with hash are : {:?} \n \n with total length: {:?}", file_contents, file_contents.len());
 
-        self.tcpls_session.stream_send_on_connection(file_contents.as_ref(), 0, None);
+        self.tcpls_session.stream_send(0, file_contents.as_ref(), false).expect("buffering failed");
 
 
         Ok(())
@@ -383,6 +386,8 @@ fn main() {
         env_logger::Builder::new().parse_filters("trace").init();
     }
 
+    let mut recv_map = RecvBufMap::new();
+
     let dest_address = lookup_address(args.arg_hostname.as_str(), args.flag_port.unwrap());
 
     let mut client = TlsClient::new();
@@ -402,7 +407,7 @@ fn main() {
         poll.poll(&mut events, None).unwrap();
 
         for ev in events.iter() {
-            client.handle_event(ev);
+            client.handle_event(ev, &mut recv_map);
             client.reregister(poll.registry());
         }
     }
