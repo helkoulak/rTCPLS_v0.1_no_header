@@ -558,11 +558,12 @@ impl LessSafeKey {
         aad: Aad<A>,
         in_out: &'in_out [u8],
         out: &'in_out mut [u8],
+        offset: usize,
     ) -> Result<&'in_out mut [u8], error::Unspecified>
         where
             A: AsRef<[u8]>,
     {
-        self.open_within_output(nonce, aad, in_out, out, 0..)
+        self.open_within_output(nonce, aad, &in_out[offset..], out, 0..)
     }
     /// Like [`OpeningKey::open_within()`], except it accepts an arbitrary nonce.
     ///
