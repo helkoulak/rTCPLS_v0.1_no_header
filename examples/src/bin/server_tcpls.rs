@@ -129,7 +129,6 @@ struct OpenConnection {
     back: Option<TcpStream>,
     sent_http_response: bool,
     tcpls_session: TcplsSession,
-    buffer: Vec<u8>,
 }
 
 /// Open a plaintext TCP-level connection for forwarded connections.
@@ -173,7 +172,6 @@ impl OpenConnection {
             back,
             sent_http_response: false,
             tcpls_session: TcplsSession::new(true),
-            buffer: Vec::new(),
         }
     }
 
@@ -183,21 +181,16 @@ impl OpenConnection {
         // see if that yielded new plaintext.  Then
         // see if the backend is readable too.
         if ev.is_readable() && !self.tcpls_session.tls_conn.as_mut().unwrap().is_handshaking() {
-            self.do_tls_read();
-            self.tcpls_session.stream_recv(recv_map).expect("TODO: panic message");
+            self.do_read(recv_map);
             self.try_back_read();
 
         }
 
 
         if ev.is_readable() && self.tcpls_session.tls_conn.as_mut().unwrap().is_handshaking(){
-
-           self.do_tls_read();
-            self.tcpls_session.stream_recv(recv_map).expect("TODO: panic message");
+            self.do_read(recv_map);
             self.try_back_read();
         }
-
-
 
 
         if ev.is_writable() {
@@ -205,7 +198,7 @@ impl OpenConnection {
         }
 
         if self.closing {
-            self.verify_received();
+            self.verify_received(recv_map);
             let _ = self
                 .tcpls_session
                 .tcp_connections
@@ -221,9 +214,11 @@ impl OpenConnection {
         }
     }
 
-    pub fn verify_received(&mut self) {
+    pub fn verify_received(&mut self, recv_map: &mut RecvBufMap ) {
 
         let mut hash_index= 0;
+
+        let recv_stream =
 
         match OpenConnection::find_pattern(self.buffer.as_slice(), vec![0x0f, 0x0f, 0x0f, 0x0f].as_slice()){
             Some(n) => hash_index = n,
@@ -263,26 +258,50 @@ impl OpenConnection {
         self.back = None;
     }
 
-    fn do_tls_read(&mut self) {
-        // Read some TLS data.
-        match self.tcpls_session.
-            recv_on_connection(0) {
-            Err(err) => {
-                if let io::ErrorKind::WouldBlock = err.kind() {
+    fn do_read(&mut self, app_buffers: &mut RecvBufMap) {
+        // Read TLS data.  This fails if the underlying TCP connection
+        // is broken.
+
+        match self.tcpls_session.recv_on_connection(0) {
+            Err(error) => {
+                if error.kind() == io::ErrorKind::WouldBlock {
                     return;
                 }
+                println!("TLS read error: {:?}", error);
+                self.closing = true;
+                return;
+            }
 
-                error!("read error {:?}", err);
-                self.closing = true;
-                return;
-            }
+            // If we're ready but there's no data: EOF.
             Ok(0) => {
-                debug!("eof");
+                println!("EOF");
+                self.closing = true;
+                self.clean_closure = true;
+                return;
+            }
+
+            Ok(_) => {}
+        };
+
+        // Reading some TLS data might have yielded new TLS
+        // messages to process.  Errors from this indicate
+        // TLS protocol problems and are fatal.
+        let io_state = match self.tcpls_session.stream_recv(app_buffers) {
+            Ok(io_state) => io_state,
+            Err(err) => {
+                println!("TLS error: {:?}", err);
                 self.closing = true;
                 return;
             }
-            Ok((_)) => {}
         };
+
+
+        // If wethat fails, the peer might have started a clean TLS-level
+        // session closure.
+        if io_state.peer_has_closed() {
+            self.clean_closure = true;
+            self.closing = true;
+        }
     }
 
     /*fn try_plain_read(&mut self) {

@@ -47,8 +47,7 @@ impl TlsClient {
         assert_eq!(ev.token(), CLIENT);
 
         if ev.is_readable() && self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking(){
-            self.tcpls_session.recv_on_connection(0).unwrap();
-            self.tcpls_session.stream_recv(recv_map).unwrap();
+           self.do_read(recv_map);
         }
 
         if ev.is_writable() && self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking(){
@@ -73,8 +72,7 @@ impl TlsClient {
 
 
         if ev.is_readable() && ! self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() {
-            self.tcpls_session.recv_on_connection(0).unwrap();
-            self.tcpls_session.stream_recv(recv_map).unwrap();
+            self.do_read(recv_map);
         }
 
         if self.is_closed() {
@@ -91,7 +89,7 @@ impl TlsClient {
     }
 
     /// We're ready to do a read.
-    fn do_read(&mut self) {
+    fn do_read(&mut self, app_buffers: &mut RecvBufMap) {
         // Read TLS data.  This fails if the underlying TCP connection
         // is broken.
 
@@ -119,7 +117,7 @@ impl TlsClient {
         // Reading some TLS data might have yielded new TLS
         // messages to process.  Errors from this indicate
         // TLS protocol problems and are fatal.
-        let io_state = match self.tcpls_session.stream_recv(&mut RecvBufMap::new()) {
+        let io_state = match self.tcpls_session.stream_recv(app_buffers) {
             Ok(io_state) => io_state,
             Err(err) => {
                 println!("TLS error: {:?}", err);
