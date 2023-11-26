@@ -21,6 +21,7 @@ extern crate core;
 use docopt::Docopt;
 use mio::Token;
 use ring::digest;
+use ring::digest::Digest;
 
 use rustls::server::{
     AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
@@ -68,7 +69,7 @@ impl TlsServer {
         }
     }
 
-    fn accept(&mut self, registry: &mio::Registry) -> Result<(), io::Error> {
+    fn accept(&mut self, registry: &mio::Registry, recv_map: &RecvBufMap) -> Result<(), io::Error> {
         loop {
             match self.server.accept() {
                 Ok((socket, addr)) => {
@@ -84,7 +85,7 @@ impl TlsServer {
                     let mut connection = OpenConnection::new(token, mode);
                     connection.tcpls_session.create_tcpls_connection_object(socket, true);
                     connection.tcpls_session.tls_conn = Some(tls_conn);
-                    connection.register(registry);
+                    connection.register(registry, recv_map);
                     self.connections
                         .insert(token, connection);
                 }
@@ -180,17 +181,18 @@ impl OpenConnection {
         // If we're readable: read some TLS.  Then
         // see if that yielded new plaintext.  Then
         // see if the backend is readable too.
-        if ev.is_readable() && !self.tcpls_session.tls_conn.as_mut().unwrap().is_handshaking() {
+        if ev.is_readable() {
             self.do_read(recv_map);
+            if !self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() {
+                self.verify_received(recv_map);
+            }
+
             self.try_back_read();
 
         }
 
 
-        if ev.is_readable() && self.tcpls_session.tls_conn.as_mut().unwrap().is_handshaking(){
-            self.do_read(recv_map);
-            self.try_back_read();
-        }
+
 
 
         if ev.is_writable() {
@@ -198,7 +200,6 @@ impl OpenConnection {
         }
 
         if self.closing {
-            self.verify_received(recv_map);
             let _ = self
                 .tcpls_session
                 .tcp_connections
@@ -210,7 +211,7 @@ impl OpenConnection {
             self.closed = true;
             self.deregister(registry);
         } else {
-            self.reregister(registry);
+            self.reregister(registry, recv_map);
         }
     }
 
@@ -218,21 +219,23 @@ impl OpenConnection {
 
         let mut hash_index= 0;
 
-        let recv_stream =
 
-        match OpenConnection::find_pattern(self.buffer.as_slice(), vec![0x0f, 0x0f, 0x0f, 0x0f].as_slice()){
-            Some(n) => hash_index = n,
-            None => debug!("hash prefix does not exist"),
+        for stream in recv_map.get_iter() {
+            let data_len = recv_map.get(stream.1.id as u16).unwrap().len();
+
+            let recv_stream = &recv_map.get(stream.1.id as u16).unwrap().as_ref()[..data_len];
+
+            hash_index = match OpenConnection::find_pattern(recv_stream, vec![0x0f, 0x0f, 0x0f, 0x0f].as_slice()) {
+                Some(n) => n,
+                None => panic!("hash prefix does not exist"),
+            };
+
+            let recvd_data = &recv_stream[..hash_index];
+            let recvd_hash = &recv_stream[hash_index + 4..];
+
+            assert_eq!(recvd_hash, self.calculate_sha256_hash(recvd_data).as_ref());
+            debug!("\n \n Bytes received on stream {:?} are {:?} \n \n with total length {:?}", stream.1.id, recvd_data, recvd_data.len() + recvd_hash.len() + 4);
         }
-
-        let mut received_data = Vec::new();
-        received_data.extend_from_slice(&self.buffer[..hash_index]);
-        let mut received_hash = Vec::new();
-        received_hash.extend_from_slice(&self.buffer[(hash_index + 4)..]);
-
-        assert_eq!(received_hash, self.calculate_sha256_hash(received_data.as_slice()).as_ref() );
-        assert_eq!(received_data.len(), self.buffer[..hash_index].len());
-        debug!("\n \n Bytes received are {:?} \n \n with total length {:?}", received_data, received_data.len() + received_hash.len() + 4);
     }
 
     fn calculate_sha256_hash(&mut self, data: &[u8]) -> digest::Digest {
@@ -259,27 +262,22 @@ impl OpenConnection {
     }
 
     fn do_read(&mut self, app_buffers: &mut RecvBufMap) {
-        // Read TLS data.  This fails if the underlying TCP connection
-        // is broken.
-
+        // Read some TLS data.
         match self.tcpls_session.recv_on_connection(0) {
-            Err(error) => {
-                if error.kind() == io::ErrorKind::WouldBlock {
+            Err(err) => {
+                if let io::ErrorKind::WouldBlock = err.kind() {
                     return;
                 }
-                println!("TLS read error: {:?}", error);
+
+                error!("read error {:?}", err);
                 self.closing = true;
                 return;
             }
-
-            // If we're ready but there's no data: EOF.
             Ok(0) => {
-                println!("EOF");
+                debug!("eof");
                 self.closing = true;
-                self.clean_closure = true;
                 return;
             }
-
             Ok(_) => {}
         };
 
@@ -295,33 +293,9 @@ impl OpenConnection {
             }
         };
 
-
-        // If wethat fails, the peer might have started a clean TLS-level
-        // session closure.
-        if io_state.peer_has_closed() {
-            self.clean_closure = true;
-            self.closing = true;
-        }
     }
 
-    /*fn try_plain_read(&mut self) {
-        // Read and process all available plaintext.
-        if let Ok(io_state) = self.tls_conn.process_received() {
-            if io_state.plaintext_bytes_to_read() > 0 {
-                let mut buf = Vec::new();
-                buf.resize(io_state.plaintext_bytes_to_read(), 0u8);
 
-                self.tls_conn
-                    .reader()
-                    .read_exact(&mut buf)
-                    .unwrap();
-
-                debug!("plaintext read {:?}", buf.len());
-                debug!("plaintext read {:?}", from_utf8(buf.as_slice()).unwrap());
-                self.incoming_plaintext(&buf);
-            }
-        }
-    }*/
 
     fn try_back_read(&mut self) {
         if self.back.is_none() {
@@ -419,8 +393,8 @@ impl OpenConnection {
         }
     }
 
-    fn register(&mut self, registry: &mio::Registry) {
-        let event_set = self.event_set();
+    fn register(&mut self, registry: &mio::Registry, app_buf: &RecvBufMap) {
+        let event_set = self.event_set(app_buf);
         registry
             .register(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket, self.token, event_set)
             .unwrap();
@@ -436,8 +410,8 @@ impl OpenConnection {
         }
     }
 
-    fn reregister(&mut self, registry: &mio::Registry) {
-        let event_set = self.event_set();
+    fn reregister(&mut self, registry: &mio::Registry, app_buf: &RecvBufMap) {
+        let event_set = self.event_set(app_buf);
         registry
             .reregister(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket, self.token, event_set)
             .unwrap();
@@ -457,8 +431,8 @@ impl OpenConnection {
 
     /// What IO events we're currently waiting for,
     /// based on wants_read/wants_write.
-    fn event_set(&self) -> mio::Interest {
-        let rd = self.tcpls_session.tls_conn.as_ref().unwrap().wants_read();
+    fn event_set(&self, app_buf: &RecvBufMap) -> mio::Interest {
+        let rd = self.tcpls_session.tls_conn.as_ref().unwrap().wants_read(app_buf);
         let wr = self.tcpls_session.tls_conn.as_ref().unwrap().wants_write();
 
         if rd && wr {
@@ -588,13 +562,13 @@ fn main() {
 
     let mut events = mio::Events::with_capacity(256);
     loop {
-        poll.poll(&mut events, None).unwrap();
+        poll.poll(&mut events, Some(Duration::new(5, 0))).unwrap();
 
         for event in events.iter() {
             match event.token() {
                 LISTENER => {
                     tcpls_server
-                        .accept(poll.registry())
+                        .accept(poll.registry(), &recv_map)
                         .expect("error accepting socket");
                 }
                 _ => tcpls_server.conn_event(poll.registry(), event, &mut recv_map),

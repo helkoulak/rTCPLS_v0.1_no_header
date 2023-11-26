@@ -1,6 +1,7 @@
 use std::cmp;
 use std::collections::hash_map;
-use crate::tcpls::stream::{DEFAULT_BUFFER_LIMIT, SimpleIdHashMap};
+use std::collections::hash_map::Iter;
+use crate::tcpls::stream::{DEFAULT_BUFFER_LIMIT, SimpleIdHashMap, StreamIter};
 
 /// This is the receive buffer of a stream
 #[derive(Default)]
@@ -50,8 +51,8 @@ impl RecvBuf {
         &mut self.data[self.offset as usize..]
     }
 
-    pub fn as_ref(&mut self) -> & [u8] {
-        & self.data[self.offset as usize..]
+    pub fn as_ref(&self) -> & [u8] {
+        & self.data
     }
 
     pub fn get_mut_consumed(&mut self) -> &mut [u8] {
@@ -63,7 +64,7 @@ impl RecvBuf {
     }
 
     pub  fn is_empty(&self) -> bool {
-        self.data.is_empty()
+        self.offset == 0
     }
 
     pub  fn is_full(&self) -> bool {
@@ -72,7 +73,7 @@ impl RecvBuf {
 
     /// How many bytes we're storing
     pub fn len(&self) -> usize {
-       self.data.len()
+        self.offset as usize
     }
 
     pub fn capacity(&self) -> usize {
@@ -114,7 +115,7 @@ impl RecvBufMap {
     }
 
 
-    pub(crate) fn get_or_create_recv_buffer(&mut self, stream_id: u64, capacity: Option<usize>) -> &mut RecvBuf {
+    pub fn get_or_create_recv_buffer(&mut self, stream_id: u64, capacity: Option<usize>) -> &mut RecvBuf {
         match self.buffers.entry(stream_id) {
             hash_map::Entry::Vacant(v) => {
                 v.insert(RecvBuf::new(stream_id, capacity))
@@ -124,10 +125,27 @@ impl RecvBufMap {
     }
 
 
-    /*pub fn get_mut(&mut self, stream_id: u64) -> Option<&mut [u8]> {
-        Some(self.buffers.get_mut(&stream_id)?
+    pub fn get(&self, id: u16) -> Option<&RecvBuf> {
+        self.buffers.get(&(id as u64))
+    }
 
-    }*/
+    /// Returns the mutable stream with the given ID if it exists.
+    pub fn get_mut(&mut self, id: u16) -> Option<&mut RecvBuf> {
+        self.buffers.get_mut(&(id as u64))
+    }
+
+    pub fn all_empty(&self) -> bool {
+        let mut all_empty = true;
+        let bufs = self.buffers.iter();
+        for buf in bufs {
+            all_empty &= buf.1.is_empty();
+        }
+        all_empty
+    }
+
+    pub fn get_iter(&self) -> Iter<'_, u64, RecvBuf>{
+        self.buffers.iter()
+    }
 
     /*pub(crate) fn read_mut(&mut self, stream_id: u64, stream: &mut Stream) -> Result<&mut [u8], Error> {
         let buf = match self.buffers.entry(stream_id) {

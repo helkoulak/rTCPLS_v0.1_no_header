@@ -593,14 +593,14 @@ impl CommonState {
     ///
     /// [`Connection::reader`]: crate::Connection::reader
     /// [`Connection::read_tls`]: crate::Connection::read_tls
-    pub fn wants_read(&self) -> bool {
+    pub fn wants_read(&self, app_buf: &RecvBufMap) -> bool {
         // We want to read more data all the time, except when we have unprocessed plaintext.
         // This provides back-pressure to the TCP buffers. We also don't want to read more after
         // the peer has sent us a close notification.
         //
         // In the handshake case we don't have readable plaintext before the handshake has
         // completed, but also don't want to read if we still have sendable tls.
-        self.received_plaintext.is_empty()
+        app_buf.all_empty()
             && !self.has_received_close_notify
             && (self.may_send_application_data || self.record_layer.streams.all_empty())
     }

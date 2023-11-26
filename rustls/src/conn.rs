@@ -381,6 +381,7 @@ impl<Data> ConnectionCommon<Data> {
         T: io::Read + io::Write,
     {
 
+        let mut recv_map = RecvBufMap::new();
         let until_handshaked = self.is_handshaking();
         let mut eof = false;
         let mut wrlen = 0;
@@ -395,7 +396,7 @@ impl<Data> ConnectionCommon<Data> {
                 return Ok((rdlen, wrlen));
             }
 
-            while !eof && self.wants_read() {
+            while !eof && self.wants_read(&recv_map) {
                 let read_size = match self.read_tls(io) {
                     Ok(0) => {
                         eof = true;

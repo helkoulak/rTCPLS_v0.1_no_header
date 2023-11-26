@@ -10,6 +10,7 @@ use std::net::SocketAddr;
 use std::ops::{Deref, DerefMut};
 use std::str;
 use std::sync::Arc;
+use std::time::Duration;
 
 use docopt::Docopt;
 use env_logger::builder;
@@ -56,7 +57,9 @@ impl TlsClient {
 
         if ev.is_writable() && ! self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() {
 
-           self.send_file().expect("");
+           self.send_file("Cargo.toml", 0).expect("");
+            self.tcpls_session.send_on_connection(0).expect("sending on socket has failed");
+            self.send_file("Cargo.toml", 1).expect("");
             self.tcpls_session.send_on_connection(0).expect("sending on socket has failed");
 
             /*let mut done = 0;
@@ -151,17 +154,17 @@ impl TlsClient {
     }
 
     /// Registers self as a 'listener' in mio::Registry
-    fn register(&mut self, registry: &mio::Registry) {
-        let interest = self.event_set();
+    fn register(&mut self, registry: &mio::Registry, recv_map: &RecvBufMap) {
+        let interest = self.event_set(recv_map);
         registry
             .register(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket, CLIENT, interest)
             .unwrap();
     }
 
     /// Reregisters self as a 'listener' in mio::Registry.
-    fn reregister(&mut self, registry: &mio::Registry) {
+    fn reregister(&mut self, registry: &mio::Registry, recv_map: & RecvBufMap) {
 
-        let interest = self.event_set();
+        let interest = self.event_set(recv_map);
         registry
             .reregister(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket, CLIENT, interest)
             .unwrap();
@@ -169,9 +172,9 @@ impl TlsClient {
 
     /// Use wants_read/wants_write to register for different mio-level
     /// IO readiness events.
-    fn event_set(&mut self) -> mio::Interest {
+    fn event_set(&mut self, app_buf: & RecvBufMap) -> mio::Interest {
 
-        let rd = self.tcpls_session.tls_conn.as_mut().unwrap().wants_read();
+        let rd = self.tcpls_session.tls_conn.as_mut().unwrap().wants_read(app_buf);
         let wr = self.tcpls_session.tls_conn.as_mut().unwrap().wants_write();
 
         if rd && wr {
@@ -189,9 +192,9 @@ impl TlsClient {
 
 
 
-    fn send_file(&mut self) -> io::Result<()> {
+    fn send_file(&mut self, file_name: &str, stream: u16) -> io::Result<()> {
         // Specify the file path you want to hash
-        let file_path = "Cargo.toml"; // Replace with the actual file path
+        let file_path = file_name; // Replace with the actual file path
 
         // Read the file into a byte vector
         let mut file_contents = TlsClient::read_file_to_bytes(file_path)?;
@@ -207,9 +210,9 @@ impl TlsClient {
         file_contents.extend(hash.as_ref());
 
         // Print the hash as a hexadecimal string
-        println!("\n \n File bytes with hash are : {:?} \n \n with total length: {:?}", file_contents, file_contents.len());
+        println!("\n \n File bytes on stream {:?} with hash are : {:?} \n \n with total length: {:?}", stream, file_contents, file_contents.len());
 
-        self.tcpls_session.stream_send(0, file_contents.as_ref(), false).expect("buffering failed");
+        self.tcpls_session.stream_send(stream, file_contents.as_ref(), false).expect("buffering failed");
 
 
         Ok(())
@@ -399,14 +402,14 @@ fn main() {
 
     let mut poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(50);
-    client.register(poll.registry());
+    client.register(poll.registry(), &recv_map);
 
     loop {
-        poll.poll(&mut events, None).unwrap();
+        poll.poll(&mut events, Some(Duration::new(5, 0))).unwrap();
 
         for ev in events.iter() {
             client.handle_event(ev, &mut recv_map);
-            client.reregister(poll.registry());
+            client.reregister(poll.registry(), &recv_map);
         }
     }
 }

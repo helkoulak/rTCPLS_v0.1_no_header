@@ -59,7 +59,7 @@ where
         // hit. Otherwise, we will prematurely signal EOF by returning 0. We
         // determine if EOF has actually been hit by checking if 0 bytes were
         // read from the underlying transport.
-        while self.conn.wants_read() {
+        while self.conn.wants_read(&RecvBufMap::new()) {
             let at_eof = self.conn.complete_io(self.sock)?.0 == 0;
             if at_eof {
                 if let Ok(io_state) = self.conn.process_new_packets(&mut RecvBufMap::new()) {
