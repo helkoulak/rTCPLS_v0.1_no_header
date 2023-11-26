@@ -350,6 +350,15 @@ impl StreamMap {
         !self.flushable.is_empty()
     }
 
+    pub fn all_empty(&self) -> bool {
+        let mut all_empty = true;
+        let flushable = self.flushable();
+        for id in flushable {
+            all_empty &= self.streams.get(&id).unwrap().send.is_empty();
+        }
+        all_empty
+    }
+
     /// Returns true if there are any streams that have data to read.
     pub fn has_readable(&self) -> bool {
         !self.readable.is_empty()

@@ -181,10 +181,7 @@ fn prepare_output(header: &TcplsHeader, payload_length: usize) -> Result<Vec<u8>
 }
 
 fn make_tls13_aad_for_enc(output_buf: &[u8]) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE_WITH_TCPLS_HEADER]> {
-    ring::aead::Aad::from([output_buf[0], output_buf[1], output_buf[2], output_buf[3]
-        , output_buf[4], output_buf[5], output_buf[6], output_buf[7]
-        , output_buf[8], output_buf[9], output_buf[10], output_buf[11]
-        , output_buf[12]])
+    ring::aead::Aad::from(<[u8; 13]>::try_from(output_buf[..TLS13_AAD_SIZE_WITH_TCPLS_HEADER].as_ref()).unwrap())
 }
 
 fn make_tls13_aad_for_dec(len: usize, header: &TcplsHeader) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE_WITH_TCPLS_HEADER]> {
@@ -246,7 +243,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
 
         let mut payload_len = plaintext_len + stream_header_len + 1 + tag_length;
         let record_payload_length = payload_len + TCPLS_HEADER_SIZE;
-        let mut input = vec![0; payload_len];
+        let mut input = vec![0; plaintext_len + stream_header_len + 1];
         let mut b = octets::OctetsMut::with_slice(&mut input);
 
         b.put_bytes(msg.payload).unwrap();
@@ -313,7 +310,7 @@ impl MessageDecrypter for Tls13MessageDecrypter {
 
         let plain_len = self
             .dec_key
-            .open_in_output(nonce, aad, payload,   output)
+            .open_in_output(nonce, aad, payload,   output, 0)
             .map_err(|_| Error::DecryptError)?
             .len();
 
@@ -347,13 +344,13 @@ impl MessageDecrypter for Tls13MessageDecrypter {
 
 
     fn decrypt_zc(&self, mut msg: BorrowedOpaqueMessage, seq: u64, stream_id: u32, recv_buf: &mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<PlainMessage, Error> {
-        let payload = &msg.payload[TCPLS_HEADER_SIZE..];
+        let payload = msg.payload;
         if payload.len() < self.dec_key.algorithm().tag_len() {
             return Err(Error::DecryptError);
         }
 
         let nonce = make_nonce(&self.iv, seq, stream_id);
-        let aad = make_tls13_aad_for_dec(payload.len(), &tcpls_header);
+        let aad = make_tls13_aad_for_dec(msg.payload.len(), &tcpls_header);
 
         // output buffer must be at least as big as the input buffer
         if recv_buf.capacity() < payload.len() {
@@ -362,21 +359,16 @@ impl MessageDecrypter for Tls13MessageDecrypter {
 
         let plain_len = self
             .dec_key
-            .open_in_output(nonce, aad, payload, recv_buf.get_mut())
+            .open_in_output(nonce, aad, payload, recv_buf.get_mut(), TCPLS_HEADER_SIZE)
             .map_err(|_| Error::DecryptError)?
             .len();
-
-        // truncate tag
-        for b in &mut recv_buf.get_mut()[plain_len..] {
-            *b = 0;
-        }
 
         if recv_buf.get_mut()[..plain_len].len() > MAX_FRAGMENT_LEN + 1 {
             return Err(Error::PeerSentOversizedRecord);
         }
 
         let mut new_size = 0;
-        (msg.typ, new_size)  = unpad_tls13_from_slice(recv_buf.get_mut());
+        (msg.typ, new_size)  = unpad_tls13_from_slice(&mut recv_buf.get_mut()[..plain_len]);
 
         let payload_len_no_type = recv_buf.get_mut()[..new_size].len();
         

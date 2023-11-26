@@ -100,7 +100,7 @@ impl CommonState {
     ///
     /// [`Connection::write_tls`]: crate::Connection::write_tls
     pub fn wants_write(&self) -> bool {
-        self.record_layer.streams.has_flushable()
+       !self.record_layer.streams.all_empty()
     }
 
 
@@ -600,9 +600,9 @@ impl CommonState {
         //
         // In the handshake case we don't have readable plaintext before the handshake has
         // completed, but also don't want to read if we still have sendable tls.
-        !self.message_deframer.has_pending()
+        self.received_plaintext.is_empty()
             && !self.has_received_close_notify
-            && (self.may_send_application_data || !self.wants_write())
+            && (self.may_send_application_data || self.record_layer.streams.all_empty())
     }
 
     pub(crate) fn current_io_state(&self) -> IoState {
