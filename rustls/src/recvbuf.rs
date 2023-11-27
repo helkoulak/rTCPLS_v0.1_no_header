@@ -52,7 +52,7 @@ impl RecvBuf {
     }
 
     pub fn as_ref(&self) -> & [u8] {
-        & self.data
+        &self.data[..self.offset as usize]
     }
 
     pub fn get_mut_consumed(&mut self) -> &mut [u8] {
