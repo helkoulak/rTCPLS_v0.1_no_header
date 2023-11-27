@@ -59,6 +59,7 @@ impl TlsClient {
 
            self.send_file("Cargo.toml", 0).expect("");
             self.send_file("Cargo.lock", 1).expect("");
+            self.send_file("TLS_HS_Client", 2).expect("");
             self.tcpls_session.send_on_connection(0).expect("sending on socket has failed");
 
             /*let mut done = 0;
