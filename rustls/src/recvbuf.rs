@@ -1,6 +1,6 @@
 use std::cmp;
 use std::collections::hash_map;
-use std::collections::hash_map::Iter;
+use std::collections::hash_map::{Iter, IterMut};
 use crate::tcpls::stream::{DEFAULT_BUFFER_LIMIT, SimpleIdHashMap, StreamIter};
 
 /// This is the receive buffer of a stream
@@ -156,6 +156,10 @@ impl RecvBufMap {
 
     pub fn get_iter(&self) -> Iter<'_, u64, RecvBuf>{
         self.buffers.iter()
+    }
+
+    pub fn get_iter_mut(&mut self) -> IterMut<'_, u64, RecvBuf> {
+        self.buffers.iter_mut()
     }
 
     /*pub(crate) fn read_mut(&mut self, stream_id: u64, stream: &mut Stream) -> Result<&mut [u8], Error> {
