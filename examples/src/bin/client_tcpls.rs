@@ -58,8 +58,7 @@ impl TlsClient {
         if ev.is_writable() && ! self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() {
 
            self.send_file("Cargo.toml", 0).expect("");
-            self.tcpls_session.send_on_connection(0).expect("sending on socket has failed");
-            self.send_file("Cargo.toml", 1).expect("");
+            self.send_file("Cargo.lock", 1).expect("");
             self.tcpls_session.send_on_connection(0).expect("sending on socket has failed");
 
             /*let mut done = 0;
@@ -202,15 +201,12 @@ impl TlsClient {
         // Calculate the hash of the file contents using SHA-256
         let hash = TlsClient::calculate_sha256_hash(&file_contents);
 
-        // Print the hash as a hexadecimal string
-        println!("SHA-256 Hash: {:?}", hash);
-
         // Append hash value to the serialized file to be sent to the peer
         file_contents.extend(vec![0x0F, 0x0F, 0x0F, 0x0F]);
         file_contents.extend(hash.as_ref());
 
         // Print the hash as a hexadecimal string
-        println!("\n \n File bytes on stream {:?} with hash are : {:?} \n \n with total length: {:?}", stream, file_contents, file_contents.len());
+        println!("\n \n File bytes on stream {:?} : \n {:?} \n \n SHA-256 Hash {:?} \n Total length: {:?} \n", stream, file_contents, hash, file_contents.len());
 
         self.tcpls_session.stream_send(stream, file_contents.as_ref(), false).expect("buffering failed");
 

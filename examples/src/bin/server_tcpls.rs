@@ -220,21 +220,26 @@ impl OpenConnection {
         let mut hash_index= 0;
 
 
-        for stream in recv_map.get_iter() {
-            let data_len = recv_map.get(stream.1.id as u16).unwrap().len();
+        for stream in recv_map.get_iter_mut() {
+            if stream.1.is_empty(){
+                continue
+            }
+            let data_len = stream.1.len();
 
-            let recv_stream = &recv_map.get(stream.1.id as u16).unwrap().as_ref()[..data_len];
-
-            hash_index = match OpenConnection::find_pattern(recv_stream, vec![0x0f, 0x0f, 0x0f, 0x0f].as_slice()) {
+            hash_index = match OpenConnection::find_pattern(&stream.1.as_ref()[..data_len], vec![0x0f, 0x0f, 0x0f, 0x0f].as_slice()) {
                 Some(n) => n,
                 None => panic!("hash prefix does not exist"),
             };
 
-            let recvd_data = &recv_stream[..hash_index];
-            let recvd_hash = &recv_stream[hash_index + 4..];
 
-            assert_eq!(recvd_hash, self.calculate_sha256_hash(recvd_data).as_ref());
-            debug!("\n \n Bytes received on stream {:?} are {:?} \n \n with total length {:?}", stream.1.id, recvd_data, recvd_data.len() + recvd_hash.len() + 4);
+
+            assert_eq!(&stream.1.as_ref()[hash_index + 4..data_len], self.calculate_sha256_hash(&stream.1.as_ref()[..hash_index]).as_ref());
+            debug!("\n \n Bytes received on stream {:?} : \n \n {:?} \n \n SHA-256 Hash {:?} \n Total length: {:?} \n",
+                stream.1.id,
+                &stream.1.as_ref()[..hash_index],
+                &stream.1.as_ref()[hash_index + 4..data_len].iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>(),
+                &stream.1.as_ref()[..hash_index].len() + &stream.1.as_ref()[hash_index + 4..data_len].len() + 4);
+            stream.1.reset_stream();
         }
     }
 
