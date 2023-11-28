@@ -207,15 +207,14 @@ impl RecordLayer {
         //
         // Note that there's no reason to refuse to decrypt: the security
         // failure has already happened.
-
-        let stream_id = tcpls_header.stream_id;
+        self.stream_in_use = tcpls_header.stream_id;
         let want_close_before_decrypt = recv_buf.read_seq == SEQ_SOFT_LIMIT;
 
         let encrypted_len = encr.payload.len();
 
         match self
             .message_decrypter
-            .decrypt_zc(encr, recv_buf.read_seq, stream_id as u32, recv_buf, &tcpls_header)
+            .decrypt_zc(encr, recv_buf.read_seq, self.stream_in_use as u32, recv_buf, &tcpls_header)
         {
             Ok(plaintext) => {
                 recv_buf.read_seq += 1;
