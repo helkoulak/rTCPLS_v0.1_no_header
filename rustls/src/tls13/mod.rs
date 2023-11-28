@@ -385,7 +385,7 @@ impl MessageDecrypter for Tls13MessageDecrypter {
             version: ProtocolVersion::TLSv1_3,
             payload: match msg.typ {
                 ContentType::ApplicationData => {
-                    recv_buf.offset += tcpls_header.offset_step as u64;
+                    recv_buf.offset += payload_len_no_type as u64;
                     Payload::new(Vec::new())
                 },
                 _ => Payload::new_from_vec(recv_buf.get_mut()[..type_pos].to_vec()),
