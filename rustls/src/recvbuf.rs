@@ -11,11 +11,11 @@ pub struct RecvBuf {
     /// where the next chunk will be appended
     pub offset: u64,
 
-    // Length of last copied data chunk
+    // Length of last decrypted data chunk
     len: usize,
 
-    /// indicates to which offset data within outbuf has already been marked consumed by the
-    /// application. V3 specific.
+    /// indicates to which offset data within offset has already been marked consumed by the
+    /// application.
     consumed: usize,
 
     pub next_recv_pkt_num: u32,
@@ -52,7 +52,7 @@ impl RecvBuf {
     }
 
     pub fn as_ref(&self) -> & [u8] {
-        &self.data[..self.offset as usize]
+        &self.data[self.consumed..self.offset as usize]
     }
 
     pub fn get_mut_consumed(&mut self) -> &mut [u8] {
