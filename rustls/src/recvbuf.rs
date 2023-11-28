@@ -52,6 +52,10 @@ impl RecvBuf {
     }
 
     pub fn as_ref(&self) -> & [u8] {
+        &self.data
+    }
+
+    pub fn as_ref_consumed(&self) -> & [u8] {
         &self.data[self.consumed..self.offset as usize]
     }
 
