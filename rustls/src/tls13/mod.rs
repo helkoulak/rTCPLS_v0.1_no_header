@@ -367,10 +367,10 @@ impl MessageDecrypter for Tls13MessageDecrypter {
             return Err(Error::PeerSentOversizedRecord);
         }
 
-        let mut new_size = 0;
-        (msg.typ, new_size)  = unpad_tls13_from_slice(&mut recv_buf.get_mut()[..plain_len]);
+        let mut type_pos = 0;
+        (msg.typ, type_pos)  = unpad_tls13_from_slice(&mut recv_buf.get_mut()[..plain_len]);
 
-        let payload_len_no_type = recv_buf.get_mut()[..new_size].len();
+        let payload_len_no_type = recv_buf.get_mut()[..type_pos].len();
         
         if msg.typ == ContentType::Unknown(0) {
             return Err(PeerMisbehaved::IllegalTlsInnerPlaintext.into());
@@ -388,7 +388,7 @@ impl MessageDecrypter for Tls13MessageDecrypter {
                     recv_buf.offset += tcpls_header.offset_step as u64;
                     Payload::new(Vec::new())
                 },
-                _ => Payload::new_from_vec(recv_buf.get_mut()[..new_size].to_vec()),
+                _ => Payload::new_from_vec(recv_buf.get_mut()[..type_pos].to_vec()),
             },
         })
     }
