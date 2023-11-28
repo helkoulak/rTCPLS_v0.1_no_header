@@ -90,7 +90,11 @@ impl RecvBuf {
     }
 
     pub fn consume(&mut self, used: usize) {
-        self.consumed += used as u64;
+        self.consumed += used;
+    }
+
+    pub fn is_consumed(&self) -> bool {
+        self.consumed as u64 == self.offset
     }
 
     pub fn truncate_processed(&mut self, processed: usize) { self.offset -= processed as u64; }
