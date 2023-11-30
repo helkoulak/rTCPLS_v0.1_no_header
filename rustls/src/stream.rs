@@ -51,6 +51,7 @@ where
     S: SideData,
 {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+        let mut app_bufs = RecvBufMap::new();
         self.complete_prior_io()?;
 
         // We call complete_io() in a loop since a single call may read only
@@ -62,7 +63,7 @@ where
         while self.conn.wants_read(&RecvBufMap::new()) {
             let at_eof = self.conn.complete_io(self.sock)?.0 == 0;
             if at_eof {
-                if let Ok(io_state) = self.conn.process_new_packets(&mut RecvBufMap::new()) {
+                if let Ok(io_state) = self.conn.process_new_packets(&mut app_bufs) {
                     if at_eof && io_state.plaintext_bytes_to_read() == 0 {
                         return Ok(0);
                     }
