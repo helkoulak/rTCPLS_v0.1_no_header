@@ -481,17 +481,6 @@ impl CommonState {
         self.received_plaintext.append(bytes.0);
     }
 
-    fn process_tcpls_payload(&mut self, app_buffers: &mut RecvBufMap) {
-        /* let mut output = app_buffers.get_or_create_recv_buffer(self
-                                                                    .common_state
-                                                                    .record_layer
-                                                                    .get__in_use(), None);
-          let mut b = octets::Octets::with_slice_reverse(output.as_ref());
-          let header_len = StreamFrameHeader::get_header_size_reverse(&mut b);
-          output.truncate_processed(header_len);
-  */
-    }
-
     #[cfg(feature = "tls12")]
     pub(crate) fn start_encryption_tls12(&mut self, secrets: &ConnectionSecrets, side: Side) {
         let (dec, enc) = secrets.make_cipher_pair(side);
