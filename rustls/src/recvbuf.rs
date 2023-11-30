@@ -1,6 +1,7 @@
 use std::cmp;
 use std::collections::hash_map;
 use std::collections::hash_map::{Iter, IterMut};
+use std::io::{Error, Read};
 use crate::tcpls::stream::{DEFAULT_BUFFER_LIMIT, SimpleIdHashMap, StreamIter};
 
 /// This is the receive buffer of a stream
@@ -117,6 +118,17 @@ impl RecvBuf {
         self.next_recv_pkt_num = 0;
         self.consumed = 0;
         self.len = 0;
+    }
+
+    /// Read data out of this object, writing it into `buf`
+    /// and returning how many bytes were written there.
+    pub(crate) fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
+
+        let to_read_length = cmp::min(buf.len(), self.as_ref_consumed().len());
+
+        buf[..to_read_length].copy_from_slice(self.as_ref_consumed());
+        self.consume(to_read_length);
+        Ok(to_read_length)
     }
 }
 
