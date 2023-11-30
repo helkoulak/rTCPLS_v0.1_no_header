@@ -89,7 +89,7 @@ impl RecvBuf {
     /// bytes should we actually write to adhere to the
     /// capacity of the buffer?
     pub  fn apply_limit(&self, len: usize) -> usize {
-        let space = self.data.capacity().saturating_sub(self.len());
+        let space = self.capacity();
         cmp::min(len, space)
 
     }
