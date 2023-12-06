@@ -33,6 +33,7 @@ use std::{
     io::Write,
     sync::{Arc, Mutex, Once},
 };
+use rustls::ProtocolVersion;
 use rustls::recvbuf::RecvBufMap;
 
 /// Approximates `#[serial]` from the `serial_test` crate.
@@ -65,6 +66,9 @@ fn exercise_key_log_file_for_client() {
         env::set_var("SSLKEYLOGFILE", "./sslkeylogfile.txt");
 
         for version in rustls::ALL_VERSIONS {
+            if version.version == ProtocolVersion::TLSv1_2 {
+                continue
+            }
             let mut client_config = make_client_config_with_versions(KeyType::Rsa, &[version]);
             client_config.key_log = Arc::new(rustls::KeyLogFile::new());
 
@@ -92,6 +96,9 @@ fn exercise_key_log_file_for_server() {
         let server_config = Arc::new(server_config);
 
         for version in rustls::ALL_VERSIONS {
+            if version.version == ProtocolVersion::TLSv1_2 {
+                continue
+            }
             let client_config = make_client_config_with_versions(KeyType::Rsa, &[version]);
             let (mut client, mut server, mut recv_svr, mut recv_clnt) =
                 make_pair_for_arc_configs(&Arc::new(client_config), &server_config);

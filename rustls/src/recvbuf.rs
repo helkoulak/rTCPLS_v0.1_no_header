@@ -122,7 +122,7 @@ impl RecvBuf {
 
     /// Read data out of this object, writing it into `buf`
     /// and returning how many bytes were written there.
-    pub(crate) fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
+    pub fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
 
         let to_read_length = cmp::min(buf.len(), self.as_ref_consumed().len());
 

@@ -178,9 +178,7 @@ impl MessageEncrypter for GcmMessageEncrypter {
         todo!()
     }
 
-    /*fn derive_enc_conn_iv(&mut self, conn_id: u32) {
-        todo!()
-    }*/
+
 
     fn get_tag_length(&self) -> usize {
         todo!()
