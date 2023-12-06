@@ -16,7 +16,7 @@ pub struct MessageFragmenter {
 impl Default for MessageFragmenter {
     fn default() -> Self {
         Self {
-            max_frag: MAX_FRAGMENT_LEN,
+            max_frag: MAX_TCPLS_FRAGMENT_LEN,
         }
     }
 }
@@ -42,9 +42,9 @@ impl MessageFragmenter {
         version: ProtocolVersion,
         payload: &'a [u8],
     ) -> (impl Iterator<Item = BorrowedPlainMessage<'a>> + 'a, usize) {
-        let count = payload.chunks(MAX_TCPLS_FRAGMENT_LEN).len();
+        let count = payload.chunks(self.max_frag).len();
         (payload
-            .chunks(MAX_TCPLS_FRAGMENT_LEN)
+            .chunks(self.max_frag)
             .map(move |c| BorrowedPlainMessage {
                 typ,
                 version,
@@ -62,8 +62,8 @@ impl MessageFragmenter {
     /// Returns BadMaxFragmentSize if the size is smaller than 32 or larger than 16389.
     pub fn set_max_fragment_size(&mut self, max_fragment_size: Option<usize>) -> Result<(), Error> {
         self.max_frag = match max_fragment_size {
-            Some(sz @ 32..=MAX_FRAGMENT_SIZE) => sz - PACKET_OVERHEAD,
-            None => MAX_FRAGMENT_LEN,
+            Some(sz @ 32..=MAX_TCPLS_FRAGMENT_LEN) => sz - PACKET_OVERHEAD,
+            None => MAX_TCPLS_FRAGMENT_LEN,
             _ => return Err(Error::BadMaxFragmentSize),
         };
         Ok(())

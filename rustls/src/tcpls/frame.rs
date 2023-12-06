@@ -13,10 +13,6 @@ pub const MAX_TCPLS_FRAGMENT_LEN: usize = MAX_FRAGMENT_LEN - TCPLS_HEADER_SIZE -
 
 
 
-/*/// Payload max length for a TCPLS stream frame
-pub const TCPLS_STREAM_FRAME_MAX_PAYLOAD_LENGTH: usize =
-    crate::msgs::fragmenter::MAX_FRAGMENT_LEN - STREAM_FRAME_MAX_OVERHEAD;*/
-
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Frame {
     Padding,
