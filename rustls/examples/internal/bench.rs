@@ -20,6 +20,7 @@ use rustls::Ticketer;
 use rustls::{ClientConfig, ClientConnection};
 use rustls::{ConnectionCommon, SideData};
 use rustls::{ServerConfig, ServerConnection};
+use rustls::recvbuf::RecvBufMap;
 
 fn duration_nanos(d: Duration) -> f64 {
     (d.as_secs() as f64) + f64::from(d.subsec_nanos()) / 1e9
@@ -64,13 +65,14 @@ where
     let mut read_time = 0f64;
     let mut data_left = expect_data;
     let mut data_buf = [0u8; 8192];
+    let mut app_bufs = RecvBufMap::new();
 
     loop {
         let mut sz = 0;
 
         while left.wants_write() {
             let written = left
-                .write_tls(&mut tls_buf[sz..].as_mut())
+                .write_tls(&mut tls_buf[sz..].as_mut(), 0)
                 .unwrap();
             if written == 0 {
                 break;
@@ -88,7 +90,7 @@ where
             let start = Instant::now();
             match right.read_tls(&mut tls_buf[offs..sz].as_ref()) {
                 Ok(read) => {
-                    right.process_new_packets().unwrap();
+                    right.process_new_packets(&mut app_bufs).unwrap();
                     offs += read;
                 }
                 Err(err) => {

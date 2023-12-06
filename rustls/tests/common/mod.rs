@@ -13,6 +13,7 @@ use rustls::RootCertStore;
 use rustls::{Certificate, PrivateKey};
 use rustls::{ClientConfig, ClientConnection};
 use rustls::{ConnectionCommon, ServerConfig, ServerConnection, SideData};
+use rustls::recvbuf::RecvBufMap;
 use rustls::tcpls::DEFAULT_CONNECTION_ID;
 
 macro_rules! embed_files {
@@ -104,7 +105,7 @@ pub fn transfer(
     while left.wants_write() {
         let sz = {
             let into_buf: &mut dyn io::Write = &mut &mut buf[..];
-            left.write_tls(into_buf).unwrap()
+            left.write_tls(into_buf, 0).unwrap()
         };
         total += sz;
         if sz == 0 {
@@ -363,37 +364,41 @@ pub fn make_client_config_with_versions_with_auth(
     finish_client_config_with_creds(kt, builder)
 }
 
-pub fn make_pair(kt: KeyType) -> (ClientConnection, ServerConnection) {
+pub fn make_pair(kt: KeyType) -> (ClientConnection, ServerConnection, RecvBufMap, RecvBufMap) {
     make_pair_for_configs(make_client_config(kt), make_server_config(kt))
 }
 
 pub fn make_pair_for_configs(
     client_config: ClientConfig,
     server_config: ServerConfig,
-) -> (ClientConnection, ServerConnection) {
+) -> (ClientConnection, ServerConnection, RecvBufMap, RecvBufMap) {
     make_pair_for_arc_configs(&Arc::new(client_config), &Arc::new(server_config))
 }
 
 pub fn make_pair_for_arc_configs(
     client_config: &Arc<ClientConfig>,
     server_config: &Arc<ServerConfig>,
-) -> (ClientConnection, ServerConnection) {
+) -> (ClientConnection, ServerConnection, RecvBufMap, RecvBufMap) {
     (
         ClientConnection::new(Arc::clone(client_config), dns_name("localhost")).unwrap(),
         ServerConnection::new(Arc::clone(server_config)).unwrap(),
+        RecvBufMap::new(),
+        RecvBufMap::new(),
     )
 }
 
 pub fn do_handshake(
     client: &mut (impl DerefMut + Deref<Target = ConnectionCommon<impl SideData>>),
     server: &mut (impl DerefMut + Deref<Target = ConnectionCommon<impl SideData>>),
+    serv: &mut RecvBufMap,
+    clnt: &mut RecvBufMap,
 ) -> (usize, usize) {
     let (mut to_client, mut to_server) = (0, 0);
     while server.is_handshaking() || client.is_handshaking() {
         to_server += transfer(client, server);
-        server.process_new_packets().unwrap();
+        server.process_new_packets(serv).unwrap();
         to_client += transfer(server, client);
-        client.process_new_packets().unwrap();
+        client.process_new_packets(clnt).unwrap();
     }
     (to_server, to_client)
 }
@@ -407,15 +412,17 @@ pub enum ErrorFromPeer {
 pub fn do_handshake_until_error(
     client: &mut ClientConnection,
     server: &mut ServerConnection,
+    serv: &mut RecvBufMap,
+    clnt: &mut RecvBufMap,
 ) -> Result<(), ErrorFromPeer> {
     while server.is_handshaking() || client.is_handshaking() {
         transfer(client, server);
         server
-            .process_received()
+            .process_new_packets(serv)
             .map_err(ErrorFromPeer::Server)?;
         transfer(server, client);
         client
-            .process_received()
+            .process_new_packets(clnt)
             .map_err(ErrorFromPeer::Client)?;
     }
 
@@ -425,13 +432,15 @@ pub fn do_handshake_until_error(
 pub fn do_handshake_until_both_error(
     client: &mut ClientConnection,
     server: &mut ServerConnection,
+    serv: &mut RecvBufMap,
+    clnt: &mut RecvBufMap,
 ) -> Result<(), Vec<ErrorFromPeer>> {
-    match do_handshake_until_error(client, server) {
+    match do_handshake_until_error(client, server, serv, clnt) {
         Err(server_err @ ErrorFromPeer::Server(_)) => {
             let mut errors = vec![server_err];
             transfer(server, client);
             let client_err = client
-                .process_received()
+                .process_new_packets(clnt)
                 .map_err(ErrorFromPeer::Client)
                 .expect_err("client didn't produce error after server error");
             errors.push(client_err);
@@ -442,7 +451,7 @@ pub fn do_handshake_until_both_error(
             let mut errors = vec![client_err];
             transfer(client, server);
             let server_err = server
-                .process_received()
+                .process_new_packets(serv)
                 .map_err(ErrorFromPeer::Server)
                 .expect_err("server didn't produce error after client error");
             errors.push(server_err);

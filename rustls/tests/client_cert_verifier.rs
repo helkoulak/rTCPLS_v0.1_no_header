@@ -17,6 +17,7 @@ use rustls::{
     ServerConnection, SignatureScheme,
 };
 use std::sync::Arc;
+use rustls::recvbuf::RecvBufMap;
 
 // Client is authorized!
 fn ver_ok() -> Result<ClientCertVerified, Error> {
@@ -108,6 +109,7 @@ fn client_verifier_no_schemes() {
 // If we do have a root, we must do auth
 #[test]
 fn client_verifier_no_auth_yes_root() {
+    let mut app_bufs = RecvBufMap::new();
     for kt in ALL_KEY_TYPES.iter() {
         let client_verifier = MockClientVerifier {
             verified: ver_unreachable,
@@ -128,7 +130,7 @@ fn client_verifier_no_auth_yes_root() {
             let mut server = ServerConnection::new(Arc::clone(&server_config)).unwrap();
             let mut client =
                 ClientConnection::new(Arc::new(client_config), dns_name("localhost")).unwrap();
-            let errs = do_handshake_until_both_error(&mut client, &mut server);
+            let errs = do_handshake_until_both_error(&mut client, &mut server, &mut app_bufs);
             assert_eq!(
                 errs,
                 Err(vec![
