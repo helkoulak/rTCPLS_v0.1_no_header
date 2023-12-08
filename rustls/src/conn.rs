@@ -20,6 +20,8 @@ use crate::tcpls::frame::{Frame, STREAM_FRAME_HEADER_SIZE};
 
 use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
+use crate::recvbuf::ReaderAppBufs;
+
 /// A client or server connection.
 #[derive(Debug)]
 pub enum Connection {
@@ -52,6 +54,12 @@ impl Connection {
         match self {
             Self::Client(conn) => conn.reader(),
             Self::Server(conn) => conn.reader(),
+        }
+    }
+    pub fn reader_app_bufs(&mut self) -> ReaderAppBufs {
+        match self {
+            Self::Client(conn) => conn.reader_app_bufs(),
+            Self::Server(conn) => conn.reader_app_bufs(),
         }
     }
 
@@ -341,6 +349,17 @@ impl<Data> ConnectionCommon<Data> {
         }
     }
 
+    pub fn reader_app_bufs(&mut self) -> ReaderAppBufs {
+        let common = &mut self.core.common_state;
+        ReaderAppBufs {
+            // Are we done? i.e., have we processed all received messages, and received a
+            // close_notify to indicate that no new messages will arrive?
+            peer_cleanly_closed: common.has_received_close_notify
+                && !common.message_deframer.has_pending(),
+            has_seen_eof: common.has_seen_eof,
+        }
+    }
+
     /// Returns an object that allows writing plaintext.
     pub fn writer(&mut self) -> Writer {
         Writer::new(self)
@@ -500,7 +519,7 @@ impl<Data> ConnectionCommon<Data> {
     ///   the [`reader()`] after the call to [`process_new_packets()`].
     ///
     /// [`process_new_packets()`]: ConnectionCommon::process_new_packets
-    /// [`reader()`]: ConnectionCommon::reader
+    /// [`reader()`]: ConnectionCommon::reader_app_bufs
     pub fn read_tls(&mut self, rd: &mut dyn io::Read) -> Result<usize, io::Error> {
         if self.received_plaintext.is_full() {
             return Err(io::Error::new(

@@ -1,4 +1,4 @@
-use std::cmp;
+use std::{cmp, io};
 use std::collections::hash_map;
 use std::collections::hash_map::{Iter, IterMut};
 use std::io::{Error, Read};
@@ -226,6 +226,32 @@ impl RecvBufMap {
          }
      }*/
 
+}
+
+pub struct ReaderAppBufs {
+    pub peer_cleanly_closed: bool,
+    pub has_seen_eof: bool,
+}
+
+impl ReaderAppBufs {
+    pub fn read_app_bufs(&mut self, buf: &mut [u8], app_bufs: &mut RecvBufMap, id: u16) -> io::Result<usize> {
+        let len = app_bufs.get_or_create_recv_buffer(id as u64, None).read(buf)?;
+
+        if len == 0 && !buf.is_empty() {
+            // No bytes available:
+            match (self.peer_cleanly_closed, self.has_seen_eof) {
+                // cleanly closed; don't care about TCP EOF: express this as Ok(0)
+                (true, _) => {}
+                // unclean closure
+                (false, true) => return Err(io::ErrorKind::UnexpectedEof.into()),
+                // connection still going, but need more data: signal `WouldBlock` so that
+                // the caller knows this
+                (false, false) => return Err(io::ErrorKind::WouldBlock.into()),
+            }
+        }
+
+        Ok(len)
+    }
 }
 
 #[cfg(test)]
