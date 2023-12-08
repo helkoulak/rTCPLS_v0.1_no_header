@@ -211,7 +211,7 @@
 //!     client.process_received().unwrap();
 //!
 //!     let mut plaintext = Vec::new();
-//!     client.reader().read_to_end(&mut plaintext).unwrap();
+//!     client.reader_app_bufs().read_to_end(&mut plaintext).unwrap();
 //!     io::stdout().write(&plaintext).unwrap();
 //!   }
 //!
