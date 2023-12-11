@@ -33,11 +33,11 @@ where
     /// If we have data to write, write it all.
     fn complete_prior_io(&mut self) -> Result<()> {
         if self.conn.is_handshaking() {
-            self.conn.complete_io(self.sock)?;
+            self.conn.complete_io(self.sock, None)?;
         }
 
         if self.conn.wants_write() {
-            self.conn.complete_io(self.sock)?;
+            self.conn.complete_io(self.sock, None)?;
         }
 
         Ok(())
@@ -61,7 +61,7 @@ where
         // determine if EOF has actually been hit by checking if 0 bytes were
         // read from the underlying transport.
         while self.conn.wants_read(&RecvBufMap::new()) {
-            let at_eof = self.conn.complete_io(self.sock)?.0 == 0;
+            let at_eof = self.conn.complete_io(self.sock, None)?.0 == 0;
             if at_eof {
                 if let Ok(io_state) = self.conn.process_new_packets(&mut app_bufs) {
                     if at_eof && io_state.plaintext_bytes_to_read() == 0 {
@@ -115,7 +115,7 @@ where
         // Try to write the underlying transport here, but don't let
         // any errors mask the fact we've consumed `len` bytes.
         // Callers will learn of permanent errors on the next call.
-        let _ = self.conn.complete_io(self.sock);
+        let _ = self.conn.complete_io(self.sock, None);
 
         Ok(len)
     }
@@ -131,7 +131,7 @@ where
         // Try to write the underlying transport here, but don't let
         // any errors mask the fact we've consumed `len` bytes.
         // Callers will learn of permanent errors on the next call.
-        let _ = self.conn.complete_io(self.sock);
+        let _ = self.conn.complete_io(self.sock, None);
 
         Ok(len)
     }
@@ -141,7 +141,7 @@ where
 
         self.conn.writer().flush()?;
         if self.conn.wants_write() {
-            self.conn.complete_io(self.sock)?;
+            self.conn.complete_io(self.sock, None)?;
         }
         Ok(())
     }

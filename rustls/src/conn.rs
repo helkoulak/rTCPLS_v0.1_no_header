@@ -113,14 +113,14 @@ impl Connection {
     /// This function uses `io` to complete any outstanding IO for this connection.
     ///
     /// See [`ConnectionCommon::complete_io()`] for more information.
-    pub fn complete_io<T>(&mut self, io: &mut T) -> Result<(usize, usize), io::Error>
+    pub fn complete_io<T>(&mut self, io: &mut T, recv_map: Option<&mut RecvBufMap>) -> Result<(usize, usize), io::Error>
     where
         Self: Sized,
         T: io::Read + io::Write,
     {
         match self {
-            Self::Client(conn) => conn.complete_io(io),
-            Self::Server(conn) => conn.complete_io(io),
+            Self::Client(conn) => conn.complete_io(io, recv_map),
+            Self::Server(conn) => conn.complete_io(io, recv_map),
         }
     }
 }
@@ -394,13 +394,17 @@ impl<Data> ConnectionCommon<Data> {
     /// [`write_tls`]: ConnectionCommon::write_tls
     /// [`read_tls`]: ConnectionCommon::read_tls
     /// [`process_new_packets`]: ConnectionCommon::process_new_packets
-    pub fn complete_io<T>(&mut self, io: &mut T) -> Result<(usize, usize), io::Error>
+    pub fn complete_io<T>(&mut self, io: &mut T, recv_map: Option<&mut RecvBufMap>) -> Result<(usize, usize), io::Error>
     where
         Self: Sized,
         T: io::Read + io::Write,
     {
 
-        let mut recv_map = RecvBufMap::new();
+        let empty_map = &mut RecvBufMap::new();
+        let mut recv = match recv_map  {
+            Some(map) => map,
+            None => empty_map,
+        };
         let until_handshaked = self.is_handshaking();
         let mut eof = false;
         let mut wrlen = 0;
@@ -415,7 +419,7 @@ impl<Data> ConnectionCommon<Data> {
                 return Ok((rdlen, wrlen));
             }
 
-            while !eof && self.wants_read(&recv_map) {
+            while !eof && self.wants_read(&recv) {
                 let read_size = match self.read_tls(io) {
                     Ok(0) => {
                         eof = true;
@@ -433,7 +437,7 @@ impl<Data> ConnectionCommon<Data> {
                 }
             }
 
-            match self.process_new_packets(&mut RecvBufMap::new()) {
+            match self.process_new_packets(&mut recv) {
                 Ok(_) => {}
                 Err(e) => {
                     // In case we have an alert to send describing this error,
