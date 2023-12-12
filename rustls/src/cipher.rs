@@ -117,7 +117,7 @@ pub(crate) struct HeaderProtector{
 impl HeaderProtector {
     pub(crate) fn new(secret: &hkdf::Prk, aead_algorithm: &'static aead::Algorithm) -> Self {
 
-        let mut derived_key= [0; 32];
+        let mut derived_key= vec![0; aead_algorithm.key_len()]; // 16 or 32 bytes
         let x = secret.expand(&[b"tcpls header protection"],aead_algorithm).unwrap();
         x.fill(&mut derived_key).unwrap();
         let mut key = [0; 16];
