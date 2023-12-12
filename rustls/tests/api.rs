@@ -1290,7 +1290,6 @@ where
     }
 
     fn write_vectored<'b>(&mut self, b: &[io::IoSlice<'b>]) -> io::Result<usize> {
-        let mut app_bufs = RecvBufMap::new();
         let mut total = 0;
         let mut lengths = vec![];
         for bytes in b {
@@ -2461,7 +2460,6 @@ fn key_log_for_tls13() {
 
 #[test]
 fn vectored_write_for_server_appdata() {
-    let mut app_bufs = RecvBufMap::new();
     let (mut client, mut server, mut recv_svr, mut recv_clnt) = make_pair(KeyType::Rsa);
     do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
 
@@ -2475,9 +2473,11 @@ fn vectored_write_for_server_appdata() {
         .unwrap();
     {
         let mut pipe = OtherSession::new(&mut client);
+        pipe.recv_map = recv_clnt;
         let wrlen = server.write_tls(&mut pipe, 0).unwrap();
-        assert_eq!(84, wrlen);
-        assert_eq!(pipe.writevs, vec![vec![42, 42]]);
+        assert_eq!(106, wrlen);
+        assert_eq!(pipe.writevs, vec![vec![53, 53]]);
+        recv_clnt = pipe.recv_map;
     }
     check_read_app_buff(
         &mut client.reader_app_bufs(),
@@ -2502,9 +2502,11 @@ fn vectored_write_for_client_appdata() {
         .unwrap();
     {
         let mut pipe = OtherSession::new(&mut server);
+        pipe.recv_map = recv_svr;
         let wrlen = client. write_tls(&mut pipe, 0).unwrap();
         assert_eq!(106, wrlen); // Consider TCPLS header size plus stream frame size
         assert_eq!(pipe.writevs, vec![vec![53, 53]]);
+        recv_svr = pipe.recv_map;
     }
     check_read_app_buff(
         &mut server.reader_app_bufs(),
@@ -2534,11 +2536,13 @@ fn vectored_write_for_server_handshake_with_half_rtt_data() {
     server.process_new_packets(&mut recv_svr).unwrap();
     {
         let mut pipe = OtherSession::new(&mut client);
+        pipe.recv_map = recv_clnt;
         let wrlen = server.write_tls(&mut pipe, 0).unwrap();
         // don't assert exact sizes here, to avoid a brittle test
         assert!(wrlen > 4000); // its pretty big (contains cert chain)
         assert_eq!(pipe.writevs.len(), 1); // only one writev
         assert_eq!(pipe.writevs[0].len(), 8); // at least a server hello/ccs/cert/serverkx/0.5rtt data
+        recv_clnt = pipe.recv_map;
     }
 
     client.process_new_packets(&mut recv_clnt).unwrap();
@@ -2546,10 +2550,12 @@ fn vectored_write_for_server_handshake_with_half_rtt_data() {
     server.process_new_packets(&mut recv_svr).unwrap();
     {
         let mut pipe = OtherSession::new(&mut client);
+        pipe.recv_map = recv_clnt;
         let wrlen = server.write_tls(&mut pipe, 0).unwrap();
         // 4 tickets
-        assert_eq!(wrlen, 103 * 4);
-        assert_eq!(pipe.writevs, vec![vec![103, 103, 103, 103]]);
+        assert_eq!(wrlen, 111 * 4);
+        assert_eq!(pipe.writevs, vec![vec![111, 111, 111, 111]]);
+        recv_clnt = pipe.recv_map;
     }
 
     assert!(!server.is_handshaking());
@@ -2558,7 +2564,6 @@ fn vectored_write_for_server_handshake_with_half_rtt_data() {
 }
 
 fn check_half_rtt_does_not_work(server_config: ServerConfig) {
-    let mut app_bufs = RecvBufMap::new();
     let (mut client, mut server, mut recv_svr, mut recv_clnt) =
         make_pair_for_configs(make_client_config_with_auth(KeyType::Rsa), server_config);
 
@@ -2572,29 +2577,33 @@ fn check_half_rtt_does_not_work(server_config: ServerConfig) {
         .unwrap();
 
     transfer(&mut client, &mut server);
-    server.process_new_packets(&mut app_bufs).unwrap();
+    server.process_new_packets(&mut recv_svr).unwrap();
     {
         let mut pipe = OtherSession::new(&mut client);
+        pipe.recv_map = recv_clnt;
         let wrlen = server.write_tls(&mut pipe, 0).unwrap();
         // don't assert exact sizes here, to avoid a brittle test
         assert!(wrlen > 4000); // its pretty big (contains cert chain)
         assert_eq!(pipe.writevs.len(), 1); // only one writev
         assert!(pipe.writevs[0].len() >= 6); // at least a server hello/ccs/cert/serverkx data
+        recv_clnt = pipe.recv_map;
     }
 
     // client second flight
-    client.process_new_packets(&mut app_bufs).unwrap();
+    client.process_new_packets(&mut recv_clnt).unwrap();
     transfer(&mut client, &mut server);
 
     // when client auth is enabled, we don't sent 0.5-rtt data, as we'd be sending
     // it to an unauthenticated peer. so it happens here, in the server's second
     // flight (42 and 32 are lengths of appdata sent above).
-    server.process_new_packets(&mut app_bufs).unwrap();
+    server.process_new_packets(&mut recv_svr).unwrap();
     {
         let mut pipe = OtherSession::new(&mut client);
+        pipe.recv_map = recv_clnt;
         let wrlen = server.write_tls(&mut pipe, 0).unwrap();
-        assert_eq!(wrlen, 486);
-        assert_eq!(pipe.writevs, vec![vec![103, 103, 103, 103, 42, 32]]);
+        assert_eq!(wrlen, 540);
+        assert_eq!(pipe.writevs, vec![vec![111, 111, 111, 111, 53, 43]]);
+        recv_clnt = pipe.recv_map;
     }
 
     assert!(!server.is_handshaking());
@@ -2629,11 +2638,13 @@ fn vectored_write_for_client_handshake() {
         .unwrap();
     {
         let mut pipe = OtherSession::new(&mut server);
+        pipe.recv_map = recv_svr;
         let wrlen = client.write_tls(&mut pipe, 0).unwrap();
         // don't assert exact sizes here, to avoid a brittle test
         assert!(wrlen > 200); // just the client hello
         assert_eq!(pipe.writevs.len(), 1); // only one writev
         assert!(pipe.writevs[0].len() == 1); // only a client hello
+        recv_svr = pipe.recv_map;
     }
 
     transfer(&mut server, &mut client);
@@ -2641,10 +2652,12 @@ fn vectored_write_for_client_handshake() {
 
     {
         let mut pipe = OtherSession::new(&mut server);
+        pipe.recv_map = recv_svr;
         let wrlen = client.write_tls(&mut pipe, 0).unwrap();
-        assert_eq!(wrlen, 154);
+        assert_eq!(wrlen, 184);
         // CCS, finished, then two application datas
-        assert_eq!(pipe.writevs, vec![vec![6, 74, 42, 32]]);
+        assert_eq!(pipe.writevs, vec![vec![6, 82, 53, 43]]);
+        recv_svr = pipe.recv_map;
     }
 
     assert!(!server.is_handshaking());
@@ -2665,6 +2678,7 @@ fn vectored_write_with_slow_client() {
 
     {
         let mut pipe = OtherSession::new(&mut client);
+        pipe.recv_map = recv_clnt;
         pipe.short_writes = true;
         let wrlen = server.write_tls(&mut pipe, 0).unwrap()
             + server.write_tls(&mut pipe, 0).unwrap()
@@ -2672,11 +2686,12 @@ fn vectored_write_with_slow_client() {
             + server.write_tls(&mut pipe, 0).unwrap()
             + server.write_tls(&mut pipe, 0).unwrap()
             + server.write_tls(&mut pipe, 0).unwrap();
-        /*assert_eq!(42, wrlen);
+        assert_eq!(53, wrlen);
         assert_eq!(
             pipe.writevs,
             vec![vec![21], vec![10], vec![5], vec![3], vec![3]]
-        );*/
+        );
+        recv_clnt = pipe.recv_map;
     }
     check_read_app_buff(&mut client.reader_app_bufs(), b"01234567890123456789", &mut recv_clnt, 0);
 }
@@ -4065,12 +4080,14 @@ fn test_server_mtu_reduction() {
     server.process_new_packets(&mut recv_svr).unwrap();
     {
         let mut pipe = OtherSession::new(&mut client);
+        pipe.recv_map = recv_clnt;
         server.write_tls(&mut pipe, 0).unwrap();
 
         assert_eq!(pipe.writevs.len(), 1);
         assert!(pipe.writevs[0]
             .iter()
             .all(|x| *x <= 64 + encryption_overhead));
+        recv_clnt = pipe.recv_map;
     }
 
     client.process_new_packets(&mut recv_clnt).unwrap();
@@ -4078,11 +4095,13 @@ fn test_server_mtu_reduction() {
     server.process_new_packets(&mut recv_svr).unwrap();
     {
         let mut pipe = OtherSession::new(&mut client);
+        pipe.recv_map = recv_clnt;
         server.write_tls(&mut pipe, 0).unwrap();
         assert_eq!(pipe.writevs.len(), 1);
         assert!(pipe.writevs[0]
             .iter()
             .all(|x| *x <= 64 + encryption_overhead));
+        recv_clnt = pipe.recv_map;
     }
 
     client.process_new_packets(&mut recv_clnt).unwrap();
@@ -4616,7 +4635,6 @@ fn test_secret_extraction_disabled_or_too_early() {
 fn test_received_plaintext_backpressure() {
     let suite = rustls::cipher_suite::TLS13_AES_128_GCM_SHA256;
     let kt = KeyType::Rsa;
-    let mut app_bufs = RecvBufMap::new();
 
     let server_config = Arc::new(
         ServerConfig::builder()
