@@ -15,6 +15,8 @@ pub struct Stream<'a, C: 'a + ?Sized, T: 'a + Read + Write + ?Sized> {
 
     /// The underlying transport, like a socket
     pub sock: &'a mut T,
+
+    pub recv_conn: &'a mut RecvBufMap,
 }
 
 impl<'a, C, T, S> Stream<'a, C, T>
@@ -25,19 +27,23 @@ where
 {
     /// Make a new Stream using the Connection `conn` and socket-like object
     /// `sock`.  This does not fail and does no IO.
-    pub fn new(conn: &'a mut C, sock: &'a mut T) -> Self {
-        Self { conn, sock }
+    pub fn new(conn: &'a mut C, sock: &'a mut T, recv_conn: &'a mut RecvBufMap) -> Self {
+        Self { conn,
+            sock,
+            recv_conn,
+        }
     }
 
     /// If we're handshaking, complete all the IO for that.
     /// If we have data to write, write it all.
     fn complete_prior_io(&mut self) -> Result<()> {
+
         if self.conn.is_handshaking() {
-            self.conn.complete_io(self.sock, None)?;
+            self.conn.complete_io(self.sock, Some(&mut self.recv_conn))?;
         }
 
         if self.conn.wants_write() {
-            self.conn.complete_io(self.sock, None)?;
+            self.conn.complete_io(self.sock, Some(&mut self.recv_conn))?;
         }
 
         Ok(())
@@ -51,7 +57,6 @@ where
     S: SideData,
 {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-        let mut app_bufs = RecvBufMap::new();
         self.complete_prior_io()?;
 
         // We call complete_io() in a loop since a single call may read only
@@ -60,10 +65,10 @@ where
         // hit. Otherwise, we will prematurely signal EOF by returning 0. We
         // determine if EOF has actually been hit by checking if 0 bytes were
         // read from the underlying transport.
-        while self.conn.wants_read(&RecvBufMap::new()) {
-            let at_eof = self.conn.complete_io(self.sock, None)?.0 == 0;
+        while self.conn.wants_read(&self.recv_conn) {
+            let at_eof = self.conn.complete_io(self.sock, Some(&mut self.recv_conn))?.0 == 0;
             if at_eof {
-                if let Ok(io_state) = self.conn.process_new_packets(&mut app_bufs) {
+                if let Ok(io_state) = self.conn.process_new_packets(&mut self.recv_conn) {
                     if at_eof && io_state.plaintext_bytes_to_read() == 0 {
                         return Ok(0);
                     }
@@ -72,7 +77,7 @@ where
             }
         }
 
-        self.conn.reader().read(buf)
+        self.recv_conn.get_mut(0).unwrap().read(buf)
     }
 
     #[cfg(read_buf)]
@@ -115,7 +120,7 @@ where
         // Try to write the underlying transport here, but don't let
         // any errors mask the fact we've consumed `len` bytes.
         // Callers will learn of permanent errors on the next call.
-        let _ = self.conn.complete_io(self.sock, None);
+        let _ = self.conn.complete_io(self.sock, Some(&mut self.recv_conn));
 
         Ok(len)
     }
@@ -159,6 +164,8 @@ pub struct StreamOwned<C: Sized, T: Read + Write + Sized> {
 
     /// The underlying transport, like a socket
     pub sock: T,
+
+    pub recv_conn: RecvBufMap,
 }
 
 impl<C, T, S> StreamOwned<C, T>
@@ -172,8 +179,8 @@ where
     ///
     /// This is the same as `Stream::new` except `conn` and `sock` are
     /// moved into the StreamOwned.
-    pub fn new(conn: C, sock: T) -> Self {
-        Self { conn, sock }
+    pub fn new(conn: C, sock: T, recv_conn: RecvBufMap) -> Self {
+        Self { conn, sock, recv_conn }
     }
 
     /// Get a reference to the underlying socket
@@ -197,6 +204,7 @@ where
         Stream {
             conn: &mut self.conn,
             sock: &mut self.sock,
+            recv_conn: &mut self.recv_conn,
         }
     }
 }

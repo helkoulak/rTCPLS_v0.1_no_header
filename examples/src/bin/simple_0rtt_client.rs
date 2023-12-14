@@ -4,6 +4,7 @@ use std::io::{stdout, Read, Write};
 use std::net::TcpStream;
 
 use rustls::{OwnedTrustAnchor, RootCertStore};
+use rustls::recvbuf::RecvBufMap;
 
 fn start_connection(config: &Arc<rustls::ClientConfig>, domain_name: &str) {
     let server_name = domain_name
@@ -29,8 +30,10 @@ fn start_connection(config: &Arc<rustls::ClientConfig>, domain_name: &str) {
             .write_all(request.as_bytes())
             .unwrap();
     }
+    let mut recv_svr = RecvBufMap::new();
+    let mut recv_clnt = RecvBufMap::new();
 
-    let mut stream = rustls::Stream::new(&mut conn, &mut sock);
+    let mut stream = rustls::Stream::new(&mut conn, &mut sock,&mut recv_clnt);
 
     // Complete handshake.
     stream.flush().unwrap();

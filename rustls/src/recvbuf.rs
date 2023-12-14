@@ -6,6 +6,7 @@ use crate::tcpls::stream::{DEFAULT_BUFFER_LIMIT, SimpleIdHashMap, StreamIter};
 
 /// This is the receive buffer of a stream
 #[derive(Default)]
+#[derive(Debug)]
 pub struct RecvBuf {
     pub id: u64,
     data: Vec<u8>,
@@ -133,6 +134,7 @@ impl RecvBuf {
 }
 
 #[derive(Default)]
+#[derive(Debug)]
 pub struct RecvBufMap {
     buffers: SimpleIdHashMap<RecvBuf>,
 }

@@ -7,6 +7,7 @@ use std::io::{stdout, Read, Write};
 use std::net::TcpStream;
 
 use rustls::OwnedTrustAnchor;
+use rustls::recvbuf::RecvBufMap;
 
 fn main() {
     let mut root_store = rustls::RootCertStore::empty();
@@ -34,7 +35,9 @@ fn main() {
     let server_name = "google.com".try_into().unwrap();
     let mut conn = rustls::ClientConnection::new(Arc::new(config), server_name).unwrap();
     let mut sock = TcpStream::connect("google.com:443").unwrap();
-    let mut tls = rustls::Stream::new(&mut conn, &mut sock);
+    let mut recv_svr = RecvBufMap::new();
+    let mut recv_clnt = RecvBufMap::new();
+    let mut tls = rustls::Stream::new(&mut conn, &mut sock, &mut recv_clnt);
     tls.write_all(
         concat!(
             "GET / HTTP/1.1\r\n",

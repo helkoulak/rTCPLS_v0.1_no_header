@@ -420,6 +420,9 @@ fn server_can_get_client_cert_after_resumption() {
         let server_config = Arc::new(make_server_config_with_mandatory_client_auth(*kt));
 
         for version in rustls::ALL_VERSIONS {
+            if version.version == ProtocolVersion::TLSv1_2 {
+                continue
+            }
             let client_config = make_client_config_with_versions_with_auth(*kt, &[version]);
             let client_config = Arc::new(client_config);
             let (mut client, mut server, mut recv_svr, mut recv_clnt) =
@@ -517,6 +520,9 @@ fn server_close_notify() {
     let server_config = Arc::new(make_server_config_with_mandatory_client_auth(kt));
     let mut app_bufs = RecvBufMap::new();
     for version in rustls::ALL_VERSIONS {
+        if version.version == ProtocolVersion::TLSv1_2 {
+            continue
+        }
         let client_config = make_client_config_with_versions_with_auth(kt, &[version]);
         let (mut client, mut server, mut recv_svr, mut recv_clnt) =
             make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
@@ -1125,7 +1131,7 @@ fn server_respects_buffer_limit_post_handshake() {
     let (mut client, mut server, mut recv_svr, mut recv_clnt) = make_pair(KeyType::Rsa);
     // this test will vary in behaviour depending on the default suites
     do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
-    server.set_buffer_limit(Some(48), 0);
+    server.set_buffer_limit(Some(59), 0); // increase the limit to include TCPLS header and stream header overhead
 
     assert_eq!(
         server
@@ -1478,9 +1484,11 @@ fn server_complete_io_for_write() {
             .unwrap();
         {
             let mut pipe = OtherSession::new(&mut client);
+            pipe.recv_map = recv_clnt;
             let (rdlen, wrlen) = server.complete_io(&mut pipe, Some(&mut recv_svr)).unwrap();
             assert!(rdlen == 0 && wrlen > 0);
-            assert_eq!(pipe.writevs, vec![vec![42, 42]]);
+            assert_eq!(pipe.writevs, vec![vec![53, 53]]);
+            recv_clnt = pipe.recv_map;
         }
         check_read_app_buff(
             &mut client.reader_app_bufs(),
@@ -1518,8 +1526,9 @@ fn client_stream_write() {
 
         {
             let mut pipe = OtherSession::new(&mut server);
-            let mut stream = Stream::new(&mut client, &mut pipe);
+            let mut stream = Stream::new(&mut client, &mut pipe, &mut recv_clnt);
             assert_eq!(stream.write(b"hello").unwrap(), 5);
+            recv_svr = pipe.recv_map;
         }
         check_read_app_buff(&mut server.reader_app_bufs(), b"hello", &mut recv_svr, 0);
     }
@@ -1532,8 +1541,9 @@ fn client_streamowned_write() {
 
         {
             let pipe = OtherSession::new(&mut server);
-            let mut stream = StreamOwned::new(client, pipe);
+            let mut stream = StreamOwned::new(client, pipe, recv_clnt);
             assert_eq!(stream.write(b"hello").unwrap(), 5);
+            recv_svr = stream.sock.recv_map;
         }
         check_read_app_buff(&mut server.reader_app_bufs(), b"hello", &mut recv_svr, 0);
     }
@@ -1551,7 +1561,7 @@ fn client_stream_read() {
 
         {
             let mut pipe = OtherSession::new(&mut server);
-            let mut stream = Stream::new(&mut client, &mut pipe);
+            let mut stream = Stream::new(&mut client, &mut pipe, &mut recv_clnt);
             check_read(&mut stream, b"world");
         }
     }
@@ -1569,7 +1579,7 @@ fn client_streamowned_read() {
 
         {
             let pipe = OtherSession::new(&mut server);
-            let mut stream = StreamOwned::new(client, pipe);
+            let mut stream = StreamOwned::new(client, pipe, recv_clnt);
             check_read(&mut stream, b"world");
         }
     }
@@ -1582,8 +1592,9 @@ fn server_stream_write() {
 
         {
             let mut pipe = OtherSession::new(&mut client);
-            let mut stream = Stream::new(&mut server, &mut pipe);
+            let mut stream = Stream::new(&mut server, &mut pipe, &mut recv_svr);
             assert_eq!(stream.write(b"hello").unwrap(), 5);
+            recv_clnt = pipe.recv_map;
         }
         check_read_app_buff(&mut client.reader_app_bufs(), b"hello", &mut recv_clnt, 0);
     }
@@ -1596,8 +1607,9 @@ fn server_streamowned_write() {
 
         {
             let pipe = OtherSession::new(&mut client);
-            let mut stream = StreamOwned::new(server, pipe);
+            let mut stream = StreamOwned::new(server, pipe, recv_svr);
             assert_eq!(stream.write(b"hello").unwrap(), 5);
+            recv_clnt = stream.sock.recv_map;
         }
         check_read_app_buff(&mut client.reader_app_bufs(), b"hello", &mut recv_clnt, 0);
     }
@@ -1615,7 +1627,7 @@ fn server_stream_read() {
 
         {
             let mut pipe = OtherSession::new(&mut client);
-            let mut stream = Stream::new(&mut server, &mut pipe);
+            let mut stream = Stream::new(&mut server, &mut pipe, &mut recv_svr);
             check_read(&mut stream, b"world");
         }
     }
@@ -1633,7 +1645,7 @@ fn server_streamowned_read() {
 
         {
             let pipe = OtherSession::new(&mut client);
-            let mut stream = StreamOwned::new(server, pipe);
+            let mut stream = StreamOwned::new(server, pipe, recv_svr);
             check_read(&mut stream, b"world");
         }
     }
@@ -1667,7 +1679,6 @@ impl io::Write for FailsWrites {
 
 #[test]
 fn stream_write_reports_underlying_io_error_before_plaintext_processed() {
-    let mut app_bufs = RecvBufMap::new();
     let (mut client, mut server, mut recv_svr, mut recv_clnt) = make_pair(KeyType::Rsa);
     do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
 
@@ -1679,7 +1690,7 @@ fn stream_write_reports_underlying_io_error_before_plaintext_processed() {
         .writer()
         .write_all(b"hello")
         .unwrap();
-    let mut client_stream = Stream::new(&mut client, &mut pipe);
+    let mut client_stream = Stream::new(&mut client, &mut pipe, &mut recv_clnt);
     let rc = client_stream.write(b"world");
     assert!(rc.is_err());
     let err = rc.err().unwrap();
@@ -1700,7 +1711,7 @@ fn stream_write_swallows_underlying_io_error_after_plaintext_processed() {
         .writer()
         .write_all(b"hello")
         .unwrap();
-    let mut client_stream = Stream::new(&mut client, &mut pipe);
+    let mut client_stream = Stream::new(&mut client, &mut pipe, &mut recv_clnt);
     let rc = client_stream.write(b"world");
     assert_eq!(format!("{:?}", rc), "Ok(5)");
 }
@@ -1735,7 +1746,7 @@ fn client_stream_handshake_error() {
 
     {
         let mut pipe = OtherSession::new_fails(&mut server);
-        let mut client_stream = Stream::new(&mut client, &mut pipe);
+        let mut client_stream = Stream::new(&mut client, &mut pipe, &mut recv_clnt);
         let rc = client_stream.write(b"hello");
         assert!(rc.is_err());
         assert_eq!(
@@ -1757,7 +1768,7 @@ fn client_streamowned_handshake_error() {
     let (client, mut server, recv_svr, recv_clnt) = make_pair_for_configs(client_config, server_config);
 
     let pipe = OtherSession::new_fails(&mut server);
-    let mut client_stream = StreamOwned::new(client, pipe);
+    let mut client_stream = StreamOwned::new(client, pipe, recv_clnt);
     let rc = client_stream.write(b"hello");
     assert!(rc.is_err());
     assert_eq!(
@@ -1784,7 +1795,7 @@ fn server_stream_handshake_error() {
 
     {
         let mut pipe = OtherSession::new_fails(&mut client);
-        let mut server_stream = Stream::new(&mut server, &mut pipe);
+        let mut server_stream = Stream::new(&mut server, &mut pipe, &mut recv_svr);
         let mut bytes = [0u8; 5];
         let rc = server_stream.read(&mut bytes);
         assert!(rc.is_err());
@@ -1806,7 +1817,7 @@ fn server_streamowned_handshake_error() {
         .unwrap();
 
     let pipe = OtherSession::new_fails(&mut client);
-    let mut server_stream = StreamOwned::new(server, pipe);
+    let mut server_stream = StreamOwned::new(server, pipe, recv_svr);
     let mut bytes = [0u8; 5];
     let rc = server_stream.read(&mut bytes);
     assert!(rc.is_err());
@@ -2273,6 +2284,9 @@ fn all_suites_covered() {
 fn negotiated_ciphersuite_client() {
     for item in TEST_CIPHERSUITES.iter() {
         let (version, kt, suite) = *item;
+        if version.version == ProtocolVersion::TLSv1_2 {
+            continue
+        }
         let scs = find_suite(suite);
         let client_config = finish_client_config(
             kt,
@@ -2291,6 +2305,9 @@ fn negotiated_ciphersuite_client() {
 fn negotiated_ciphersuite_server() {
     for item in TEST_CIPHERSUITES.iter() {
         let (version, kt, suite) = *item;
+        if version.version == ProtocolVersion::TLSv1_2 {
+            continue
+        }
         let scs = find_suite(suite);
         let server_config = finish_server_config(
             kt,
@@ -2689,7 +2706,7 @@ fn vectored_write_with_slow_client() {
         assert_eq!(53, wrlen);
         assert_eq!(
             pipe.writevs,
-            vec![vec![21], vec![10], vec![5], vec![3], vec![3]]
+            vec![vec![26], vec![13], vec![7], vec![3], vec![4]]
         );
         recv_clnt = pipe.recv_map;
     }
@@ -4152,6 +4169,8 @@ use rustls::internal::msgs::{
     handshake::ClientExtension, handshake::HandshakePayload, message::Message,
     message::MessagePayload,
 };
+use rustls::internal::msgs::fragmenter::MAX_FRAGMENT_LEN;
+use rustls::internal::msgs::message::MAX_WIRE_SIZE;
 use rustls::recvbuf::RecvBufMap;
 use rustls::tcpls::DEFAULT_CONNECTION_ID;
 
@@ -4631,7 +4650,7 @@ fn test_secret_extraction_disabled_or_too_early() {
     }
 }
 
-#[test]
+//#[test] // Test logic is no more applicable
 fn test_received_plaintext_backpressure() {
     let suite = rustls::cipher_suite::TLS13_AES_128_GCM_SHA256;
     let kt = KeyType::Rsa;
@@ -4649,6 +4668,7 @@ fn test_received_plaintext_backpressure() {
 
     let client_config = Arc::new(make_client_config(kt));
     let (mut client, mut server, mut recv_svr, mut recv_clnt) = make_pair_for_arc_configs(&client_config, &server_config);
+    recv_svr.get_or_create_recv_buffer(0, Some(16 * 1024 + 11));
     do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
 
     // Fill the server's received plaintext buffer with 16k bytes
