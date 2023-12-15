@@ -229,7 +229,7 @@ impl MessageDecrypter for InvalidMessageDecrypter {
     }
 
     fn decrypt_zc(&self, msg: BorrowedOpaqueMessage, seq: u64, conn_id: u32, recv_buf: &mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<PlainMessage, Error> {
-        todo!()
+        Err(Error::DecryptError)
     }
 
    /* fn derive_dec_conn_iv(&mut self, stream_id: u16) {
@@ -237,7 +237,7 @@ impl MessageDecrypter for InvalidMessageDecrypter {
     }*/
 
     fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error> {
-        todo!()
+        Err(Error::DecryptError)
     }
 }
 
