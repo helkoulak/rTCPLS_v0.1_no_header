@@ -269,7 +269,6 @@ fn config_builder_for_server_rejects_incompatible_cipher_suites() {
 
 #[test]
 fn buffered_client_data_sent() {
-    let mut app_bufs = RecvBufMap::new();
     let server_config = Arc::new(make_server_config(KeyType::Rsa));
 
     for version in rustls::ALL_VERSIONS {
@@ -284,7 +283,7 @@ fn buffered_client_data_sent() {
 
         do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
         transfer(&mut client, &mut server);
-        server.process_new_packets(&mut app_bufs).unwrap();
+        server.process_new_packets(&mut recv_svr).unwrap();
 
         check_read_app_buff(&mut server.reader_app_bufs(), b"hello", &mut recv_svr, 0);
     }
