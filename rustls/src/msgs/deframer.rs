@@ -220,56 +220,7 @@ impl MessageDeframer {
         }))
     }
 
-    /*pub fn process_new_zc(&mut self, record_layer: &mut RecordLayer, app_buf: &mut RecvBuffer) -> Result<Option<(usize, bool)>, Error> {
-        if let Some(last_err) = self.last_error.clone() {
-            return Err(last_err);
-        } else if self.used == 0 {
-            return Ok(None);
-        }
 
-        let start = 0;
-
-            // Does our `buf` contain a full message?  It does if it is big enough to
-            // contain a header, and that header has a length which falls within `buf`.
-            // If so, deframe it and place the message onto the frames output queue.
-            let mut rd = codec::Reader::init(&self.buf[start..self.used]);
-            let m = match BorrowedOpaqueMessage::read(&mut rd) {
-                Ok((ct,ver, s, len)) => BorrowedOpaqueMessage {
-                    typ: ct,
-                    version: ver,
-                    payload: &self.buf[s..s + len as usize],
-                },
-                Err(msg_err) => {
-                    let err_kind = match msg_err {
-                        MessageError::TooShortForHeader | MessageError::TooShortForLength => {
-                            return Ok(None)
-                        }
-                        MessageError::InvalidEmptyPayload => InvalidMessage::InvalidEmptyPayload,
-                        MessageError::MessageTooLarge => InvalidMessage::MessageTooLarge,
-                        MessageError::InvalidContentType => InvalidMessage::InvalidContentType,
-                        MessageError::UnknownProtocolVersion => {
-                            InvalidMessage::UnknownProtocolVersion
-                        }
-                    };
-
-                    return Err(self.set_err(err_kind));
-                }
-            };
-        // Decrypt the encrypted message.
-        match record_layer.decrypt_incoming_zc(m, app_buf) {
-            Ok(Some((decrypted, wants_close_before_decrypt))) => {
-                self.discard(start + rd.used());
-                Ok(Some((decrypted, wants_close_before_decrypt)))
-            }
-
-            Ok(None) => {
-                self.discard(start + rd.used());
-                return Ok(None)
-            }
-            Err(e) => return Err(e),
-        }
-
-    }*/
 
     /// Fuses this deframer's error and returns the set value.
     ///
