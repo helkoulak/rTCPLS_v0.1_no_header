@@ -1,8 +1,8 @@
 use std::{cmp, io};
 use std::collections::hash_map;
 use std::collections::hash_map::{Iter, IterMut};
-use std::io::{Error, Read};
-use crate::tcpls::stream::{DEFAULT_BUFFER_LIMIT, SimpleIdHashMap, StreamIter};
+use std::io::Error;
+use crate::tcpls::stream::{DEFAULT_BUFFER_LIMIT, SimpleIdHashMap};
 
 /// This is the receive buffer of a stream
 #[derive(Default)]

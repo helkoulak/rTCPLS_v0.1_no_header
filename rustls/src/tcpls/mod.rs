@@ -18,7 +18,6 @@ use crate::{server, version, Certificate, ClientConfig, ClientConnection, Connec
 
 
 use crate::recvbuf::RecvBufMap;
-use crate::tcpls::frame::Frame;
 use crate::tcpls::network_address::AddressMap;
 use crate::tcpls::stream::SimpleIdHashMap;
 use crate::verify::{

@@ -2914,7 +2914,6 @@ fn tls13_stateful_resumption() {
     server_config.session_storage = storage.clone();
     let server_config = Arc::new(server_config);
 
-    let mut app_bufs = RecvBufMap::new();
     // full handshake
     let (mut client, mut server, mut recv_svr, mut recv_clnt) = make_pair_for_arc_configs(&client_config, &server_config);
     let (full_c2s, full_s2c) = do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
@@ -2927,7 +2926,7 @@ fn tls13_stateful_resumption() {
             .map(|certs| certs.len()),
         Some(3)
     );
-    let mut app_bufs = RecvBufMap::new();
+
     // resumed
     let (mut client, mut server, mut recv_svr, mut recv_clnt) = make_pair_for_arc_configs(&client_config, &server_config);
     let (resume_c2s, resume_s2c) = do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
@@ -2942,7 +2941,7 @@ fn tls13_stateful_resumption() {
             .map(|certs| certs.len()),
         Some(3)
     );
-    let mut app_bufs = RecvBufMap::new();
+
     // resumed again
     let (mut client, mut server, mut recv_svr, mut recv_clnt) = make_pair_for_arc_configs(&client_config, &server_config);
     let (resume2_c2s, resume2_s2c) = do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
@@ -2970,7 +2969,6 @@ fn tls13_stateless_resumption() {
     let storage = Arc::new(ServerStorage::new());
     server_config.session_storage = storage.clone();
     let server_config = Arc::new(server_config);
-    let mut app_bufs = RecvBufMap::new();
     // full handshake
     let (mut client, mut server, mut recv_svr, mut recv_clnt) = make_pair_for_arc_configs(&client_config, &server_config);
     let (full_c2s, full_s2c) = do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
@@ -2983,7 +2981,6 @@ fn tls13_stateless_resumption() {
             .map(|certs| certs.len()),
         Some(3)
     );
-    let mut app_bufs = RecvBufMap::new();
     // resumed
     let (mut client, mut server, mut recv_svr, mut recv_clnt) = make_pair_for_arc_configs(&client_config, &server_config);
     let (resume_c2s, resume_s2c) = do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
@@ -2998,7 +2995,7 @@ fn tls13_stateless_resumption() {
             .map(|certs| certs.len()),
         Some(3)
     );
-    let mut app_bufs = RecvBufMap::new();
+
     // resumed again
     let (mut client, mut server, mut recv_svr, mut recv_clnt) = make_pair_for_arc_configs(&client_config, &server_config);
     let (resume2_c2s, resume2_s2c) = do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
@@ -4169,10 +4166,9 @@ use rustls::internal::msgs::{
     handshake::ClientExtension, handshake::HandshakePayload, message::Message,
     message::MessagePayload,
 };
-use rustls::internal::msgs::fragmenter::MAX_FRAGMENT_LEN;
-use rustls::internal::msgs::message::MAX_WIRE_SIZE;
+
 use rustls::recvbuf::RecvBufMap;
-use rustls::tcpls::DEFAULT_CONNECTION_ID;
+
 
 #[test]
 fn test_server_rejects_duplicate_sni_names() {

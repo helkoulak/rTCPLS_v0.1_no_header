@@ -14,7 +14,7 @@ use rustls::{Certificate, PrivateKey};
 use rustls::{ClientConfig, ClientConnection};
 use rustls::{ConnectionCommon, ServerConfig, ServerConnection, SideData};
 use rustls::recvbuf::RecvBufMap;
-use rustls::tcpls::DEFAULT_CONNECTION_ID;
+
 
 macro_rules! embed_files {
     (

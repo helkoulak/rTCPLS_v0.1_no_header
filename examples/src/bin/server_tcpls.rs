@@ -6,12 +6,11 @@ use mio::net::{TcpListener, TcpStream};
 extern crate log;
 
 use std::collections::HashMap;
-use std::fs;
+
 use std::io;
-use std::io::{BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::net;
-use std::ops::DerefMut;
-use std::str::from_utf8;
+
 use std::time::Duration;
 
 #[macro_use]
@@ -19,16 +18,14 @@ extern crate serde_derive;
 extern crate core;
 
 use docopt::Docopt;
-use mio::Token;
-use ring::digest;
-use ring::digest::Digest;
 
-use rustls::server::{
-    AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
-};
-use rustls::{self, Connection, RootCertStore, ServerConnection, tcpls};
+use ring::digest;
+
+
+
+use rustls::{self, Connection, tcpls};
 use rustls::recvbuf::RecvBufMap;
-use rustls::tcpls::{DEFAULT_CONNECTION_ID, load_certs, load_private_key, lookup_suites, lookup_versions, server_create_listener, TcplsSession};
+use rustls::tcpls::{server_create_listener, TcplsSession};
 
 // Token for our listening socket.
 const LISTENER: mio::Token = mio::Token(0);
