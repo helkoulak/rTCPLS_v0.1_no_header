@@ -59,6 +59,10 @@ impl ChunkVecBuffer {
         self.chunks.is_empty()
     }
 
+    pub(crate)  fn shuffle_records(&mut self, n: usize) {
+        self.chunks.rotate_left(n)
+    }
+
     pub(crate)  fn is_full(&self) -> bool {
         self.limit
             .map(|limit| self.len() > limit)
@@ -179,6 +183,7 @@ impl ChunkVecBuffer {
 
 #[cfg(test)]
 mod test {
+    use std::collections::VecDeque;
     use super::ChunkVecBuffer;
 
     #[test]
@@ -192,6 +197,19 @@ mod test {
         let mut buf = [0u8; 12];
         assert_eq!(cvb.read(&mut buf).unwrap(), 12);
         assert_eq!(buf.to_vec(), b"helloworldhe".to_vec());
+    }
+
+    #[test]
+    fn test_shuffle_records() {
+
+        let mut cvb = ChunkVecBuffer::new(Some(3));
+        cvb.append(b"first".to_vec());
+        cvb.append(b"second".to_vec());
+        cvb.append(b"third".to_vec());
+       cvb.shuffle_records(2);
+        assert_eq!(cvb.chunks.pop_front().unwrap(), b"third");
+        assert_eq!(cvb.chunks.pop_front().unwrap(), b"first");
+        assert_eq!(cvb.chunks.pop_front().unwrap(), b"second");
     }
 
     #[cfg(read_buf)]

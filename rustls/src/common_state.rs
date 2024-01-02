@@ -481,6 +481,10 @@ impl CommonState {
         self.received_plaintext.append(bytes.0);
     }
 
+    pub fn shuffle_records(&mut self, id: u16, n: usize) {
+        self.record_layer.streams.get_mut(id).unwrap().send.shuffle_records(n);
+    }
+
     #[cfg(feature = "tls12")]
     pub(crate) fn start_encryption_tls12(&mut self, secrets: &ConnectionSecrets, side: Side) {
         let (dec, enc) = secrets.make_cipher_pair(side);
