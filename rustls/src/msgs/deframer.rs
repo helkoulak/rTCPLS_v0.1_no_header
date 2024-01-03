@@ -759,9 +759,9 @@ mod tests {
         );
     }
 
-    #[test]
+   #[test]
     fn test_limited_buffer() {
-        const PAYLOAD_LEN: usize = 16_384;
+        const PAYLOAD_LEN: usize = 16_384 * 4;
         let mut message = Vec::with_capacity(16_389);
         message.push(0x17); // ApplicationData
         message.extend(&[0x03, 0x04]); // ProtocolVersion
@@ -773,8 +773,22 @@ mod tests {
         assert_len(4096, input_bytes(&mut d, &message));
         assert_len(4096, input_bytes(&mut d, &message));
         assert_len(4096, input_bytes(&mut d, &message));
+        assert_len(4096, input_bytes(&mut d, &message));
+        assert_len(4096, input_bytes(&mut d, &message));
+        assert_len(4096, input_bytes(&mut d, &message));
+       assert_len(4096, input_bytes(&mut d, &message));
+       assert_len(4096, input_bytes(&mut d, &message));
+       assert_len(4096, input_bytes(&mut d, &message));
+       assert_len(4096, input_bytes(&mut d, &message));
+       assert_len(4096, input_bytes(&mut d, &message));
+       assert_len(4096, input_bytes(&mut d, &message));
+       assert_len(4096, input_bytes(&mut d, &message));
+       assert_len(4096, input_bytes(&mut d, &message));
+       assert_len(4096, input_bytes(&mut d, &message));
+       assert_len(4096, input_bytes(&mut d, &message));
+       assert_len(4096, input_bytes(&mut d, &message));
         assert_len(
-            MAX_WIRE_SIZE - 16_384,
+            20,
             input_bytes(&mut d, &message),
         );
         assert!(input_bytes(&mut d, &message).is_err());
