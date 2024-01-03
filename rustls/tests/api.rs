@@ -14,10 +14,7 @@ use rustls::internal::msgs::codec::Codec;
 use rustls::server::{AllowAnyAnonymousOrAuthenticatedClient, ClientHello, ResolvesServerCert};
 #[cfg(feature = "secret_extraction")]
 use rustls::ConnectionTrafficSecrets;
-use rustls::{
-    sign, CertificateError, ConnectionCommon, Error, KeyLog, PeerIncompatible, PeerMisbehaved,
-    SideData,
-};
+use rustls::{sign, CertificateError, ConnectionCommon, Error, KeyLog, PeerIncompatible, PeerMisbehaved, SideData, Connection};
 use rustls::{CipherSuite, ProtocolVersion, SignatureScheme};
 use rustls::{ClientConfig, ClientConnection};
 use rustls::{ServerConfig, ServerConnection};
@@ -311,9 +308,46 @@ fn buffered_server_data_sent() {
 }
 
 #[test]
+fn receive_out_of_order_tls_records_single_stream() {
+    let server_config = Arc::new(make_server_config(KeyType::Rsa));
+    let client_config = make_client_config_with_versions(KeyType::Rsa, &[&rustls::version::TLS13]);
+    let (mut client, mut server, mut recv_svr, mut recv_clnt) =
+        make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
+    do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
+    // Prepare records
+    let record_1 = vec![1u8; 20];
+    let record_2 = vec![2u8; 20];
+    let record_3 = vec![3u8; 20];
+    let record_4 = vec![4u8; 20];
+    // Write records to send buffer
+    client.writer().write(&record_1);
+    client.writer().write(&record_2);
+    client.writer().write(&record_3);
+    client.writer().write(&record_4);
+
+
+    //Change the order of records in send buffer
+   client.shuffle_records(0, 2);
+
+    //send records from client to server
+    transfer(&mut client, &mut server);
+    server.process_new_packets(&mut recv_svr);
+
+    //test that data was received in order
+    let mut buf = vec![0u8; 20];
+    recv_svr.get_mut(0).unwrap().read(&mut buf);
+    assert_eq!(record_1, buf);
+    recv_svr.get_mut(0).unwrap().read(&mut buf);
+    assert_eq!(record_2, buf);
+    recv_svr.get_mut(0).unwrap().read(&mut buf);
+    assert_eq!(record_3, buf);
+    recv_svr.get_mut(0).unwrap().read(&mut buf);
+    assert_eq!(record_4, buf);
+}
+
+#[test]
 fn buffered_both_data_sent() {
     let server_config = Arc::new(make_server_config(KeyType::Rsa));
-    let mut app_bufs = RecvBufMap::new();
     for version in rustls::ALL_VERSIONS {
         if version.version == ProtocolVersion::TLSv1_2 {
             continue
@@ -4165,8 +4199,11 @@ use rustls::internal::msgs::{
     handshake::ClientExtension, handshake::HandshakePayload, message::Message,
     message::MessagePayload,
 };
+use rustls::ProtocolVersion::TLSv1_3;
 
 use rustls::recvbuf::RecvBufMap;
+use rustls::tcpls::frame::MAX_TCPLS_FRAGMENT_LEN;
+use rustls::tcpls::TcplsSession;
 
 
 #[test]
