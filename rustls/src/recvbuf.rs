@@ -127,7 +127,7 @@ impl RecvBuf {
 
         let to_read_length = cmp::min(buf.len(), self.as_ref_consumed().len());
 
-        buf[..to_read_length].copy_from_slice(self.as_ref_consumed());
+        buf[..to_read_length].copy_from_slice(&self.as_ref_consumed()[..to_read_length]);
         self.consume(to_read_length);
         Ok(to_read_length)
     }
