@@ -19,7 +19,7 @@ pub(crate) const MAX_PAYLOAD: u16 = 16384 + 2048;
 pub(crate) const HEADER_SIZE: u16 = 1 + 2 + 2;
 
 /// Maximum on-wire message size.
-pub const MAX_WIRE_SIZE: usize = (MAX_PAYLOAD + HEADER_SIZE) as usize;
+pub const MAX_WIRE_SIZE: usize = ((16384 + 2048 + 5) * 4 ) as usize;
 
 #[derive(Debug)]
 pub enum MessagePayload {
