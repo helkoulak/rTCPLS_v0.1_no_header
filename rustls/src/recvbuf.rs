@@ -295,6 +295,30 @@ mod test {
         assert_eq!(stream.len, 0);
     }
 
+    #[test]
+    fn test_read_in_external_buffer() {
+        // test reading in an external buffer that is double the size of the receive buffer
+        let mut buffer = vec![0u8; DEFAULT_BUFFER_LIMIT * 2];
+        let mut stream = RecvBuf::new(0, Some(DEFAULT_BUFFER_LIMIT));
+        stream.data.fill(0x0A);
+        stream.offset += DEFAULT_BUFFER_LIMIT as u64;
+        let mut data_read = stream.read(&mut buffer).unwrap();
+
+        assert_eq!(data_read, stream.data.len());
+        assert_eq!(buffer[..data_read], stream.data);
+        assert_eq!(stream.read(&mut buffer).unwrap(), 0);
+        // test reading in a buffer smaller than the receive buffer
+        buffer = vec![0u8; 100];
+
+        stream.consumed = 0;
+
+        let mut data_read = stream.read(&mut buffer).unwrap();
+
+        assert_eq!(data_read, buffer.len());
+        assert_eq!(buffer, stream.data[..data_read]);
+
+    }
+
     #[cfg(read_buf)]
     #[test]
     fn read_buf() {
