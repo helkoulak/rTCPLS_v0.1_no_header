@@ -3,20 +3,17 @@
 
 /// This module contains optional APIs for implementing TCPLS.
 use std::{io, u32, vec};
-
-
 use std::fs;
-
 use std::io::{BufReader, Read, Write};
 use std::net::{SocketAddr, ToSocketAddrs};
-
 use std::sync::Arc;
 
 use mio::net::{TcpListener, TcpStream};
 
-use crate::{server, version, Certificate, ClientConfig, ClientConnection, Connection, Error, KeyLogFile, PrivateKey, RootCertStore, ServerConfig, ServerConnection, ServerName, SupportedCipherSuite, SupportedProtocolVersion, Ticketer, ALL_CIPHER_SUITES, ALL_VERSIONS, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, IoState};
-
-
+use crate::{ALL_CIPHER_SUITES, ALL_VERSIONS, Certificate, ClientConfig, ClientConnection,
+            Connection, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, Error, IoState, KeyLogFile,
+            PrivateKey, RootCertStore, server, ServerConfig, ServerConnection, ServerName,
+            SupportedCipherSuite, SupportedProtocolVersion, Ticketer, version};
 use crate::recvbuf::RecvBufMap;
 use crate::tcpls::network_address::AddressMap;
 use crate::tcpls::stream::SimpleIdHashMap;
