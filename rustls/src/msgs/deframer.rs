@@ -82,7 +82,7 @@ impl MessageDeframer {
                 let mut rd = codec::Reader::init(&self.buf[start..self.used]);
                 let m = match BorrowedOpaqueMessage::read(&mut rd) {
                     Ok((ct, ver, offset, len)) => {
-                        payload_offset = offset;
+                        payload_offset = start + offset;
                         payload_length = len;
                         BorrowedOpaqueMessage {
                             typ: ct,
@@ -114,7 +114,7 @@ impl MessageDeframer {
                 if m.typ == ContentType::ChangeCipherSpec && self.joining_hs.is_none() {
                     // This is unencrypted. We check the contents later.
                     let plain = m.into_plain_message();
-                    self.discard(end);
+                    self.discard(start, (end - start));
                     return Ok(Some(Deframed {
                         want_close_before_decrypt: false,
                         aligned: true,
@@ -154,7 +154,7 @@ impl MessageDeframer {
                     ));
                 }
                 Ok(None) => {
-                    self.discard(end);
+                    self.discard(start, (end - start));
                     continue;
                 }
                 Err(e) => return Err(e),
@@ -170,7 +170,7 @@ impl MessageDeframer {
 
             // If it's not a handshake message, just return it -- no joining necessary.
             if msg.typ != ContentType::Handshake {
-                self.discard(start + rd.used());
+                self.discard(start, (end - start));
                 return Ok(Some(Deframed {
                     want_close_before_decrypt: false,
                     aligned: true,
@@ -209,7 +209,7 @@ impl MessageDeframer {
             // discard all of the bytes that we're previously buffered as handshake data.
             let end = meta.message.end;
             self.joining_hs = None;
-            self.discard(end);
+            self.discard(0, end );
         }
 
         Ok(Some(Deframed {
@@ -370,7 +370,7 @@ impl MessageDeframer {
     }
 
     /// Discard `taken` bytes from the start of our buffer.
-    pub fn discard(&mut self, taken: usize) {
+    pub fn discard(&mut self, start: usize, taken: usize) {
         #[allow(clippy::comparison_chain)]
         if taken < self.used {
             /* Before:
@@ -385,10 +385,15 @@ impl MessageDeframer {
              * +----------+----------+----------+
              * 0          ^ self.used
              */
+            // If the last record stored in buffer was consumed
+            if (start + taken) == self.used {
+                self.used = start;
+            } else {
+                self.buf
+                    .copy_within(start + taken..self.used, start);
+                self.used -= taken;
+            }
 
-            self.buf
-                .copy_within(taken..self.used, 0);
-            self.used -= taken;
         } else if taken == self.used {
             self.used = 0;
         }
