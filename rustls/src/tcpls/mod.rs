@@ -126,7 +126,7 @@ impl TcplsSession {
     }
     
 
-    pub fn send_on_connection(&mut self, conn_id: u32) -> Result<usize, Error> {
+    pub fn send_on_connection(&mut self, conn_id: u32, wr: Option<&mut dyn io::Write>) -> Result<usize, Error> {
         let tls_conn = self.tls_conn.as_mut().unwrap();
 
         let (has_pending, pending_at) = match tls_conn.record_layer.streams.has_pending {
@@ -138,11 +138,14 @@ impl TcplsSession {
         let flushable_streams = tls_conn.record_layer.streams.flushable().skip_while(|&id| id != pending_at as u64 && has_pending);
 
         let mut done = 0;
-        let socket = &mut self
-            .tcp_connections
-            .get_mut(&(conn_id as u64))
-            .unwrap()
-            .socket;
+        let socket = match wr {
+            Some(socket) => socket,
+            None => &mut self
+                .tcp_connections
+                .get_mut(&(conn_id as u64))
+                .unwrap()
+                .socket,
+        };
 
         for id in flushable_streams {
 
@@ -155,19 +158,31 @@ impl TcplsSession {
 
             let mut len = stream.send.len();
             let mut sent = 0;
+            let mut complete_sent = false;
+
             while len > 0 {
-                let chunk = stream.send.pop().unwrap();
+
+                (sent, complete_sent) = match stream.send.write_chunk_to(socket) {
+                    (Ok(sent), complete) => (sent, complete),
+                    (Error) => return Err(Error::General("Data sending on socket failed".to_string())),
+
+                };
+               /* let chunk = stream.send.pop().unwrap();
                 let chunk_len = chunk.len();
 
                 sent = socket
                     .write(chunk.as_slice())
-                    .unwrap();
+                    .unwrap();*/
                 len -= sent;
                 done += sent;
-                stream.send.consume_chunk(sent, chunk);
+                //stream.send.consume_chunk(sent, chunk);
                 // In case the chunk was partially sent, by the next call
                 // to send on the same connection this stream should be chosen as first
-                if sent != chunk_len {
+                if sent == 0 {
+                    return Ok(done);
+                }
+
+                if !complete_sent {
                     tls_conn.record_layer.streams.has_pending = Some(id as u16);
                     return Ok(done);
                 }
