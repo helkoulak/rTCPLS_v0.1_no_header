@@ -60,7 +60,7 @@ impl TlsClient {
            self.send_file("Cargo.toml", 0).expect("");
             self.send_file("Cargo.lock", 1).expect("");
             self.send_file("TLS_HS_Client", 2).expect("");
-            self.tcpls_session.send_on_connection(0).expect("sending on socket has failed");
+            self.tcpls_session.send_on_connection(0, None).expect("sending on socket has failed");
             
         }
 
@@ -141,7 +141,7 @@ impl TlsClient {
 
     fn do_write(&mut self) {
 
-        self.tcpls_session.send_on_connection(0).unwrap();
+        self.tcpls_session.send_on_connection(0, None).unwrap();
     }
 
     /// Registers self as a 'listener' in mio::Registry
