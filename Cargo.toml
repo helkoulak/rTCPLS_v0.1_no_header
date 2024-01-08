@@ -12,5 +12,3 @@ members = [
 exclude = ["admin/rustfmt"]
 resolver = "2"
 
-[patch.crates-io]
-ring = {path = "ring"}
