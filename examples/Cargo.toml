@@ -23,7 +23,7 @@ sct = "0.7"
 serde = "1.0"
 serde_derive = "1.0"
 webpki-roots = "0.23"
-ring = "0.16.20"
+ring = {path = "../ring"}
 
 [dev-dependencies]
 regex = "1.0"

@@ -17,7 +17,7 @@ rustversion = { version = "1.0.6", optional = true }
 
 [dependencies]
 log = { version = "0.4.4", optional = true }
-ring = "0.16.20"
+ring = {path = "../ring"}
 siphasher = "1.0.0"
 sct = "0.7.0"
 mio = { version = "0.8", features = ["net", "os-poll"] }
