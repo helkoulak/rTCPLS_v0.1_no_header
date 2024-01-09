@@ -384,6 +384,13 @@ impl Message {
             payload: MessagePayload::handshake(HandshakeMessagePayload::build_key_update_notify()),
         }
     }
+
+    pub fn get_payload(& self) -> Vec<u8> {
+        match &self.payload {
+            MessagePayload::ApplicationData(payload) => payload.0.to_vec(),
+            _ => Vec::new(),
+        }
+    }
 }
 
 /// Parses a plaintext message into a well-typed [`Message`].
