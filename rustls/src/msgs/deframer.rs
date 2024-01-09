@@ -61,7 +61,7 @@ impl MessageDeframer {
         // For records that decrypt as `Handshake`, we keep the current state of the joined
         // handshake message payload in `self.joining_hs`, appending to it as we see records.
         let expected_len = loop {
-            let mut start = match &self.joining_hs {
+            let start = match &self.joining_hs {
                 Some(meta) => {
                     match meta.expected_len {
                         // We're joining a handshake payload, and we've seen the full payload.

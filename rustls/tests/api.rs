@@ -320,10 +320,10 @@ fn receive_out_of_order_tls_records_single_stream() {
     let record_3 = vec![3u8; 20];
     let record_4 = vec![4u8; 20];
     // Write records to send buffer
-    client.writer().write(&record_1);
-    client.writer().write(&record_2);
-    client.writer().write(&record_3);
-    client.writer().write(&record_4);
+    client.writer().write(&record_1).expect("TODO: panic message");
+    client.writer().write(&record_2).expect("TODO: panic message");
+    client.writer().write(&record_3).expect("TODO: panic message");
+    client.writer().write(&record_4).expect("TODO: panic message");
 
 
     //Change the order of records in send buffer
@@ -331,17 +331,17 @@ fn receive_out_of_order_tls_records_single_stream() {
 
     //send records from client to server
     transfer(&mut client, &mut server);
-    server.process_new_packets(&mut recv_svr);
+    server.process_new_packets(&mut recv_svr).expect("TODO: panic message");
 
     //test that data was received in order
     let mut buf = vec![0u8; 20];
-    recv_svr.get_mut(0).unwrap().read(&mut buf);
+    recv_svr.get_mut(0).unwrap().read(&mut buf).expect("TODO: panic message");
     assert_eq!(record_1, buf);
-    recv_svr.get_mut(0).unwrap().read(&mut buf);
+    recv_svr.get_mut(0).unwrap().read(&mut buf).expect("TODO: panic message");
     assert_eq!(record_2, buf);
-    recv_svr.get_mut(0).unwrap().read(&mut buf);
+    recv_svr.get_mut(0).unwrap().read(&mut buf).expect("TODO: panic message");
     assert_eq!(record_3, buf);
-    recv_svr.get_mut(0).unwrap().read(&mut buf);
+    recv_svr.get_mut(0).unwrap().read(&mut buf).expect("TODO: panic message");
     assert_eq!(record_4, buf);
 }
 
@@ -4303,7 +4303,7 @@ use rustls::internal::msgs::{
 use rustls::ProtocolVersion::TLSv1_3;
 
 use rustls::recvbuf::RecvBufMap;
-use rustls::tcpls::frame::MAX_TCPLS_FRAGMENT_LEN;
+
 use rustls::tcpls::TcplsSession;
 
 
@@ -4784,7 +4784,7 @@ fn test_secret_extraction_disabled_or_too_early() {
 }
 
 //#[test] // Test logic is no more applicable
-fn test_received_plaintext_backpressure() {
+/*fn test_received_plaintext_backpressure() {
     let suite = rustls::cipher_suite::TLS13_AES_128_GCM_SHA256;
     let kt = KeyType::Rsa;
 
@@ -4854,7 +4854,7 @@ fn test_received_plaintext_backpressure() {
             .unwrap(),
         24
     );
-}
+}*/
 
 #[test]
 fn test_debug_server_name_from_ip() {

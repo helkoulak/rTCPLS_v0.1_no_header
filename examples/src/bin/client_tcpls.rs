@@ -1,12 +1,11 @@
 #[macro_use]
 extern crate serde_derive;
 
-use std::{fs, process};
-use std::fs::{File, remove_file};
+use std::process;
+use std::fs::File;
 use std::io;
-use std::io::{BufReader, Read, Write};
-use std::iter::SkipWhile;
-use std::net::SocketAddr;
+use std::io::{Read, Write};
+
 use std::ops::{Deref, DerefMut};
 use std::str;
 use std::sync::Arc;
