@@ -345,6 +345,97 @@ fn receive_out_of_order_tls_records_single_stream() {
     assert_eq!(record_4, buf);
 }
 
+
+#[test]
+
+fn send_fragmented_records_on_two_connections() {
+    // Perform the handshake
+    let server_config = Arc::new(make_server_config(KeyType::Rsa));
+    let client_config = make_client_config_with_versions(KeyType::Rsa, &[&rustls::version::TLS13]);
+    let (mut client, mut server, mut recv_svr, mut recv_clnt) =
+        make_pair_for_arc_configs(&Arc::new(client_config.clone()), &server_config);
+    do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
+
+    // Create a second server connection to simulate a second TCP connection
+    let (mut client2, mut server2, mut recv_svr2, mut recv_clnt2) =
+        make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
+
+    let mut tcpls_client = TcplsSession::new(false);
+
+
+    // Prepare data that should be sent
+
+    let m_1 = Message {
+        version: TLSv1_3,
+        payload: MessagePayload::ApplicationData(Payload(vec![1u8; 20]))
+    };
+    let m_2 = Message {
+        version: TLSv1_3,
+        payload: MessagePayload::ApplicationData(Payload(vec![2u8; 20]))
+    };
+    let m_3 = Message {
+        version: TLSv1_3,
+        payload: MessagePayload::ApplicationData(Payload(vec![3u8; 20]))
+    };
+    let m_4 = Message {
+        version: TLSv1_3,
+        payload: MessagePayload::ApplicationData(Payload(vec![4u8; 20]))
+    };
+
+
+    // Buffer data into four different streams
+       client.send_msg_plain(m_1, 0);
+        client.send_msg_plain(m_2, 1);
+        client.send_msg_plain(m_3, 2);
+        client.send_msg_plain(m_4, 3);
+
+
+    let mut input = Vec::new();
+    client.read_send_buffer(&mut input, 0);
+    client.read_send_buffer(&mut input, 1);
+    client.read_send_buffer(&mut input, 2);
+    client.read_send_buffer(&mut input, 3);
+
+    //Create pipes that simulate TCP connections
+    let mut pipe = OtherSession::new(&mut server);
+    let mut pipe2 = OtherSession::new(&mut server2);
+    // Create a receive buffer that is smaller than each record to force partial record sending
+    pipe.recv_map = RecvBufMap::new();
+
+    pipe.recv_map.get_or_create_recv_buffer(0, Some(10));
+
+    pipe2.recv_map = RecvBufMap::new();
+
+    pipe2.recv_map.get_or_create_recv_buffer(0, Some(10));
+
+    //Encapsulate inside TCPLS object to be able to test method send_on_connection
+    tcpls_client.tls_conn = Some(Connection::from(client));
+
+    let mut sent = 0;
+
+    let mut output: Vec<u8> = Vec::new();
+
+
+    loop {
+        //Send on two different TCP connections and construct output buffer from partially sent records
+        sent = tcpls_client.send_on_connection(0, Some(&mut pipe)).unwrap();
+        if sent == 0 { break }
+        output.extend_from_slice(pipe.recv_map.get_mut(0).unwrap().as_ref());
+        pipe.recv_map.get_mut(0).unwrap().offset -= sent as u64; // Empty space for the next send
+
+
+        sent = tcpls_client.send_on_connection(0, Some(&mut pipe2)).unwrap();
+        if sent == 0 { break }
+        output.extend_from_slice(pipe2.recv_map.get_mut(0).unwrap().as_ref());
+        pipe2.recv_map.get_mut(0).unwrap().offset -= sent as u64; // Empty space for the next send
+
+
+    }
+
+
+    assert_eq!(output, input);
+}
+
 #[test]
 fn buffered_both_data_sent() {
     let server_config = Arc::new(make_server_config(KeyType::Rsa));
@@ -1320,8 +1411,11 @@ where
     C: DerefMut + Deref<Target = ConnectionCommon<S>>,
     S: SideData,
 {
-    fn write(&mut self, _: &[u8]) -> io::Result<usize> {
-        unreachable!()
+    fn write(&mut self, input: &[u8]) -> io::Result<usize> {
+        let mut recv_buf = self.recv_map.get_mut(0).unwrap();
+        let sent = recv_buf.get_mut().write(input).unwrap();
+        recv_buf.offset += sent as u64;
+        Ok(sent)
     }
 
     fn flush(&mut self) -> io::Result<()> {
