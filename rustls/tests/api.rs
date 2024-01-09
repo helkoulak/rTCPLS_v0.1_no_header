@@ -4188,6 +4188,13 @@ fn assert_lt(left: usize, right: usize) {
     }
 }
 
+
+fn assert_loe(left: usize, right: usize) {
+    if !(left <= right) {
+        panic!("expected {} < {}", left, right);
+    }
+}
+
 #[test]
 fn connection_types_are_not_huge() {
     // Arbitrary sizes
