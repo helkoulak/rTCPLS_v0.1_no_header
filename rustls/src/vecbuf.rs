@@ -114,6 +114,10 @@ impl ChunkVecBuffer {
         self.chunks.pop_front()
     }
 
+    pub(crate) fn copy_records(& self) -> VecDeque<Vec<u8>> {
+        self.chunks.clone()
+    }
+
     /// Read data out of this object, writing it into `buf`
     /// and returning how many bytes were written there.
     pub(crate) fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
