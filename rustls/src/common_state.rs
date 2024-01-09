@@ -437,6 +437,13 @@ impl CommonState {
         }
     }
 
+    pub fn read_send_buffer(&mut self, out: &mut Vec<u8>, id: u16) {
+        let mut send_vec = self.record_layer.streams.get_mut(id).unwrap().send.copy_records();
+        while let Some(buf) = send_vec.pop_front() {
+            out.extend_from_slice(&buf);
+        }
+    }
+
     // Put m into sendable_tls for writing.
     pub(crate) fn queue_message(&mut self, msg: Vec<u8>, id: u16) {
         self.record_layer.streams.get_or_create(id).unwrap().send.append(msg);
@@ -474,6 +481,16 @@ impl CommonState {
             }
         } else {
             self.send_msg_encrypt(m.into(), id);
+        }
+    }
+
+    pub fn send_msg_plain(&mut self, m: Message, id: u16) {
+        let msg = &m.into();
+        let iter = self
+            .message_fragmenter
+            .fragment_message(msg);
+        for m in iter {
+            self.queue_message(m.to_unencrypted_opaque().encode(), id);
         }
     }
 
