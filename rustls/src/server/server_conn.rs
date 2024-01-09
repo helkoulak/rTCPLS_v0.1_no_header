@@ -9,7 +9,7 @@ use crate::log::trace;
 use crate::msgs::base::Payload;
 use crate::msgs::handshake::{ClientHelloPayload, ProtocolName, ServerExtension};
 use crate::msgs::message::Message;
-use crate::sign;
+use crate::{ClientConnection, Connection, sign};
 use crate::suites::SupportedCipherSuite;
 use crate::vecbuf::ChunkVecBuffer;
 use crate::verify;
@@ -487,9 +487,19 @@ impl DerefMut for ServerConnection {
     }
 }
 
-impl From<ServerConnection> for crate::Connection {
+impl From<ServerConnection> for Connection {
     fn from(conn: ServerConnection) -> Self {
         Self::Server(conn)
+    }
+}
+
+impl From<Connection> for ServerConnection {
+    fn from(value: Connection) -> Self {
+        use crate::Connection::*;
+        match value {
+            Server(conn) => conn,
+            Client(_) => panic!("Type ClientConnection found"),
+        }
     }
 }
 
