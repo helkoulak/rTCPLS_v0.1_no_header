@@ -60,6 +60,10 @@ impl RecordLayer {
         self.encrypt_state == DirectionState::Active
     }
 
+    pub(crate) fn is_handshaking(&self) -> bool {
+        self.is_handshaking
+    }
+
     pub(crate) fn set_not_handshaking(&mut self) {
         self.is_handshaking = false;
     }
