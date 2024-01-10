@@ -1,4 +1,5 @@
-
+use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use std::io;
 use std::ops::Range;
 
@@ -10,7 +11,7 @@ use crate::error::{Error, InvalidMessage, PeerMisbehaved};
 use crate::msgs::{codec, message};
 use crate::msgs::message::{BorrowedOpaqueMessage, MessageError};
 use crate::record_layer::{Decrypted, RecordLayer};
-use crate::recvbuf::RecvBufMap;
+use crate::recvbuf::{RecvBuf, RecvBufMap};
 use crate::tcpls::frame::{TcplsHeader, TCPLS_HEADER_SIZE};
 
 
@@ -36,6 +37,9 @@ pub struct MessageDeframer {
 
     /// What size prefix of `buf` is used.
     used: usize,
+
+    /// Info of records delivered out-of-order
+    pub(crate) data_info: BTreeMap<u64, RangeBufInfo>,
 }
 
 impl MessageDeframer {
@@ -56,6 +60,7 @@ impl MessageDeframer {
         let mut payload_offset = 0;
         let mut payload_length = 0;
         let mut end = 0;
+        let mut recv_buf = &mut RecvBuf::default();
 
         // We loop over records we've received but not processed yet.
         // For records that decrypt as `Handshake`, we keep the current state of the joined
@@ -72,7 +77,21 @@ impl MessageDeframer {
                         _ => meta.message.end,
                     }
                 }
-                None => end,
+                None => {
+                        if !self.data_info.is_empty(){
+                            for element in self.data_info.iter() {
+                                if (app_buffers.get_or_create_recv_buffer(element.1.id as u64, None).next_recv_pkt_num == element.1.chunk_num) {
+                                    end = *element.0 as usize;
+                                    break
+                                }
+                                else {
+                                    end = *element.0 as usize + element.1.len;
+                                    continue
+                                }
+                            }
+                        }
+                    end
+                },
             };
 
 
@@ -108,7 +127,7 @@ impl MessageDeframer {
                 };
 
 
-                // If we're in the middle of joining a handshake payload and the next message is not of
+            // If we're in the middle of joining a handshake payload and the next message is not of
                 // type handshake, yield an error. Return CCS messages immediately without decrypting.
                 end = start + rd.used();
                 if m.typ == ContentType::ChangeCipherSpec && self.joining_hs.is_none() {
@@ -127,10 +146,19 @@ impl MessageDeframer {
             if tag_len != 0 {
                 // Take the LSBs of calculated tag as input sample for hash function
                 let sample = m.payload.rchunks(tag_len).next().unwrap();
-                // process tcpls header and choose recv_buf accordingly
-                header_decoded = TcplsHeader::decode_tcpls_header_from_slice(&record_layer.decrypt_header(sample, &m.payload[..TCPLS_HEADER_SIZE]).expect("decrypting header failed"));
+                // Decode tcpls header and choose recv_buf accordingly
+                header_decoded =
+                    TcplsHeader::decode_tcpls_header_from_slice(
+                        &record_layer.decrypt_header(sample, &m.payload[..TCPLS_HEADER_SIZE]).expect("decrypting header failed")
+                    );
+
+                if !record_layer.is_handshaking() {
+                    self.data_info.insert(start as u64, RangeBufInfo::from(header_decoded.chunk_num, header_decoded.stream_id, end - start));
+                }
+
             }
-                let mut recv_buf = app_buffers.get_or_create_recv_buffer(header_decoded.stream_id as u64, None);
+            recv_buf = app_buffers.get_or_create_recv_buffer(header_decoded.stream_id as u64, None);
+               /* recv_buf = app_buffers.get_or_create_recv_buffer(header_decoded.stream_id as u64, None);*/
                 if recv_buf.next_recv_pkt_num != header_decoded.chunk_num {
                     continue
                 }
@@ -170,7 +198,7 @@ impl MessageDeframer {
 
             // If it's not a handshake message, just return it -- no joining necessary.
             if msg.typ != ContentType::Handshake {
-                self.discard(start, (end - start));
+                //self.discard(start, (end - start));
                 return Ok(Some(Deframed {
                     want_close_before_decrypt: false,
                     aligned: true,
@@ -451,6 +479,46 @@ fn payload_size(buf: &[u8]) -> Result<Option<usize>, Error> {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct RangeBufInfo {
+    /// The id of the stream this record belongs to
+    pub(crate) id: u16,
+
+    /// The chunk number of record.
+    pub(crate) chunk_num: u32,
+
+    /// Length of chunk
+    pub(crate) len: usize,
+}
+
+impl RangeBufInfo {
+    pub fn from(chunk_num: u32, id: u16, len: usize) -> RangeBufInfo {
+        RangeBufInfo {
+            id,
+            chunk_num,
+            len,
+        }
+    }
+}
+
+/*impl Ord for RangeBufInfo {
+    /*fn cmp(&self, other: &Self) -> Ordering {
+        self.start_off.cmp(&other.start_off)
+    }*/
+}
+
+impl PartialOrd for RangeBufInfo {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for RangeBufInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.start_off == other.start_off
+    }
+}*/
+
 #[derive(Debug)]
 pub struct Deframed {
     pub want_close_before_decrypt: bool,
@@ -476,6 +544,7 @@ const READ_SIZE: usize = 4096;
 
 #[cfg(test)]
 mod tests {
+    use std::cmp::Ordering;
     use super::MessageDeframer;
     use crate::msgs::message::{MAX_WIRE_SIZE, Message};
     use crate::record_layer::RecordLayer;
