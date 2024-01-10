@@ -319,11 +319,13 @@ fn receive_out_of_order_tls_records_single_stream() {
     let record_2 = vec![2u8; 20];
     let record_3 = vec![3u8; 20];
     let record_4 = vec![4u8; 20];
+    let record_5 = vec![5u8; 20];
     // Write records to send buffer
     client.writer().write(&record_1).expect("TODO: panic message");
     client.writer().write(&record_2).expect("TODO: panic message");
     client.writer().write(&record_3).expect("TODO: panic message");
     client.writer().write(&record_4).expect("TODO: panic message");
+    client.writer().write(&record_5).expect("TODO: panic message");
 
 
     //Change the order of records in send buffer
@@ -343,6 +345,8 @@ fn receive_out_of_order_tls_records_single_stream() {
     assert_eq!(record_3, buf);
     recv_svr.get_mut(0).unwrap().read(&mut buf).expect("TODO: panic message");
     assert_eq!(record_4, buf);
+    recv_svr.get_mut(0).unwrap().read(&mut buf).expect("TODO: panic message");
+    assert_eq!(record_5, buf);
 }
 
 
