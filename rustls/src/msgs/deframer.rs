@@ -9,6 +9,7 @@ use super::message::PlainMessage;
 use crate::enums::{ContentType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerMisbehaved};
 use crate::msgs::{codec, message};
+use crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
 use crate::msgs::message::{BorrowedOpaqueMessage, MessageError};
 use crate::record_layer::{Decrypted, RecordLayer};
 use crate::recvbuf::{RecvBuf, RecvBufMap};
@@ -38,8 +39,12 @@ pub struct MessageDeframer {
     /// What size prefix of `buf` is used.
     used: usize,
 
-    /// Info of records delivered out-of-order
+    /// Info of records delivered
     pub(crate) data_info: BTreeMap<u64, RangeBufInfo>,
+
+    /// Range of offsets of processed data in deframer buffer.
+    /// Contiguous range starts from offset 0 and will be discarded if >= DISCARD_THRESHOLD
+    pub(crate) processed_range: Range<u64>,
 }
 
 impl MessageDeframer {
@@ -397,6 +402,20 @@ impl MessageDeframer {
         self.used > 0
     }
 
+    /// Calculate ranges where data was processed and can be discarded.
+    /// Only contiguous data that is >= DISCARD_THRESHOLD is discarded.
+    pub fn calculate_discard_ranges(&mut self) {
+        self.processed_range.start = 0;
+            for entry in self.data_info.iter() {
+                if entry.1.processed {
+                    self.processed_range.end = *entry.0 + *entry.1.len; //Note end offset of each adjacent record till we have a chunk of processed data >= threshold
+                    if (self.processed_range.end - self.processed_range.start) >= DISCARD_THRESHOLD as u64 {
+                        return;
+                    }
+                }
+            }
+    }
+
     /// Discard `taken` bytes from the start of our buffer.
     pub fn discard(&mut self, start: usize, taken: usize) {
         #[allow(clippy::comparison_chain)]
@@ -489,6 +508,9 @@ pub struct RangeBufInfo {
 
     /// Length of chunk
     pub(crate) len: usize,
+
+    /// If record already processed
+    pub(crate) processed: bool,
 }
 
 impl RangeBufInfo {
@@ -497,6 +519,7 @@ impl RangeBufInfo {
             id,
             chunk_num,
             len,
+            processed: false,
         }
     }
 }
@@ -540,6 +563,8 @@ const HEADER_SIZE: usize = 1 + 3;
 const MAX_HANDSHAKE_SIZE: u32 = 0xffff;
 
 const READ_SIZE: usize = 4096;
+
+const DISCARD_THRESHOLD: usize =  MAX_FRAGMENT_LEN ;
 
 
 #[cfg(test)]
