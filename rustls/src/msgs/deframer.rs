@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+
 use std::collections::BTreeMap;
 use std::io;
 use std::ops::Range;
@@ -203,7 +203,14 @@ impl MessageDeframer {
 
             // If it's not a handshake message, just return it -- no joining necessary.
             if msg.typ != ContentType::Handshake {
-                //self.discard(start, (end - start));
+                self.record_info.get_mut(&(start as u64)).unwrap().processed = true;
+                match self.calculate_discard_range() {
+                   true =>
+                       self.discard(self.processed_range.start as usize,
+                                    (self.processed_range.end - self.processed_range.start) as usize),
+                    false => (),
+                };
+                //
                 return Ok(Some(Deframed {
                     want_close_before_decrypt: false,
                     aligned: true,
@@ -402,22 +409,44 @@ impl MessageDeframer {
         self.used > 0
     }
 
-    /// Calculate ranges where data was processed and can be discarded.
-    /// Only contiguous data that is >= DISCARD_THRESHOLD is discarded.
-    pub fn calculate_discard_ranges(&mut self) {
-        self.processed_range.start = 0;
-            for entry in self.data_info.iter() {
-                if entry.1.processed {
-                    self.processed_range.end = *entry.0 + *entry.1.len; //Note end offset of each adjacent record till we have a chunk of processed data >= threshold
-                    if (self.processed_range.end - self.processed_range.start) >= DISCARD_THRESHOLD as u64 {
-                        return;
+    /// Calculate range where data was processed and can be discarded.
+    /// Contiguous data range grows to the left or right depending on adjacent processed records.
+    /// Range will only be saved in self.processed_range if range >= DISCARD_THRESHOLD.
+    pub fn calculate_discard_range(&mut self) -> bool{
+        let mut contiguous = true;
+        while contiguous {
+            for (offset, info) in self.record_info.iter() {
+                let entry_start = *offset;
+                let entry_end = *offset + info.len as u64;
+                if info.processed {
+                    // Initiate range with first processed entry found and build upon
+                    if self.processed_range.start == 0 && self.processed_range.end == 0 {
+                        self.processed_range.start = entry_start;
+                        self.processed_range.end = entry_end;
+                    }
+                    // expand to the right
+                    if entry_start == self.processed_range.end  {
+                        self.processed_range.end = entry_end;
+                     }
+                    // expand to the left
+                    if (entry_end == self.processed_range.start) {
+                        self.processed_range.start = entry_start;
                     }
                 }
             }
+            contiguous = false;
+        }
+        if !((self.processed_range.end - self.processed_range.start) >= DISCARD_THRESHOLD as u64) {
+            self.processed_range.end = 0;
+            self.processed_range.start = 0;
+            false
+        }else { true }
     }
 
     /// Discard `taken` bytes from the start of our buffer.
     pub fn discard(&mut self, start: usize, taken: usize) {
+        let mut new_record_info: BTreeMap<u64, RangeBufInfo > = BTreeMap::new();
+        let mut next_start = 0;
         #[allow(clippy::comparison_chain)]
         if taken < self.used {
             /* Before:
@@ -444,6 +473,40 @@ impl MessageDeframer {
         } else if taken == self.used {
             self.used = 0;
         }
+        // Build a new record_info BTreeMap excluding the discarded range
+        for entry in self.record_info.iter()
+            .filter(|&(key, info)| *key < self.processed_range.start || *key >= self.processed_range.end) {
+            if *entry.0 == self.processed_range.end {
+                new_record_info.insert(self.processed_range.start, RangeBufInfo{
+                    chunk_num: entry.1.chunk_num,
+                    len: entry.1.len,
+                    id: entry.1.id,
+                    processed: entry.1.processed,
+                });
+                next_start = self.processed_range.start + entry.1.len as u64;
+                continue
+            }
+
+            if *entry.0 > self.processed_range.end {
+                new_record_info.insert(next_start, RangeBufInfo{
+                    chunk_num: entry.1.chunk_num,
+                    len: entry.1.len,
+                    id: entry.1.id,
+                    processed: entry.1.processed,
+                });
+                next_start += entry.1.len as u64;
+                continue
+            }
+            new_record_info.insert(*entry.0, RangeBufInfo{
+                chunk_num: entry.1.chunk_num,
+                len: entry.1.len,
+                id: entry.1.id,
+                processed: entry.1.processed,
+            });
+        }
+        self.record_info = new_record_info;
+        self.processed_range.start = 0;
+        self.processed_range.end   = 0;
     }
 }
 
