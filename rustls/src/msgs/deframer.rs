@@ -40,7 +40,7 @@ pub struct MessageDeframer {
     used: usize,
 
     /// Info of records delivered
-    pub(crate) data_info: BTreeMap<u64, RangeBufInfo>,
+    pub(crate) record_info: BTreeMap<u64, RangeBufInfo>,
 
     /// Range of offsets of processed data in deframer buffer.
     /// Contiguous range starts from offset 0 and will be discarded if >= DISCARD_THRESHOLD
@@ -83,14 +83,14 @@ impl MessageDeframer {
                     }
                 }
                 None => {
-                        if !self.data_info.is_empty(){
-                            for element in self.data_info.iter() {
-                                if (app_buffers.get_or_create_recv_buffer(element.1.id as u64, None).next_recv_pkt_num == element.1.chunk_num) {
-                                    end = *element.0 as usize;
+                        if !self.record_info.is_empty(){
+                            for (offset, info) in self.record_info.iter() {
+                                if (app_buffers.get_or_create_recv_buffer(info.id as u64, None).next_recv_pkt_num == info.chunk_num) {
+                                    end = *offset as usize;
                                     break
                                 }
                                 else {
-                                    end = *element.0 as usize + element.1.len;
+                                    end = *offset as usize + info.len;
                                     continue
                                 }
                             }
@@ -158,7 +158,7 @@ impl MessageDeframer {
                     );
 
                 if !record_layer.is_handshaking() {
-                    self.data_info.insert(start as u64, RangeBufInfo::from(header_decoded.chunk_num, header_decoded.stream_id, end - start));
+                    self.record_info.insert(start as u64, RangeBufInfo::from(header_decoded.chunk_num, header_decoded.stream_id, end - start));
                 }
 
             }
