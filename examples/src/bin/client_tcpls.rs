@@ -183,23 +183,29 @@ impl TlsClient {
 
 
     fn send_file(&mut self, file_name: &str, stream: u16) -> io::Result<()> {
+        let mut data = Vec::new();
+        // Total length to send
+        let mut len:u16 = 0;
         // Specify the file path you want to hash
         let file_path = file_name; // Replace with the actual file path
 
         // Read the file into a byte vector
         let mut file_contents = TlsClient::read_file_to_bytes(file_path)?;
-
+        len += file_contents.len() as u16;
         // Calculate the hash of the file contents using SHA-256
         let hash = TlsClient::calculate_sha256_hash(&file_contents);
-
-        // Append hash value to the serialized file to be sent to the peer
-        file_contents.extend(vec![0x0F, 0x0F, 0x0F, 0x0F]);
-        file_contents.extend(hash.as_ref());
+        len += hash.algorithm().output_len as u16;
+        len += 4;
+        // Append total length and hash value to the serialized file to be sent to the peer
+        data.extend_from_slice( [((len >> 8) & 0xFF) as u8, ((len & 0xFF) as u8)].as_slice());
+        data.extend_from_slice(file_contents.as_slice());
+        data.extend(vec![0x0F, 0x0F, 0x0F, 0x0F]);
+        data.extend(hash.as_ref());
 
         // Print the hash as a hexadecimal string
-        println!("\n \n File bytes on stream {:?} : \n {:?} \n \n SHA-256 Hash {:?} \n Total length: {:?} \n", stream, file_contents, hash, file_contents.len());
+        println!("\n \n File bytes on stream {:?} : \n {:?} \n \n SHA-256 Hash {:?} \n Total length: {:?} \n", stream, file_contents, hash, len);
 
-        self.tcpls_session.stream_send(stream, file_contents.as_ref(), false).expect("buffering failed");
+        self.tcpls_session.stream_send(stream, data.as_ref(), false).expect("buffering failed");
 
 
         Ok(())

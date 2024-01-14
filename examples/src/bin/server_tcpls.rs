@@ -221,20 +221,28 @@ impl OpenConnection {
             if stream.1.is_empty() || stream.1.is_consumed(){
                 continue
             }
-            let unprocessed_len = stream.1.as_ref_consumed().len();
+
+            let received_len: usize = u16::from_be_bytes([stream.1.as_ref_consumed()[0], stream.1.as_ref_consumed()[1]]) as usize;
+            let unprocessed_len = stream.1.as_ref_consumed()[2..].len();
+
+            if received_len != unprocessed_len {
+                continue
+            }
+
+
 
             hash_index = match OpenConnection::find_pattern(&stream.1.as_ref_consumed(), vec![0x0f, 0x0f, 0x0f, 0x0f].as_slice()) {
                 Some(n) => n + 4,
                 None => panic!("hash prefix does not exist"),
             };
 
-            assert_eq!(&stream.1.as_ref_consumed()[hash_index..], self.calculate_sha256_hash(&stream.1.as_ref_consumed()[..hash_index - 4]).as_ref());
+            assert_eq!(&stream.1.as_ref_consumed()[hash_index..], self.calculate_sha256_hash(&stream.1.as_ref_consumed()[2..hash_index - 4]).as_ref());
             debug!("\n \n Bytes received on stream {:?} : \n \n {:?} \n \n SHA-256 Hash {:?} \n Total length: {:?} \n",
                 stream.1.id,
-                &stream.1.as_ref_consumed()[..hash_index],
+                &stream.1.as_ref_consumed()[2..hash_index - 4],
                 &stream.1.as_ref_consumed()[hash_index..].iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>(),
-                &stream.1.as_ref_consumed().len());
-             stream.1.consume(unprocessed_len);
+                unprocessed_len);
+             stream.1.consume(received_len);
         }
     }
 
