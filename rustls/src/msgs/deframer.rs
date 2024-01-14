@@ -156,11 +156,9 @@ impl MessageDeframer {
                     TcplsHeader::decode_tcpls_header_from_slice(
                         &record_layer.decrypt_header(sample, &m.payload[..TCPLS_HEADER_SIZE]).expect("decrypting header failed")
                     );
-
-                if !record_layer.is_handshaking() {
-                    self.record_info.insert(start as u64, RangeBufInfo::from(header_decoded.chunk_num, header_decoded.stream_id, end - start));
-                }
-
+            }
+            if !record_layer.is_handshaking() {
+                self.record_info.insert(start as u64, RangeBufInfo::from(header_decoded.chunk_num, header_decoded.stream_id, end - start));
             }
             recv_buf = app_buffers.get_or_create_recv_buffer(header_decoded.stream_id as u64, None);
                /* recv_buf = app_buffers.get_or_create_recv_buffer(header_decoded.stream_id as u64, None);*/
@@ -192,6 +190,10 @@ impl MessageDeframer {
                 }
                 Err(e) => return Err(e),
             };
+            // Remove entry if data != ApplicationData
+            if msg.typ != ContentType::ApplicationData {
+                self.record_info.remove(&(start as u64));
+            }
 
             if self.joining_hs.is_some() && msg.typ != ContentType::Handshake {
                 // "Handshake messages MUST NOT be interleaved with other record
