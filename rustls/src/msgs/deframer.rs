@@ -161,7 +161,7 @@ impl MessageDeframer {
                 self.record_info.insert(start as u64, RangeBufInfo::from(header_decoded.chunk_num, header_decoded.stream_id, end - start));
             }
             recv_buf = app_buffers.get_or_create_recv_buffer(header_decoded.stream_id as u64, None);
-               /* recv_buf = app_buffers.get_or_create_recv_buffer(header_decoded.stream_id as u64, None);*/
+
                 if recv_buf.next_recv_pkt_num != header_decoded.chunk_num {
                     continue
                 }
@@ -635,7 +635,7 @@ const DISCARD_THRESHOLD: usize =  MAX_FRAGMENT_LEN ;
 #[cfg(test)]
 mod tests {
     use std::cmp::Ordering;
-    use super::MessageDeframer;
+    use super::{DISCARD_THRESHOLD, MessageDeframer};
     use crate::msgs::message::{MAX_WIRE_SIZE, Message};
     use crate::record_layer::RecordLayer;
     use crate::{ContentType, Error, InvalidMessage};
@@ -951,5 +951,47 @@ mod tests {
             input_bytes(&mut d, &message),
         );
         assert!(input_bytes(&mut d, &message).is_err());
+    }
+    #[test]
+    fn discard_processed_data_if_threshold_reached(){
+        let mut receive_map = RecvBufMap::new();
+        const PAYLOAD_LEN1: usize = 10000;
+        const PAYLOAD_LEN2: usize = DISCARD_THRESHOLD;
+        let mut message1 = Vec::with_capacity(17000);
+        message1.push(0x17); // ApplicationData
+        message1.extend(&[0x03, 0x04]); // ProtocolVersion
+        message1.extend((PAYLOAD_LEN1 as u16).to_be_bytes()); // payload length
+        message1.extend(&[0; PAYLOAD_LEN1]);
+
+
+        let mut message2 = Vec::with_capacity(17000);
+        message2.push(0x17); // ApplicationData
+        message2.extend(&[0x03, 0x04]); // ProtocolVersion
+        message2.extend((PAYLOAD_LEN2 as u16).to_be_bytes()); // payload length
+        message2.extend(&[0; PAYLOAD_LEN2]);
+
+        let mut d = MessageDeframer::default();
+        let mut rl = RecordLayer::new();
+
+        rl.set_not_handshaking();
+
+        // 1000 is < DISCARD_THRESHOLD -> no discard
+        d.buf.extend_from_slice(message1.as_slice());
+        d.used += message1.len();
+        d.pop(&mut rl, &mut receive_map).unwrap();
+        assert!(d.has_pending());
+
+        // clear previous message
+        d.buf.clear();
+        d.used = 0;
+
+
+        d.buf.extend_from_slice(message2.as_slice());
+        d.used += message2.len();
+
+        // After writing this message, deframer will have data >= threshold and must discard it
+        d.pop(&mut rl, &mut receive_map).unwrap();
+        assert!(!d.has_pending());
+
     }
 }
