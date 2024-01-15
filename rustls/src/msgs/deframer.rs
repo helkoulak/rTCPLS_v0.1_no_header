@@ -60,6 +60,7 @@ impl MessageDeframer {
         } else if self.used == 0 {
             return Ok(None);
         }
+        let mut start = 0;
         let tag_len = record_layer.get_tag_length();
         let mut header_decoded = TcplsHeader::default();
         let mut payload_offset = 0;
@@ -71,7 +72,7 @@ impl MessageDeframer {
         // For records that decrypt as `Handshake`, we keep the current state of the joined
         // handshake message payload in `self.joining_hs`, appending to it as we see records.
         let expected_len = loop {
-            let start = match &self.joining_hs {
+            start = match &self.joining_hs {
                 Some(meta) => {
                     match meta.expected_len {
                         // We're joining a handshake payload, and we've seen the full payload.
@@ -251,7 +252,7 @@ impl MessageDeframer {
             // discard all of the bytes that we're previously buffered as handshake data.
             let end = meta.message.end;
             self.joining_hs = None;
-            self.discard(0, end );
+            self.discard(start, (end - start));
         }
 
         Ok(Some(Deframed {
