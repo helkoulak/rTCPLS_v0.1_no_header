@@ -86,7 +86,7 @@ impl MessageDeframer {
                 None => {
                         if !self.record_info.is_empty(){
                             for (offset, info) in self.record_info.iter() {
-                                if (app_buffers.get_or_create_recv_buffer(info.id as u64, None).next_recv_pkt_num == info.chunk_num) {
+                                if (app_buffers.get_or_create_recv_buffer(info.id as u64, None).next_recv_pkt_num == info.chunk_num && !info.processed) {
                                     end = *offset as usize;
                                     break
                                 }
@@ -980,11 +980,6 @@ mod tests {
         d.used += message1.len();
         d.pop(&mut rl, &mut receive_map).unwrap();
         assert!(d.has_pending());
-
-        // clear previous message
-        d.buf.clear();
-        d.used = 0;
-
 
         d.buf.extend_from_slice(message2.as_slice());
         d.used += message2.len();
