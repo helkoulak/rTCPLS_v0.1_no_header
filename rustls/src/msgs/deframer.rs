@@ -758,7 +758,7 @@ mod tests {
         pop_first(&mut d, &mut rl);
         assert!(d.has_pending());
         pop_second(&mut d, &mut rl);
-        assert!(!d.has_pending());
+        assert!(d.has_pending()); // Buffer content is < DISCARD_THRESHOLD
         assert!(d.last_error.is_none());
     }
 
@@ -785,7 +785,7 @@ mod tests {
         let mut rl = RecordLayer::new();
         pop_first(&mut d, &mut rl);
         pop_second(&mut d, &mut rl);
-        assert!(!d.has_pending());
+        assert!(d.has_pending());
         assert!(d.last_error.is_none());
     }
 
@@ -801,7 +801,7 @@ mod tests {
         let mut rl = RecordLayer::new();
         pop_first(&mut d, &mut rl);
         pop_second(&mut d, &mut rl);
-        assert!(!d.has_pending());
+        assert!(d.has_pending());
         assert!(d.last_error.is_none());
     }
 
@@ -817,7 +817,7 @@ mod tests {
         let mut rl = RecordLayer::new();
         pop_second(&mut d, &mut rl);
         pop_first(&mut d, &mut rl);
-        assert!(!d.has_pending());
+        assert!(d.has_pending());
         assert!(d.last_error.is_none());
     }
 
@@ -894,7 +894,7 @@ mod tests {
         let m = d.pop(&mut rl, &mut RecvBufMap::new()).unwrap().unwrap().message;
         assert_eq!(m.typ, ContentType::ApplicationData);
         assert_eq!(m.payload.0.len(), 0);
-        assert!(!d.has_pending());
+        assert!(d.has_pending());
         assert!(d.last_error.is_none());
     }
 
