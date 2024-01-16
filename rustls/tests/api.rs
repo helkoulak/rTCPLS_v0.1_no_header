@@ -360,7 +360,71 @@ fn receive_out_of_order_tls_records_single_stream() {
 
 
 #[test]
+fn receive_out_of_order_tls_records_multiple_streams() {
+    let server_config = Arc::new(make_server_config(KeyType::Rsa));
+    let client_config = make_client_config_with_versions(KeyType::Rsa, &[&rustls::version::TLS13]);
+    let (mut client, mut server, mut recv_svr, mut recv_clnt) =
+        make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
+    do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
+    // Prepare records
+    let mut record_1: Vec<u8> = Vec::new();
+    let mut record_2: Vec<u8> = Vec::new();
+    let mut record_3: Vec<u8> = Vec::new();
 
+    for value in 0..20000 {
+        record_1.push(value as u8);
+    }
+    for value in 20000..40000 {
+        record_2.push(value as u8);
+    }
+    for value in 40000..60000 {
+        record_3.push(value as u8);
+    }
+
+
+    // Write records to send buffer
+    let mut tcpls_client = TcplsSession::new(false);
+
+    tcpls_client.tls_conn = Some(Connection::from(client));
+
+    tcpls_client.stream_send(0, &record_1, false);
+    tcpls_client.stream_send(1, &record_2, false);
+    tcpls_client.stream_send(2, &record_3, false);
+
+
+    client = match tcpls_client.tls_conn.unwrap() {
+        Connection::Client(conn) => conn,
+        Connection::Server(conn) => panic!("wrong type of connection. Found server connection")
+    };
+
+    //Change the order of records in send buffers
+    client.shuffle_records(0, 1);
+    client.shuffle_records(1, 1);
+    client.shuffle_records(2, 1);
+
+    tcpls_client.tls_conn = Some(Connection::from(client));
+
+    let mut pipe = OtherSession::new(&mut server);
+
+    //Send all data
+    loop {
+        if tcpls_client.send_on_connection(0, Some(&mut pipe)).unwrap() == 0 {break}
+    }
+    //send records from client to server
+    server.process_new_packets(&mut recv_svr).expect("TODO: panic message");
+
+    //test that data was received in order
+    let mut buf = vec![0u8; 20000];
+    recv_svr.get_mut(0).unwrap().read(&mut buf).expect("TODO: panic message");
+    assert_eq!(record_1, buf);
+    recv_svr.get_mut(1).unwrap().read(&mut buf).expect("TODO: panic message");
+    assert_eq!(record_2, buf);
+    recv_svr.get_mut(2).unwrap().read(&mut buf).expect("TODO: panic message");
+    assert_eq!(record_3, buf);
+}
+
+
+#[test]
 fn send_fragmented_records_on_two_connections() {
     // Perform the handshake
     let server_config = Arc::new(make_server_config(KeyType::Rsa));
@@ -369,82 +433,61 @@ fn send_fragmented_records_on_two_connections() {
         make_pair_for_arc_configs(&Arc::new(client_config.clone()), &server_config);
     do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
 
-    // Create a second server connection to simulate a second TCP connection
-    let (mut client2, mut server2, mut recv_svr2, mut recv_clnt2) =
-        make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
 
+    // Prepare records
+    let record_1 = vec![1u8; 20000];
+    let record_2 = vec![2u8; 20000];
+    let record_3 = vec![3u8; 20000];
+
+    // Write records to send buffer
     let mut tcpls_client = TcplsSession::new(false);
 
+    tcpls_client.tls_conn = Some(Connection::from(client));
 
-    // Prepare data that should be sent
-
-    let m_1 = Message {
-        version: TLSv1_3,
-        payload: MessagePayload::ApplicationData(Payload(vec![1u8; 20]))
-    };
-    let m_2 = Message {
-        version: TLSv1_3,
-        payload: MessagePayload::ApplicationData(Payload(vec![2u8; 20]))
-    };
-    let m_3 = Message {
-        version: TLSv1_3,
-        payload: MessagePayload::ApplicationData(Payload(vec![3u8; 20]))
-    };
-    let m_4 = Message {
-        version: TLSv1_3,
-        payload: MessagePayload::ApplicationData(Payload(vec![4u8; 20]))
-    };
+    tcpls_client.stream_send(0, &record_1, false);
+    tcpls_client.stream_send(1, &record_2, false);
+    tcpls_client.stream_send(2, &record_3, false);
 
 
-    // Buffer data into four different streams
-       client.send_msg_plain(m_1, 0);
-        client.send_msg_plain(m_2, 1);
-        client.send_msg_plain(m_3, 2);
-        client.send_msg_plain(m_4, 3);
 
-
+    // Prepare an input buffer for comparison
     let mut input = Vec::new();
-    client.read_send_buffer(&mut input, 0);
-    client.read_send_buffer(&mut input, 1);
-    client.read_send_buffer(&mut input, 2);
-    client.read_send_buffer(&mut input, 3);
+   input.extend_from_slice(record_1.as_slice());
+    input.extend_from_slice(record_2.as_slice());
+    input.extend_from_slice(record_3.as_slice());
+
 
     //Create pipes that simulate TCP connections
     let mut pipe = OtherSession::new(&mut server);
-    let mut pipe2 = OtherSession::new(&mut server2);
-    // Create a receive buffer that is smaller than each record to force partial record sending
-    pipe.recv_map = RecvBufMap::new();
-
-    pipe.recv_map.get_or_create_recv_buffer(0, Some(10));
-
-    pipe2.recv_map = RecvBufMap::new();
-
-    pipe2.recv_map.get_or_create_recv_buffer(0, Some(10));
-
-    //Encapsulate inside TCPLS object to be able to test method send_on_connection
-    tcpls_client.tls_conn = Some(Connection::from(client));
 
     let mut sent = 0;
 
     let mut output: Vec<u8> = Vec::new();
 
-
+    // The receiving side will read a maximum of 4096 bytes in one shot. This will force fragmentation of records while sending.
+    // Send part of the data on one tcp connection
     loop {
-        //Send on two different TCP connections and construct output buffer from partially sent records
-        sent = tcpls_client.send_on_connection(0, Some(&mut pipe)).unwrap();
-        if sent == 0 { break }
-        output.extend_from_slice(pipe.recv_map.get_mut(0).unwrap().as_ref());
-        pipe.recv_map.get_mut(0).unwrap().offset -= sent as u64; // Empty space for the next send
-
-
-        sent = tcpls_client.send_on_connection(0, Some(&mut pipe2)).unwrap();
-        if sent == 0 { break }
-        output.extend_from_slice(pipe2.recv_map.get_mut(0).unwrap().as_ref());
-        pipe2.recv_map.get_mut(0).unwrap().offset -= sent as u64; // Empty space for the next send
-
-
+        sent += tcpls_client.send_on_connection(0, Some(&mut pipe)).unwrap();
+        if sent >= 30000 {break}
     }
 
+    let mut pipe2 = OtherSession::new(&mut server);
+
+    //Send the rest of data on the second connection
+
+    loop {
+        sent = tcpls_client.send_on_connection(0, Some(&mut pipe2)).unwrap();
+        if sent == 0 {break}
+    }
+
+    //Process data
+    server.process_new_packets(&mut recv_svr).unwrap();
+
+
+    //build output
+    output.extend_from_slice(&recv_svr.get_mut(0).unwrap().get_mut_consumed()[..20000]);
+    output.extend_from_slice(&recv_svr.get_mut(1).unwrap().get_mut_consumed()[..20000]);
+    output.extend_from_slice(&recv_svr.get_mut(2).unwrap().get_mut_consumed()[..20000]);
 
     assert_eq!(output, input);
 }
