@@ -1425,10 +1425,9 @@ where
     S: SideData,
 {
     fn write(&mut self, input: &[u8]) -> io::Result<usize> {
-        let mut recv_buf = self.recv_map.get_mut(0).unwrap();
-        let sent = recv_buf.get_mut().write(input).unwrap();
-        recv_buf.offset += sent as u64;
-        Ok(sent)
+        let mut buf = input.clone();
+        self.sess.read_tls(&mut buf)
+
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -3982,7 +3981,6 @@ fn test_client_sends_helloretryrequest() {
     let server_config =
         make_server_config_with_kx_groups(KeyType::Rsa, &[&rustls::kx_group::X25519]);
 
-    let mut app_bufs = RecvBufMap::new();
     let (mut client, mut server, mut recv_svr, mut recv_clnt) = make_pair_for_configs(client_config, server_config);
 
     // client sends hello
