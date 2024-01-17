@@ -248,6 +248,7 @@ fn emit_client_hello_for_retry(
             panic!("TLS 1.3 support is required for TCPLS");
         }
         exts.push(ClientExtension::TCPLS);
+        exts.push(ClientExtension::TcplsTokens(Vec::new()));
         cx.common.protocol = Tcpls;
     }
 

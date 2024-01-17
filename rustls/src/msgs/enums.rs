@@ -119,7 +119,7 @@ enum_builder! {
         TransportParameters => 0x0039,
         TCPLS => 0x64,
         TcplsJoin => 0x65,
-        TcplsToken => 0x66,
+        TcplsTokens => 0x66,
         NextProtocolNegotiation => 0x3374,
         ChannelId => 0x754f,
         RenegotiationInfo => 0xff01,

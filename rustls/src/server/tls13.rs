@@ -664,12 +664,14 @@ mod client_hello {
             ep.exts.push(ServerExtension::EarlyData);
         }
 
-        // Send TCPLS extension in EE if found in CH
+        // Send TCPLS extension in EE if found in CH and generate TCPLS tokens
 
         if hello.tcpls_extension_offered() {
             ep.exts.push(ServerExtension::TCPLS);
-
+            ep.exts.push(ServerExtension::make_tcpls_tokens())
         }
+
+
 
 
         let ee = Message {

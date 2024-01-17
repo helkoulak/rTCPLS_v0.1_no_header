@@ -207,6 +207,10 @@ impl TlsListElement for SignatureScheme {
     const SIZE_LEN: ListLength = ListLength::U16;
 }
 
+impl TlsListElement for TcplsToken {
+    const SIZE_LEN: ListLength = ListLength::U16;
+}
+
 #[derive(Clone, Debug)]
 pub enum ServerNamePayload {
     // Stored twice, bytes so we can round-trip, and DnsName for use
@@ -449,15 +453,14 @@ impl Codec for PresharedKeyOffer {
     }
 }
 
-/*
-//#[derive(Clone, Copy)]
+
+#[derive(Clone, Copy)]
 pub struct TcplsToken {
     len: usize,
     data: [u8; 32],
-    consumed: bool,
 }
-*/
-/*
+
+
 impl fmt::Debug for TcplsToken {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         super::base::hex(f, &self.data[..self.len])
@@ -497,15 +500,13 @@ impl Codec for TcplsToken {
             None => return Err(InvalidMessage::MissingData("TcplsToken")),
         };
 
-        let consumed = bool::read(r);
-
         let mut out = [0u8; 32];
         out[..len].clone_from_slice(&bytes[..len]);
-        Ok(Self { len,  })
+        Ok(Self { len, data: out})
     }
 }
 
-impl SessionId {
+impl TcplsToken {
     pub fn random() -> Result<Self, rand::GetRandomFailed> {
         let mut data = [0u8; 32];
         rand::fill_random(&mut data)?;
@@ -528,7 +529,7 @@ impl SessionId {
     }
 }
 
-*/
+
 
 // --- RFC6066 certificate status request ---
 wrapped_payload!(ResponderId, PayloadU16,);
@@ -644,6 +645,7 @@ pub enum ClientExtension {
     TransportParametersDraft(Vec<u8>),
     EarlyData,
     TCPLS,
+    TcplsTokens(Vec<TcplsToken>),
    // TcplsJoin(TcplsToken),
     Unknown(UnknownExtension),
 }
@@ -669,6 +671,7 @@ impl ClientExtension {
             Self::TransportParametersDraft(_) => ExtensionType::TransportParametersDraft,
             Self::EarlyData => ExtensionType::EarlyData,
             Self::TCPLS => ExtensionType::TCPLS,
+            Self::TcplsTokens(_) => ExtensionType::TcplsTokens,
             //Self::TcplsJoin(_) => ExtensionType::TcplsJoin,
             Self::Unknown(ref r) => r.typ,
         }
@@ -692,6 +695,7 @@ impl Codec for ClientExtension {
             | Self::EarlyData => {}
             Self::SessionTicket(ClientSessionTicket::Offer(ref r)) => r.encode(&mut sub),
             Self::Protocols(ref r) => r.encode(&mut sub),
+            Self::TcplsTokens(ref r) => r.encode(&mut sub),
             Self::SupportedVersions(ref r) => r.encode(&mut sub),
             Self::KeyShare(ref r) => r.encode(&mut sub),
             Self::PresharedKeyModes(ref r) => r.encode(&mut sub),
@@ -747,6 +751,7 @@ impl Codec for ClientExtension {
             }
             ExtensionType::EarlyData if !sub.any_left() => Self::EarlyData,
             ExtensionType::TCPLS if !sub.any_left() => Self::TCPLS,
+            ExtensionType::TcplsTokens => Self::TcplsTokens(Vec::read(&mut sub)?),
             _ => Self::Unknown(UnknownExtension::read(typ, &mut sub)),
         };
 
@@ -805,7 +810,7 @@ pub enum ServerExtension {
     TransportParametersDraft(Vec<u8>),
     EarlyData,
     TCPLS,
-  //  TcplsToken(TcplsToken),
+    TcplsTokens(Vec<TcplsToken>),
     Unknown(UnknownExtension),
 }
 
@@ -827,7 +832,7 @@ impl ServerExtension {
             Self::TransportParametersDraft(_) => ExtensionType::TransportParametersDraft,
             Self::EarlyData => ExtensionType::EarlyData,
             Self::TCPLS => ExtensionType::TCPLS,
-           // Self::TcplsToken(_) => ExtensionType::TcplsToken,
+            Self::TcplsTokens(_) => ExtensionType::TcplsTokens,
             Self::Unknown(ref r) => r.typ,
         }
     }
@@ -848,6 +853,7 @@ impl Codec for ServerExtension {
             | Self::EarlyData => {}
             Self::RenegotiationInfo(ref r) => r.encode(&mut sub),
             Self::Protocols(ref r) => r.encode(&mut sub),
+            Self::TcplsTokens(ref r) => r.encode(&mut sub),
             Self::KeyShare(ref r) => r.encode(&mut sub),
             Self::PresharedKey(r) => r.encode(&mut sub),
             Self::SignedCertificateTimestamp(ref r) => r.encode(&mut sub),
@@ -887,6 +893,7 @@ impl Codec for ServerExtension {
             }
             ExtensionType::EarlyData => Self::EarlyData,
             ExtensionType::TCPLS => Self::TCPLS,
+            ExtensionType::TcplsTokens => Self::TcplsTokens(Vec::read(&mut sub)?),
             _ => Self::Unknown(UnknownExtension::read(typ, &mut sub)),
         };
 
@@ -909,6 +916,16 @@ impl ServerExtension {
         let scts = Vec::read_bytes(&sctl).expect("invalid SCT list");
         Self::SignedCertificateTimestamp(scts)
     }
+
+    pub fn make_tcpls_tokens() -> Self {
+        let mut tokens: Vec<TcplsToken> = Vec::new();
+        //Generate five tokens
+        for i in 1..=5 {
+            tokens.push(TcplsToken::random().unwrap());
+        }
+        ServerExtension::TcplsTokens(tokens)
+    }
+
 }
 
 #[derive(Debug)]
