@@ -45,6 +45,7 @@ use ring::constant_time;
 
 use crate::sign::{CertifiedKey, Signer};
 use std::sync::Arc;
+use crate::Error::General;
 use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
 // Extensions we expect in plaintext in the ServerHello.
@@ -377,6 +378,14 @@ impl State<ClientConnectionData> for ExpectEncryptedExtensions {
                     }
                 }
             }
+        }
+
+        if exts.tcpls_tokens_extension_offered() {
+            cx.common.tcpls_tokens = match exts.get_tcpls_tokens() {
+                Some(tokens) => tokens,
+                None => return Err(General("Received empty tcpls tokens extension from server".to_string()))
+            }
+
         }
 
         if let Some(resuming_session) = self.resuming_session {

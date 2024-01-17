@@ -917,13 +917,13 @@ impl ServerExtension {
         Self::SignedCertificateTimestamp(scts)
     }
 
-    pub fn make_tcpls_tokens() -> Self {
+    pub fn make_tcpls_tokens() -> Vec<TcplsToken> {
         let mut tokens: Vec<TcplsToken> = Vec::new();
         //Generate five tokens
         for i in 1..=5 {
             tokens.push(TcplsToken::random().unwrap());
         }
-        ServerExtension::TcplsTokens(tokens)
+       tokens
     }
 
 }
@@ -1858,6 +1858,19 @@ pub trait HasServerExtensions {
     fn tcpls_extension_offered(&self) -> bool {
         self.find_extension(ExtensionType::TCPLS)
             .is_some()
+    }
+
+    fn tcpls_tokens_extension_offered(&self) -> bool {
+        self.find_extension(ExtensionType::TcplsTokens)
+            .is_some()
+    }
+
+    fn get_tcpls_tokens(&self) -> Option<Vec<TcplsToken>> {
+        let ext = self.find_extension(ExtensionType::TcplsTokens)?;
+        match *ext {
+            ServerExtension::TcplsTokens(ref tokens) => Some(tokens.clone()),
+            _ => None,
+        }
     }
 }
 

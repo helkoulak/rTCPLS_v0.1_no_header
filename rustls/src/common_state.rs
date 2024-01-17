@@ -9,6 +9,7 @@ use crate::msgs::base::Payload;
 use crate::msgs::deframer::MessageDeframer;
 use crate::msgs::enums::{AlertLevel, KeyUpdateRequest};
 use crate::msgs::fragmenter::MessageFragmenter;
+use crate::msgs::handshake::TcplsToken;
 use crate::msgs::message::{BorrowedPlainMessage, Message, PlainMessage};
 #[cfg(feature = "quic")]
 use crate::msgs::message::MessagePayload;
@@ -48,6 +49,8 @@ pub struct CommonState {
     pub(crate) message_deframer: MessageDeframer,
 
     pub(crate) received_plaintext: ChunkVecBuffer,
+
+    pub(crate) tcpls_tokens: Vec<TcplsToken>,
     sendable_plaintext: ChunkVecBuffer,
 
     queued_key_update_message: Option<Vec<u8>>,
@@ -81,6 +84,7 @@ impl CommonState {
             message_fragmenter: MessageFragmenter::default(),
 
             received_plaintext: ChunkVecBuffer::new(Some(DEFAULT_RECEIVED_PLAINTEXT_LIMIT)),
+            tcpls_tokens: Vec::new(),
             sendable_plaintext: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
             message_deframer: MessageDeframer::default(),
 
