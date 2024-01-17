@@ -1049,6 +1049,15 @@ impl ClientHelloPayload {
         }
     }
 
+
+    pub fn get_tcpls_tokens_extension(&self) -> Option<&Vec<TcplsToken>> {
+        let ext = self.find_extension(ExtensionType::TcplsTokens)?;
+        match *ext {
+            ClientExtension::TcplsTokens(ref req) => Some(req),
+            _ => None,
+        }
+    }
+
     pub fn get_quic_params_extension(&self) -> Option<Vec<u8>> {
         let ext = self
             .find_extension(ExtensionType::TransportParameters)
@@ -1143,6 +1152,11 @@ impl ClientHelloPayload {
 
     pub fn tcpls_extension_offered(&self) -> bool {
         self.find_extension(ExtensionType::TCPLS)
+            .is_some()
+    }
+
+    pub fn tcpls_tokens_extension_offered(&self) -> bool {
+        self.find_extension(ExtensionType::TcplsTokens)
             .is_some()
     }
 }

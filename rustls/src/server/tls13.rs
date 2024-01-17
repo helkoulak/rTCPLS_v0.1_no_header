@@ -668,6 +668,14 @@ mod client_hello {
 
         if hello.tcpls_extension_offered() {
             ep.exts.push(ServerExtension::TCPLS);
+        }
+
+        if hello.tcpls_tokens_extension_offered() {
+            if let Some(tokens) = hello.get_tcpls_tokens_extension() {
+                if !tokens.is_empty() {
+                    return Err(Error::General("Client sent non-empty TcplsTokens extension".to_string()))
+                }
+            }
             ep.exts.push(ServerExtension::make_tcpls_tokens())
         }
 
