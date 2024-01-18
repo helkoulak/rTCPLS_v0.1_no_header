@@ -306,7 +306,27 @@ fn buffered_server_data_sent() {
         check_read_app_buff(&mut server.reader_app_bufs(), b"hello", &mut recv_clnt, 0);
     }
 }
+#[test]
+fn receive_tcpls_tokens_from_server() {
+    let server_config = Arc::new(make_server_config(KeyType::Rsa));
+    let mut client_config = make_client_config_with_versions(KeyType::Rsa, &[&rustls::version::TLS13]);
+    client_config.enable_tcpls = true;
+    let (mut client, mut server, mut recv_svr, mut recv_clnt) =
+        make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
+    do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
+    let client_tokens = match client.tcpls_tokens() {
+        Some(tokens) => tokens,
+        None => panic!("cannot continue test. No tokens found")
+    };
+    let server_tokens = match server.tcpls_tokens() {
+        Some(tokens) => tokens,
+        None => panic!("cannot continue test. No tokens found")
+    };
+    for i in 0..server_tokens.len() {
+        assert_eq!(client_tokens.get(i), server_tokens.get(i));
+    }
 
+}
 #[test]
 fn receive_out_of_order_tls_records_single_stream() {
     let server_config = Arc::new(make_server_config(KeyType::Rsa));
