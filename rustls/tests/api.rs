@@ -4,6 +4,7 @@ use std::fmt;
 use std::io::{self, IoSlice, Read, Write};
 use std::mem;
 use std::ops::{Deref, DerefMut};
+use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -14,7 +15,7 @@ use rustls::internal::msgs::codec::Codec;
 use rustls::server::{AllowAnyAnonymousOrAuthenticatedClient, ClientHello, ResolvesServerCert};
 #[cfg(feature = "secret_extraction")]
 use rustls::ConnectionTrafficSecrets;
-use rustls::{sign, CertificateError, ConnectionCommon, Error, KeyLog, PeerIncompatible, PeerMisbehaved, SideData, Connection};
+use rustls::{sign, CertificateError, ConnectionCommon, Error, KeyLog, PeerIncompatible, PeerMisbehaved, SideData, Connection, AlertDescription};
 use rustls::{CipherSuite, ProtocolVersion, SignatureScheme};
 use rustls::{ClientConfig, ClientConnection};
 use rustls::{ServerConfig, ServerConnection};
@@ -4374,6 +4375,7 @@ use rustls::internal::msgs::{
     handshake::ClientExtension, handshake::HandshakePayload, message::Message,
     message::MessagePayload,
 };
+use rustls::internal::msgs::handshake::TcplsToken;
 use rustls::ProtocolVersion::TLSv1_3;
 
 use rustls::recvbuf::RecvBufMap;
@@ -4437,6 +4439,46 @@ fn test_server_rejects_empty_sni_extension() {
             PeerMisbehaved::ServerNameMustContainOneHostName
         ))
     );
+}
+
+#[test]
+fn test_server_rejects_non_empty_tcpls_tokens_extension() {
+    fn non_empty_tcpls_tokens(msg: &mut Message) -> Altered {
+        if let MessagePayload::Handshake { parsed, encoded } = &mut msg.payload {
+            if let HandshakePayload::ClientHello(ch) = &mut parsed.payload {
+                for mut ext in ch.extensions.iter_mut() {
+                    if let ClientExtension::TcplsTokens(tokens) = &mut ext {
+                        for i in 1..=5 {
+                            tokens.push(TcplsToken::random().unwrap());
+                        }
+                    }
+
+                }
+            }
+
+            *encoded = Payload::new(parsed.get_encoding());
+        }
+        Altered::InPlace
+    }
+    let server_config = Arc::new(make_server_config(KeyType::Rsa));
+    let mut client_config = make_client_config_with_versions(KeyType::Rsa, &[&rustls::version::TLS13]);
+    client_config.enable_tcpls = true;
+    let (mut client, mut server, mut recv_svr, mut recv_clnt) =
+        make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
+    let (mut conn_client, mut conn_server) = (Connection::Client(client), Connection::Server(server));
+    transfer_altered(&mut conn_client, non_empty_tcpls_tokens, &mut conn_server);
+    client = match conn_client {
+        Connection::Client(conn) => conn,
+        Connection::Server(conn) => panic!("Wrong connection type")
+    };
+    server = match conn_server {
+        Connection::Server(conn) => conn,
+        Connection::Client(conn) => panic!("Wrong connection type"),
+    };
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
+    }));
+    assert!(result.is_err());
 }
 
 #[test]
