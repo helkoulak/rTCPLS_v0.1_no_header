@@ -56,22 +56,26 @@ impl TcplsSession {
     pub fn tcpls_connect(
         &mut self,
         dest_address: SocketAddr,
-        config: Arc<ClientConfig>,
+        config: Option<Arc<ClientConfig>>,
         server_name: ServerName,
         is_server: bool,
     ) {
         assert_ne!(is_server, true);
 
-        let tls_config = config.clone();
+
         let socket = TcpStream::connect(dest_address).expect("TCP connection establishment failed");
 
         let new_id = self.create_tcpls_connection_object(socket, is_server);
 
         if new_id == DEFAULT_CONNECTION_ID {
-            let client_conn = ClientConnection::new(tls_config, server_name)
+            match config {
+                Some(ref client_config) => (),
+                None => panic!("No ClientConfig is supplied"),
+            };
+            let client_conn = ClientConnection::new(config.as_ref().unwrap().clone(), server_name)
                 .expect("Establishment of TLS session failed");
             let _ = self.tls_conn.insert(Connection::from(client_conn));
-            let _ = self.tls_config.insert(TlsConfig::Client(config.clone()));
+            let _ = self.tls_config.insert(TlsConfig::Client(config.unwrap()));
         }
 
     }
