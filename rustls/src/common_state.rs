@@ -152,6 +152,14 @@ impl CommonState {
         self.get_alpn_protocol()
     }
 
+    pub fn tcpls_tokens(&self) -> Option<&Vec<TcplsToken>> {
+        self.get_tcpls_tokens()
+    }
+
+    pub fn next_tcpls_token(&mut self) -> Option<TcplsToken> {
+        self.get_next_tcpls_token()
+    }
+
     /// Retrieves the ciphersuite agreed with the peer.
     ///
     /// This returns None until the ciphersuite is agreed.
@@ -596,6 +604,16 @@ impl CommonState {
         self.alpn_protocol
             .as_ref()
             .map(AsRef::as_ref)
+    }
+
+    pub(crate) fn get_tcpls_tokens(&self) -> Option<&Vec<TcplsToken>> {
+        if !self.tcpls_tokens.is_empty() {
+            Some(&self.tcpls_tokens)
+        }else { None }
+    }
+
+    pub(crate) fn get_next_tcpls_token(&mut self) -> Option<TcplsToken> {
+        self.tcpls_tokens.pop()
     }
 
     /// Returns true if the caller should call [`Connection::read_tls`] as soon
