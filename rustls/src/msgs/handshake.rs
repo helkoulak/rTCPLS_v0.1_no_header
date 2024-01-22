@@ -646,7 +646,7 @@ pub enum ClientExtension {
     EarlyData,
     TCPLS,
     TcplsTokens(Vec<TcplsToken>),
-   // TcplsJoin(TcplsToken),
+    TcplsJoin(TcplsToken),
     Unknown(UnknownExtension),
 }
 
@@ -672,7 +672,7 @@ impl ClientExtension {
             Self::EarlyData => ExtensionType::EarlyData,
             Self::TCPLS => ExtensionType::TCPLS,
             Self::TcplsTokens(_) => ExtensionType::TcplsTokens,
-            //Self::TcplsJoin(_) => ExtensionType::TcplsJoin,
+            Self::TcplsJoin(_) => ExtensionType::TcplsJoin,
             Self::Unknown(ref r) => r.typ,
         }
     }
@@ -700,7 +700,7 @@ impl Codec for ClientExtension {
             Self::KeyShare(ref r) => r.encode(&mut sub),
             Self::PresharedKeyModes(ref r) => r.encode(&mut sub),
             Self::PresharedKey(ref r) => r.encode(&mut sub),
-           // Self::TcplsJoin(ref r) => r.encode(&mut sub),
+            Self::TcplsJoin(ref r) => r.encode(&mut sub),
             Self::Cookie(ref r) => r.encode(&mut sub),
             Self::CertificateStatusRequest(ref r) => r.encode(&mut sub),
             Self::TransportParameters(ref r) | Self::TransportParametersDraft(ref r) => {
@@ -752,6 +752,7 @@ impl Codec for ClientExtension {
             ExtensionType::EarlyData if !sub.any_left() => Self::EarlyData,
             ExtensionType::TCPLS if !sub.any_left() => Self::TCPLS,
             ExtensionType::TcplsTokens => Self::TcplsTokens(Vec::read(&mut sub)?),
+            ExtensionType::TcplsJoin => Self::TcplsJoin(TcplsToken::read(&mut sub)?),
             _ => Self::Unknown(UnknownExtension::read(typ, &mut sub)),
         };
 
@@ -811,6 +812,7 @@ pub enum ServerExtension {
     EarlyData,
     TCPLS,
     TcplsTokens(Vec<TcplsToken>),
+    TcplsJoin(TcplsToken),
     Unknown(UnknownExtension),
 }
 
@@ -833,6 +835,7 @@ impl ServerExtension {
             Self::EarlyData => ExtensionType::EarlyData,
             Self::TCPLS => ExtensionType::TCPLS,
             Self::TcplsTokens(_) => ExtensionType::TcplsTokens,
+            Self::TcplsJoin(_) => ExtensionType::TcplsJoin,
             Self::Unknown(ref r) => r.typ,
         }
     }
@@ -854,6 +857,7 @@ impl Codec for ServerExtension {
             Self::RenegotiationInfo(ref r) => r.encode(&mut sub),
             Self::Protocols(ref r) => r.encode(&mut sub),
             Self::TcplsTokens(ref r) => r.encode(&mut sub),
+            Self::TcplsJoin(ref r) => r.encode(&mut sub),
             Self::KeyShare(ref r) => r.encode(&mut sub),
             Self::PresharedKey(r) => r.encode(&mut sub),
             Self::SignedCertificateTimestamp(ref r) => r.encode(&mut sub),
@@ -894,6 +898,7 @@ impl Codec for ServerExtension {
             ExtensionType::EarlyData => Self::EarlyData,
             ExtensionType::TCPLS => Self::TCPLS,
             ExtensionType::TcplsTokens => Self::TcplsTokens(Vec::read(&mut sub)?),
+            ExtensionType::TcplsJoin => Self::TcplsJoin(TcplsToken::read(&mut sub)?),
             _ => Self::Unknown(UnknownExtension::read(typ, &mut sub)),
         };
 

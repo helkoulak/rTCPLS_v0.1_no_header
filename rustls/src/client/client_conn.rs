@@ -26,6 +26,7 @@ use std::net::IpAddr;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::{fmt, io, mem};
+use std::env::join_paths;
 use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
 /// A trait for the ability to store client session data, so that sessions
@@ -551,6 +552,10 @@ impl ClientConnection {
         })
     }
 
+    pub fn join_tcp_connection(config: &Arc<ClientConfig>, common: &mut CommonState){
+        ConnectionCore::join_tcp_connection(config, common)
+    }
+
     /// Returns an `io::Write` implementer you can write bytes to
     /// to send TLS1.3 early data (a.k.a. "0-RTT data") to the server.
     ///
@@ -673,6 +678,11 @@ impl ConnectionCore<ClientConnectionData> {
 
     pub(crate) fn is_early_data_accepted(&self) -> bool {
         self.data.early_data.is_accepted()
+    }
+
+
+    pub(crate) fn join_tcp_connection(config: &Arc<ClientConfig>, common: &mut CommonState){
+        hs::start_fake_handshake(config, common)
     }
 }
 

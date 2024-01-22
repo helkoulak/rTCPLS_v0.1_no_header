@@ -70,12 +70,22 @@ impl TcplsSession {
         if new_id == DEFAULT_CONNECTION_ID {
             match config {
                 Some(ref client_config) => (),
-                None => panic!("No ClientConfig is supplied"),
+                None => panic!("No ClientConfig supplied"),
             };
             let client_conn = ClientConnection::new(config.as_ref().unwrap().clone(), server_name)
                 .expect("Establishment of TLS session failed");
             let _ = self.tls_conn.insert(Connection::from(client_conn));
             let _ = self.tls_config.insert(TlsConfig::Client(config.unwrap()));
+        } else {
+            let tls_config = match self.tls_config.as_ref().unwrap() {
+                TlsConfig::Client(ref config) => config,
+                TlsConfig::Server(ref config) => panic!("ClientConfig expected, found ServerConfig"),
+            };
+            let mut client_conn = match self.tls_conn.as_mut().unwrap() {
+                Connection::Client(conn) => conn,
+                Connection::Server(conn) => panic!("Server connection found. Client connection required")
+            };
+            ClientConnection::join_tcp_connection(tls_config, client_conn);
         }
 
     }

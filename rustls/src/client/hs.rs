@@ -88,6 +88,10 @@ fn find_session(
     found
 }
 
+pub(super) fn start_fake_handshake(config: &Arc<ClientConfig>, common: &mut CommonState) {
+    emit_fake_client_hello(config, common)
+}
+
 pub(super) fn start_handshake(
     server_name: ServerName,
     extra_exts: Vec<ClientExtension>,
@@ -189,7 +193,97 @@ struct ClientHelloInput {
     session_id: SessionId,
     server_name: ServerName,
 }
+fn emit_fake_client_hello(client_config: &Arc<ClientConfig>, common: &mut CommonState) {
 
+    let support_tls13 = client_config.supports_version(ProtocolVersion::TLSv1_3);
+
+    let mut supported_versions = Vec::new();
+    if support_tls13 {
+        supported_versions.push(ProtocolVersion::TLSv1_3);
+    }
+
+    // should be unreachable thanks to config builder
+    assert!(!supported_versions.is_empty());
+
+    let mut exts = vec![
+        ClientExtension::SupportedVersions(supported_versions),
+        ClientExtension::ECPointFormats(ECPointFormat::SUPPORTED.to_vec()),
+        ClientExtension::NamedGroups(
+            client_config
+                .kx_groups
+                .iter()
+                .map(|skxg| skxg.name)
+                .collect(),
+        ),
+        ClientExtension::SignatureAlgorithms(
+            client_config
+                .verifier
+                .supported_verify_schemes(),
+        ),
+        ClientExtension::ExtendedMasterSecretRequest,
+        ClientExtension::CertificateStatusRequest(CertificateStatusRequest::build_ocsp()),
+    ];
+
+
+
+    if client_config.enable_tcpls {
+        if !client_config.supports_version(ProtocolVersion::TLSv1_3) {
+            panic!("TLS 1.3 support is required for TCPLS");
+        }
+        let tcpls_token = match common.get_next_tcpls_token() {
+            Some(token) => token,
+            None => panic!("No tcpls token found"),
+        };
+
+        exts.push(ClientExtension::TcplsJoin(tcpls_token));
+    }
+
+
+    if support_tls13 {
+        // We could support PSK_KE here too. Such connections don't
+        // have forward secrecy, and are similar to TLS1.2 resumption.
+        let psk_modes = vec![PSKKeyExchangeMode::PSK_DHE_KE];
+        exts.push(ClientExtension::PresharedKeyModes(psk_modes));
+
+    }
+
+
+    let mut cipher_suites: Vec<_> = client_config
+        .cipher_suites
+        .iter()
+        .map(|cs| cs.suite())
+        .collect();
+    // We don't do renegotiation at all, in fact.
+    cipher_suites.push(CipherSuite::TLS_EMPTY_RENEGOTIATION_INFO_SCSV);
+
+    let mut chp = HandshakeMessagePayload {
+        typ: HandshakeType::ClientHello,
+        payload: HandshakePayload::ClientHello(ClientHelloPayload {
+            client_version: ProtocolVersion::TLSv1_2,
+            random: Random::new().unwrap(),
+            session_id: SessionId::empty(),
+            cipher_suites,
+            compression_methods: vec![Compression::Null],
+            extensions: exts,
+        }),
+    };
+
+
+
+    let ch = Message {
+        // "This value MUST be set to 0x0303 for all records generated
+        //  by a TLS 1.3 implementation other than an initial ClientHello
+        //  (i.e., one not generated after a HelloRetryRequest)"
+        version: ProtocolVersion::TLSv1_0,
+        payload: MessagePayload::handshake(chp),
+    };
+
+
+
+    trace!("Sending ClientHello {:#?}", ch);
+    common.send_msg(ch, false, DEFAULT_STREAM_ID);
+
+}
 fn emit_client_hello_for_retry(
     mut transcript_buffer: HandshakeHashBuffer,
     retryreq: Option<&HelloRetryRequest>,
