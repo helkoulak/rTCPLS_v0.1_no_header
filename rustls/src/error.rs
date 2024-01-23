@@ -239,6 +239,9 @@ pub enum PeerMisbehaved {
     UnsolicitedSctList,
     UnsolicitedServerHelloExtension,
     WrongGroupForKeyShare,
+    TcplsJoinExtensionNotFound,
+    EmptyTcplsJoinExtension,
+    InvalidTcplsJoinToken
 }
 
 impl From<PeerMisbehaved> for Error {
