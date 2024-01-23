@@ -1314,7 +1314,7 @@ impl ExpectTraffic {
         //Validate token
         if let Some(index) = cx.common.tcpls_tokens.iter().position(|&x| x == *token) {
             cx.common.tcpls_tokens.remove(index);
-            cx.common.multipath_ready = true;
+            cx.common.join_msg_received = true;
         } else {
             cx.common
                 .send_fatal_alert(IllegalParameter);

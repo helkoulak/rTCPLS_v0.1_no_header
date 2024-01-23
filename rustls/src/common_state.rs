@@ -51,6 +51,7 @@ pub struct CommonState {
     pub(crate) received_plaintext: ChunkVecBuffer,
 
     pub(crate) tcpls_tokens: Vec<TcplsToken>,
+    pub(crate) join_msg_received: bool,
     sendable_plaintext: ChunkVecBuffer,
 
     queued_key_update_message: Option<Vec<u8>>,
@@ -85,6 +86,7 @@ impl CommonState {
 
             received_plaintext: ChunkVecBuffer::new(Some(DEFAULT_RECEIVED_PLAINTEXT_LIMIT)),
             tcpls_tokens: Vec::new(),
+            join_msg_received: false,
             sendable_plaintext: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
             message_deframer: MessageDeframer::default(),
 
