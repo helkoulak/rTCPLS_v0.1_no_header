@@ -15,13 +15,13 @@ use crate::key::Certificate;
 #[cfg(feature = "logging")]
 use crate::log::{debug, trace, warn};
 use crate::msgs::codec::Codec;
-use crate::msgs::enums::KeyUpdateRequest;
-use crate::msgs::handshake::HandshakeMessagePayload;
+use crate::msgs::enums::{Compression, ExtensionType, KeyUpdateRequest};
+use crate::msgs::handshake::{ClientExtension, ClientHelloPayload, HandshakeMessagePayload, Random, ServerExtension, ServerHelloPayload, SessionId};
 use crate::msgs::handshake::HandshakePayload;
 use crate::msgs::handshake::{NewSessionTicketExtension, NewSessionTicketPayloadTLS13};
 use crate::msgs::message::{Message, MessagePayload};
 use crate::msgs::persist;
-use crate::rand;
+use crate::{rand, SignatureScheme};
 use crate::server::ServerConfig;
 #[cfg(feature = "secret_extraction")]
 use crate::suites::PartiallyExtractedSecrets;
@@ -30,7 +30,7 @@ use crate::tls13::key_schedule::{KeyScheduleTraffic, KeyScheduleTrafficWithClien
 use crate::tls13::Tls13CipherSuite;
 use crate::verify;
 
-use super::hs::{self, HandshakeHashOrBuffer, ServerContext};
+use super::hs::{self, decode_error, HandshakeHashOrBuffer, ServerContext};
 use super::server_conn::ServerConnectionData;
 
 use std::sync::Arc;
@@ -38,6 +38,9 @@ use std::sync::Arc;
 use ring::constant_time;
 
 pub(super) use client_hello::CompleteClientHelloHandling;
+use crate::AlertDescription::IllegalParameter;
+use crate::InvalidMessage::InvalidEmptyPayload;
+use crate::PeerMisbehaved::{InvalidTcplsJoinToken, TcplsJoinExtensionNotFound};
 use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
 mod client_hello {
@@ -273,7 +276,7 @@ mod client_hello {
                 }
 
                 if psk_offer.binders.is_empty() {
-                    return Err(hs::decode_error(
+                    return Err(decode_error(
                         cx.common,
                         PeerMisbehaved::MissingBinderInPskExtension,
                     ));
@@ -673,7 +676,7 @@ mod client_hello {
         if hello.tcpls_tokens_extension_offered() {
             if let Some(tokens) = hello.get_tcpls_tokens_extension() {
                 if !tokens.is_empty() {
-                    cx.common.send_fatal_alert(AlertDescription::IllegalParameter);
+                    cx.common.send_fatal_alert(IllegalParameter);
                     return Err(Error::General("Client sent non-empty TcplsTokens extension".to_string()))
                 }
             }
@@ -1245,6 +1248,81 @@ impl ExpectTraffic {
             .update_decrypter(common);
         Ok(())
     }
+    fn handle_fake_client_hello(&self,  m: &Message, cx: &mut ServerContext<'_>) {
+        let (client_hello, sig_schemes) = self.process_fake_client_hello(&m, cx).unwrap();
+        self.emit_fake_server_hello(cx, client_hello);
+    }
+
+    fn emit_fake_server_hello(&self, cx: &mut ServerContext, client_hello: &ClientHelloPayload) {
+        let mut extensions = Vec::new();
+
+
+        let kse = client_hello.get_keyshare_extension().unwrap();
+        extensions.push(ServerExtension::KeyShare(kse[0].clone()));
+        extensions.push(ServerExtension::SupportedVersions(ProtocolVersion::TLSv1_3));
+
+
+
+        let sh = Message {
+            version: ProtocolVersion::TLSv1_2,
+            payload: MessagePayload::handshake(HandshakeMessagePayload {
+                typ: HandshakeType::ServerHello,
+                payload: HandshakePayload::ServerHello(ServerHelloPayload {
+                    legacy_version: ProtocolVersion::TLSv1_2,
+                    random: Random::new().unwrap(),
+                    session_id: SessionId::empty(),
+                    cipher_suite: cx.common.suite.unwrap().suite(),
+                    compression_method: Compression::Null,
+                    extensions,
+                }),
+            }),
+        };
+
+
+
+        trace!("sending fake server hello {:?}", sh);
+        cx.common.send_msg(sh, false, DEFAULT_STREAM_ID);
+    }
+
+    fn process_fake_client_hello<'a>(
+        &self,
+        m: &'a Message,
+        cx: &mut ServerContext,
+    ) -> Result<(&'a ClientHelloPayload, Vec<SignatureScheme>), Error>{
+        let client_hello =
+            require_handshake_msg!(m, HandshakeType::ClientHello, HandshakePayload::ClientHello)?;
+        trace!("we got a clienthello {:?}", client_hello);
+
+
+        if client_hello.has_duplicate_extension() {
+            return Err(decode_error(
+                cx.common,
+                PeerMisbehaved::DuplicateClientHelloExtensions,
+            ));
+        }
+
+        let tcpls_join_ext = match client_hello.find_extension(ExtensionType::TcplsJoin) {
+            Some(tcpls_join) => tcpls_join,
+            None =>  return Err(Error::PeerMisbehaved(TcplsJoinExtensionNotFound))
+        };
+
+        let token = match tcpls_join_ext {
+            ClientExtension::TcplsJoin(ref token) => token,
+            _ => return Err(Error::InvalidMessage(InvalidEmptyPayload))
+        };
+
+        //Validate token
+        if let Some(index) = cx.common.tcpls_tokens.iter().position(|&x| x == *token) {
+            cx.common.tcpls_tokens.remove(index);
+            cx.common.multipath_ready = true;
+        } else {
+            cx.common
+                .send_fatal_alert(IllegalParameter);
+            return return Err(Error::PeerMisbehaved(InvalidTcplsJoinToken));
+        };
+
+        Ok((client_hello, Vec::from(&[SignatureScheme::ECDSA_NISTP256_SHA256].to_owned())))
+    }
 }
 
 impl State<ServerConnectionData> for ExpectTraffic {
@@ -1261,6 +1339,14 @@ impl State<ServerConnectionData> for ExpectTraffic {
                     },
                 ..
             } => self.handle_key_update(cx.common, &key_update)?,
+            MessagePayload::Handshake {
+                parsed:
+                HandshakeMessagePayload {
+                    payload: HandshakePayload::ClientHello(client_hello),
+                    ..
+                },
+                ..
+            } => self.handle_fake_client_hello(&m, cx),
             payload => {
                 return Err(inappropriate_handshake_message(
                     &payload,
