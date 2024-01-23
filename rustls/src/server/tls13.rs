@@ -1342,7 +1342,7 @@ impl State<ServerConnectionData> for ExpectTraffic {
             MessagePayload::Handshake {
                 parsed:
                 HandshakeMessagePayload {
-                    payload: HandshakePayload::ClientHello(client_hello),
+                    payload: HandshakePayload::ClientHello(ref client_hello),
                     ..
                 },
                 ..
