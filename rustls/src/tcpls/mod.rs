@@ -10,10 +10,7 @@ use std::sync::Arc;
 
 use mio::net::{TcpListener, TcpStream};
 
-use crate::{ALL_CIPHER_SUITES, ALL_VERSIONS, Certificate, ClientConfig, ClientConnection,
-            Connection, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, Error, IoState, KeyLogFile,
-            PrivateKey, RootCertStore, server, ServerConfig, ServerConnection, ServerName,
-            SupportedCipherSuite, SupportedProtocolVersion, Ticketer, version};
+use crate::{ALL_CIPHER_SUITES, ALL_VERSIONS, Certificate, ClientConfig, ClientConnection, Connection, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, Error, IoState, KeyLogFile, manual, PrivateKey, RootCertStore, server, ServerConfig, ServerConnection, ServerName, SupportedCipherSuite, SupportedProtocolVersion, Ticketer, version};
 use crate::recvbuf::RecvBufMap;
 use crate::tcpls::network_address::AddressMap;
 use crate::tcpls::stream::SimpleIdHashMap;
@@ -65,9 +62,7 @@ impl TcplsSession {
 
         let socket = TcpStream::connect(dest_address).expect("TCP connection establishment failed");
 
-        let new_id = self.create_tcpls_connection_object(socket, is_server);
-
-        if new_id == DEFAULT_CONNECTION_ID {
+        if self.next_conn_id == DEFAULT_CONNECTION_ID {
             match config {
                 Some(ref client_config) => (),
                 None => panic!("No ClientConfig supplied"),
@@ -76,6 +71,7 @@ impl TcplsSession {
                 .expect("Establishment of TLS session failed");
             let _ = self.tls_conn.insert(Connection::from(client_conn));
             let _ = self.tls_config.insert(TlsConfig::Client(config.unwrap()));
+            self.create_tcpls_connection_object(socket, is_server);
         } else {
             let tls_config = match self.tls_config.as_ref().unwrap() {
                 TlsConfig::Client(ref config) => config,
@@ -85,7 +81,13 @@ impl TcplsSession {
                 Connection::Client(conn) => conn,
                 Connection::Server(conn) => panic!("Server connection found. Client connection required")
             };
-            ClientConnection::join_tcp_connection(tls_config, client_conn);
+            match ClientConnection::join_tcp_connection(tls_config, client_conn) {
+                Ok(()) => {
+                    self.create_tcpls_connection_object(socket, is_server);
+                },
+                Err(e)=> Err(e),
+
+            };
         }
 
     }

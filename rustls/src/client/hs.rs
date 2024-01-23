@@ -88,7 +88,7 @@ fn find_session(
     found
 }
 
-pub(super) fn start_fake_handshake(config: &Arc<ClientConfig>, common: &mut CommonState) {
+pub(super) fn start_fake_handshake(config: &Arc<ClientConfig>, common: &mut CommonState) -> Result<(), Error>{
     emit_fake_client_hello(config, common)
 }
 
@@ -193,7 +193,7 @@ struct ClientHelloInput {
     session_id: SessionId,
     server_name: ServerName,
 }
-fn emit_fake_client_hello(client_config: &Arc<ClientConfig>, common: &mut CommonState) {
+fn emit_fake_client_hello(client_config: &Arc<ClientConfig>, common: &mut CommonState) -> Result<(), Error>{
 
     let support_tls13 = client_config.supports_version(ProtocolVersion::TLSv1_3);
 
@@ -228,11 +228,11 @@ fn emit_fake_client_hello(client_config: &Arc<ClientConfig>, common: &mut Common
 
     if client_config.enable_tcpls {
         if !client_config.supports_version(ProtocolVersion::TLSv1_3) {
-            panic!("TLS 1.3 support is required for TCPLS");
+            return Err(Error::General("TLS 1.3 support is required for TCPLS".to_string()))
         }
         let tcpls_token = match common.get_next_tcpls_token() {
             Some(token) => token,
-            None => panic!("No tcpls token found"),
+            None => return Err(Error::General("No tcpls token found".to_string())),
         };
 
         exts.push(ClientExtension::TcplsJoin(tcpls_token));
@@ -282,6 +282,7 @@ fn emit_fake_client_hello(client_config: &Arc<ClientConfig>, common: &mut Common
 
     trace!("Sending ClientHello {:#?}", ch);
     common.send_msg(ch, false, DEFAULT_STREAM_ID);
+    Ok(())
 
 }
 fn emit_client_hello_for_retry(

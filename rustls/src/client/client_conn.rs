@@ -552,7 +552,7 @@ impl ClientConnection {
         })
     }
 
-    pub fn join_tcp_connection(config: &Arc<ClientConfig>, common: &mut CommonState){
+    pub fn join_tcp_connection(config: &Arc<ClientConfig>, common: &mut CommonState) -> Result<(), Error>{
         ConnectionCore::join_tcp_connection(config, common)
     }
 
@@ -681,7 +681,7 @@ impl ConnectionCore<ClientConnectionData> {
     }
 
 
-    pub(crate) fn join_tcp_connection(config: &Arc<ClientConfig>, common: &mut CommonState){
+    pub(crate) fn join_tcp_connection(config: &Arc<ClientConfig>, common: &mut CommonState) -> Result<(), Error>{
         hs::start_fake_handshake(config, common)
     }
 }
