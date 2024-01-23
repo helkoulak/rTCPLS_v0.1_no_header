@@ -680,7 +680,7 @@ mod client_hello {
                     return Err(Error::General("Client sent non-empty TcplsTokens extension".to_string()))
                 }
             }
-            cx.common.tcpls_tokens = ServerExtension::make_tcpls_tokens();
+            cx.common.tcpls_tokens = ServerExtension::make_tcpls_tokens(config.max_tcpls_tokens_cap);
             ep.exts.push(ServerExtension::TcplsTokens(cx.common.tcpls_tokens.clone()));
         }
 

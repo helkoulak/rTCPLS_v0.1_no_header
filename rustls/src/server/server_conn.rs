@@ -302,6 +302,8 @@ pub struct ServerConfig {
     /// The default is false
     pub enable_tcpls: bool,
 
+    pub max_tcpls_tokens_cap: usize,
+
 
 }
 

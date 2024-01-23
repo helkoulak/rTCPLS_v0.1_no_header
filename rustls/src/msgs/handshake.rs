@@ -922,10 +922,10 @@ impl ServerExtension {
         Self::SignedCertificateTimestamp(scts)
     }
 
-    pub fn make_tcpls_tokens() -> Vec<TcplsToken> {
-        let mut tokens: Vec<TcplsToken> = Vec::new();
+    pub fn make_tcpls_tokens(tokens_count: usize) -> Vec<TcplsToken> {
+        let mut tokens: Vec<TcplsToken> = Vec::with_capacity(tokens_count);
         //Generate five tokens
-        for i in 1..=5 {
+        for i in 1..=tokens.len() {
             tokens.push(TcplsToken::random().unwrap());
         }
        tokens
