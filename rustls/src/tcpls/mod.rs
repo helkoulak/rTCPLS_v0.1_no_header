@@ -58,39 +58,67 @@ impl TcplsSession {
         is_server: bool,
     ) {
         assert_ne!(is_server, true);
-
+        assert_eq!(self.next_conn_id, DEFAULT_CONNECTION_ID);
 
         let socket = TcpStream::connect(dest_address).expect("TCP connection establishment failed");
 
-        if self.next_conn_id == DEFAULT_CONNECTION_ID {
-            match config {
-                Some(ref client_config) => (),
-                None => panic!("No ClientConfig supplied"),
-            };
-            let client_conn = ClientConnection::new(config.as_ref().unwrap().clone(), server_name)
-                .expect("Establishment of TLS session failed");
-            let _ = self.tls_conn.insert(Connection::from(client_conn));
-            let _ = self.tls_config.insert(TlsConfig::Client(config.unwrap()));
-            self.create_tcpls_connection_object(socket, is_server);
-        } else {
-            let tls_config = match self.tls_config.as_ref().unwrap() {
-                TlsConfig::Client(ref config) => config,
-                TlsConfig::Server(ref config) => panic!("ClientConfig expected, found ServerConfig"),
-            };
-            let mut client_conn = match self.tls_conn.as_mut().unwrap() {
-                Connection::Client(conn) => conn,
-                Connection::Server(conn) => panic!("Server connection found. Client connection required")
-            };
-            match ClientConnection::join_tcp_connection(tls_config, client_conn) {
-                Ok(()) => {
-                    self.create_tcpls_connection_object(socket, is_server);
-                },
-                Err(e)=> Err(e),
+        match config {
+            Some(ref client_config) => (),
+            None => panic!("No ClientConfig supplied"),
+        };
+        let client_conn = ClientConnection::new(config.as_ref().unwrap().clone(), server_name)
+            .expect("Establishment of TLS session failed");
+        let _ = self.tls_conn.insert(Connection::from(client_conn));
+        let _ = self.tls_config.insert(TlsConfig::Client(config.unwrap()));
 
-            };
-        }
+        self.create_tcpls_connection_object(socket, false);
 
     }
+
+    pub fn join_tcp_connection( &mut self, dest_address: SocketAddr) -> Result<(), Error> {
+        assert_eq!(self.tls_conn.as_ref().unwrap().side, Side::Client);
+
+        let mut socket = TcpStream::connect(dest_address).expect("TCP connection establishment failed");
+
+        let mut client_conn = match self.tls_conn.as_mut().unwrap() {
+            Connection::Client(conn) => conn,
+            Connection::Server(conn) => panic!("Server connection found. Client connection required")
+        };
+
+        // Emit fake client hello containing the TcplsJoin extension
+
+        let mut ch_payload = get_sample_clienthellopayload();
+
+        //Get next available token and push TcplsJoin Extension in ch payload
+        let tcpls_token = match client_conn.get_next_tcpls_token() {
+            Some(token) => token,
+            None => return Err(Error::General("No tcpls token found".to_string())),
+        };
+        ch_payload.extensions.push(ClientExtension::TcplsJoin(tcpls_token));
+
+
+        let mut chp = HandshakeMessagePayload {
+            typ: HandshakeType::ClientHello,
+            payload: HandshakePayload::ClientHello(ch_payload)
+        };
+
+        let ch = Message {
+            version: ProtocolVersion::TLSv1_0,
+            payload: MessagePayload::handshake(chp),
+        };
+
+            trace!("Sending fake ClientHello {:#?}", ch);
+            socket.write(PlainMessage::from(ch)
+                .into_unencrypted_opaque()
+                .encode()
+                .as_slice())
+                .expect("Sending fake client hello failed");
+
+        self.outstanding_tcp_conns.insert(self.next_conn_id as u64, OutstandingTcpConnection::new(socket));
+        self.next_conn_id += 1;
+        Ok(())
+    }
+
 
     pub fn create_tcpls_connection_object(&mut self, socket: TcpStream, is_server: bool) -> u32 {
         let mut tcp_conn = TcpConnection::new(socket, self.next_conn_id);
@@ -183,12 +211,7 @@ impl TcplsSession {
                     (Error) => return Err(Error::General("Data sending on socket failed".to_string())),
 
                 };
-               /* let chunk = stream.send.pop().unwrap();
-                let chunk_len = chunk.len();
 
-                sent = socket
-                    .write(chunk.as_slice())
-                    .unwrap();*/
                 len -= sent;
                 done += sent;
                 //stream.send.consume_chunk(sent, chunk);
@@ -573,15 +596,19 @@ pub fn server_new_tls_connection(config: Arc<ServerConfig>) -> ServerConnection 
     ServerConnection::new(config).expect("Establishing a TLS session has failed")
 }
 
-// #[test]
-/*fn test_prep_crypto_context(){
+fn get_sample_clienthellopayload() -> ClientHelloPayload {
+    ClientHelloPayload {
+        client_version: ProtocolVersion::TLSv1_2,
+        random: Random::from([0; 32]),
+        session_id: SessionId::empty(),
+        cipher_suites: vec![CipherSuite::TLS_DH_anon_WITH_AES_256_CBC_SHA256],
+        compression_methods: vec![Compression::Null],
+        extensions: vec![
+            ClientExtension::ECPointFormats(ECPointFormat::SUPPORTED.to_vec()),
+            ClientExtension::NamedGroups(vec![NamedGroup::X25519]),
+            ClientExtension::SignatureAlgorithms(vec![SignatureScheme::ECDSA_NISTP256_SHA256]),
+            ClientExtension::SupportedVersions(vec![ProtocolVersion::TLSv1_3]),
 
- let mut iv= Iv::copy(&[0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]) ;
- let mut iv_vec = vec![iv];
-
- let iv_2= Iv::copy(&[0x0C, 0x0B, 0x0A, 0x08, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]) ;
- let connection_id:u32 = 0x01;
- derive_connection_iv(&mut iv_vec, connection_id);
-assert_eq!(iv_2.value(), iv_vec.get(1).unwrap().value())
-
-}*/
+        ],
+    }
+}
