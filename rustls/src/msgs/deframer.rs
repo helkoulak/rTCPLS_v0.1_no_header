@@ -43,7 +43,7 @@ pub struct MessageDeframer {
     pub(crate) record_info: BTreeMap<u64, RangeBufInfo>,
 
     /// Range of offsets of processed data in deframer buffer.
-    /// Contiguous range starts from offset 0 and will be discarded if >= DISCARD_THRESHOLD
+    /// Contiguous range of bytes will be discarded if >= DISCARD_THRESHOLD
     pub(crate) processed_range: Range<u64>,
 }
 
