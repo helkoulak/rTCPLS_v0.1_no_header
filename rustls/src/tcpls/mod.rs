@@ -5,7 +5,7 @@
 use std::{io, u32, vec};
 use std::fs;
 use std::io::{BufReader, Read, Write};
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::{Shutdown, SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 use log::trace;
 
@@ -16,7 +16,7 @@ use crate::AlertDescription::IllegalParameter;
 use crate::InvalidMessage::{InvalidContentType, InvalidEmptyPayload};
 use crate::msgs::codec;
 use crate::msgs::enums::{Compression, ECPointFormat, ExtensionType};
-use crate::msgs::handshake::{ClientExtension, ClientHelloPayload, HandshakeMessagePayload, HandshakePayload, Random, ServerExtension, ServerHelloPayload, SessionId};
+use crate::msgs::handshake::{ClientExtension, ClientHelloPayload, HandshakeMessagePayload, HandshakePayload, HasServerExtensions, Random, ServerExtension, ServerHelloPayload, SessionId};
 use crate::msgs::message::{Message, MessageError, MessagePayload, OpaqueMessage, PlainMessage};
 use crate::PeerMisbehaved::{InvalidTcplsJoinToken, TcplsJoinExtensionNotFound};
 use crate::recvbuf::RecvBufMap;
@@ -312,12 +312,19 @@ impl TcplsSession {
         //Validate token received and send fake sh
         match self.tls_conn.unwrap().side {
             Side::Client => {
-                 if msg.is_handshake_type(HandshakeType::ServerHello)
+                //
+                 if !msg.is_handshake_type(HandshakeType::ServerHello) {
+                     self.outstanding_tcp_conns.remove(&(token.0 as u64)).unwrap()
+                         .socket.shutdown(Shutdown::Both).expect("Error while shutting connection down");
+                     return Err(Error::General("Expected Server Hello".to_string()))
+                 }
             },
             Side::Server => {
                 if msg.is_handshake_type(HandshakeType::ClientHello) {
                     self.handle_fake_client_hello(&msg, token).expect("Processing ch failed");
                 } else {
+                    self.outstanding_tcp_conns.remove(&(token.0 as u64)).unwrap()
+                        .socket.shutdown(Shutdown::Both).expect("Error while shutting connection down");
                     return Err(Error::General("Expected Client Hello".to_string()))
                 }
 
@@ -326,6 +333,13 @@ impl TcplsSession {
 
 
         //Upon successful token validation join socket into tcpls session
+        self.join_outstanding_tcp_conn(&token);
+
+        Ok(())
+
+    }
+
+    fn join_outstanding_tcp_conn(&mut self, token: &Token) {
         let socket = self.outstanding_tcp_conns.remove(&(token.0 as u64)).unwrap().socket;
         self.tcp_connections.insert(token.0 as u64, TcpConnection {
             connection_id: token.0 as u32,
@@ -337,9 +351,6 @@ impl TcplsSession {
             is_primary: false,
             state: TcplsConnectionState::CLOSED,
         });
-
-        Ok(())
-
     }
     fn handle_fake_client_hello(&mut self,  m: &Message, token: Token) -> Result<(), Error>{
         let client_hello = match self.process_fake_client_hello(&m) {
