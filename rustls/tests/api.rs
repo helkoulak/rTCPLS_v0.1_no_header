@@ -346,6 +346,50 @@ fn clients_rejects_empty_tcpls_tokens_extension_from_server() {
 
     assert!(result.is_err())
 }
+
+
+#[test]
+fn receive_same_number_of_tcpls_tokens_from_server() {
+    // Generate 5 tokens on server side and receive 5 on client side
+    let mut server_config = make_server_config(KeyType::Rsa);
+    server_config.max_tcpls_tokens_cap = 5;
+    let mut client_config = make_client_config_with_versions(KeyType::Rsa, &[&rustls::version::TLS13]);
+    client_config.enable_tcpls = true;
+    let (mut client, mut server, mut recv_svr, mut recv_clnt) =
+        make_pair_for_arc_configs(&Arc::new(client_config), &Arc::new(server_config));
+    do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
+    let client_tokens = match client.tcpls_tokens() {
+        Some(tokens) => tokens,
+        None => panic!("cannot continue test. No tokens found")
+    };
+    let server_tokens = match server.tcpls_tokens() {
+        Some(tokens) => tokens,
+        None => panic!("cannot continue test. No tokens found")
+    };
+    for i in 0..=5 {
+        assert_eq!(client_tokens.get(i), server_tokens.get(i));
+    }
+    // Generate 20 tokens on server side and receive 20 on client side
+    let mut server_config = make_server_config(KeyType::Rsa);
+    server_config.max_tcpls_tokens_cap = 20;
+    let mut client_config = make_client_config_with_versions(KeyType::Rsa, &[&rustls::version::TLS13]);
+    client_config.enable_tcpls = true;
+    let (mut client, mut server, mut recv_svr, mut recv_clnt) =
+        make_pair_for_arc_configs(&Arc::new(client_config), &Arc::new(server_config));
+    do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
+    let client_tokens = match client.tcpls_tokens() {
+        Some(tokens) => tokens,
+        None => panic!("cannot continue test. No tokens found")
+    };
+    let server_tokens = match server.tcpls_tokens() {
+        Some(tokens) => tokens,
+        None => panic!("cannot continue test. No tokens found")
+    };
+    for i in 0..=20 {
+        assert_eq!(client_tokens.get(i), server_tokens.get(i));
+    }
+
+}
 #[test]
 fn receive_out_of_order_tls_records_single_stream() {
     let server_config = Arc::new(make_server_config(KeyType::Rsa));
