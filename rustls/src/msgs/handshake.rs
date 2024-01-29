@@ -925,7 +925,7 @@ impl ServerExtension {
     pub fn make_tcpls_tokens(tokens_count: usize) -> Vec<TcplsToken> {
         let mut tokens: Vec<TcplsToken> = Vec::with_capacity(tokens_count);
         //Generate five tokens
-        for i in 1..=tokens.len() {
+        for i in 1..=tokens_count {
             tokens.push(TcplsToken::random().unwrap());
         }
        tokens
