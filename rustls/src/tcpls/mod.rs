@@ -310,7 +310,7 @@ impl TcplsSession {
         let msg = Message::try_from(m.into_plain_message()).unwrap();
 
         //Validate token received and send fake sh
-        match self.tls_conn.unwrap().side {
+        match self.tls_conn.as_ref().unwrap().side {
             Side::Client => {
                 //
                  if !msg.is_handshake_type(HandshakeType::ServerHello) {
@@ -378,7 +378,7 @@ impl TcplsSession {
                     legacy_version: ProtocolVersion::TLSv1_2,
                     random: Random::new().unwrap(),
                     session_id: SessionId::empty(),
-                    cipher_suite: self.tls_conn.unwrap().suite.unwrap().suite(),
+                    cipher_suite: self.tls_conn.as_ref().unwrap().suite.unwrap().suite().clone(),
                     compression_method: Compression::Null,
                     extensions,
                 }),
@@ -417,11 +417,11 @@ impl TcplsSession {
         };
 
         //Validate token
-        if let Some(index) = self.tls_conn.unwrap().tcpls_tokens.iter().position(|&x| x == *token) {
-            self.tls_conn.unwrap().tcpls_tokens.remove(index);
+        if let Some(index) = self.tls_conn.as_mut().unwrap().tcpls_tokens.iter().position(|&x| x == *token) {
+            self.tls_conn.as_mut().unwrap().tcpls_tokens.remove(index);
             /*cx.common.join_msg_received = true;*/
         } else {
-            self.tls_conn.unwrap()
+            self.tls_conn.as_mut().unwrap()
                 .send_fatal_alert(IllegalParameter);
             return Err(Error::PeerMisbehaved(InvalidTcplsJoinToken));
         };

@@ -1265,14 +1265,6 @@ impl State<ServerConnectionData> for ExpectTraffic {
                     },
                 ..
             } => self.handle_key_update(cx.common, &key_update)?,
-            MessagePayload::Handshake {
-                parsed:
-                HandshakeMessagePayload {
-                    payload: HandshakePayload::ClientHello(ref client_hello),
-                    ..
-                },
-                ..
-            } => self.handle_fake_client_hello(&m, cx),
             payload => {
                 return Err(inappropriate_handshake_message(
                     &payload,
