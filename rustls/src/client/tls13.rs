@@ -383,7 +383,11 @@ impl State<ClientConnectionData> for ExpectEncryptedExtensions {
         if exts.tcpls_tokens_extension_offered() {
             cx.common.tcpls_tokens = match exts.get_tcpls_tokens() {
                 Some(tokens) => tokens,
-                None => return Err(General("Received empty tcpls tokens extension from server".to_string()))
+                None => return Err(General("No TCPLS Tokens received from server".to_string()))
+            };
+
+            if cx.common.tcpls_tokens.is_empty()  {
+                return Err(General("Empty TCPLS Tokens' extension received from server".to_string()))
             }
 
         }
