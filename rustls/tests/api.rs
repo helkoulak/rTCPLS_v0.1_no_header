@@ -8,6 +8,7 @@ use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
+use mio::Token;
 
 use rustls::client::{ResolvesClientCert, Resumption};
 use rustls::internal::msgs::base::Payload;
@@ -309,11 +310,12 @@ fn buffered_server_data_sent() {
 }
 #[test]
 fn receive_tcpls_tokens_from_server() {
-    let server_config = Arc::new(make_server_config(KeyType::Rsa));
+    let mut server_config = make_server_config(KeyType::Rsa);
+    server_config.max_tcpls_tokens_cap = 5;
     let mut client_config = make_client_config_with_versions(KeyType::Rsa, &[&rustls::version::TLS13]);
     client_config.enable_tcpls = true;
     let (mut client, mut server, mut recv_svr, mut recv_clnt) =
-        make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
+        make_pair_for_arc_configs(&Arc::new(client_config), &Arc::new(server_config));
     do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
     let client_tokens = match client.tcpls_tokens() {
         Some(tokens) => tokens,
@@ -429,7 +431,7 @@ fn receive_out_of_order_tls_records_multiple_streams() {
 
     //Send all data
     loop {
-        if tcpls_client.send_on_connection(0, Some(&mut pipe)).unwrap() == 0 {break}
+        if tcpls_client.send_on_connection(&Token(0), Some(&mut pipe)).unwrap() == 0 {break}
     }
     //send records from client to server
     server.process_new_packets(&mut recv_svr).expect("TODO: panic message");
@@ -488,7 +490,7 @@ fn send_fragmented_records_on_two_connections() {
     // The receiving side will read a maximum of 4096 bytes in one shot. This will force fragmentation of records while sending.
     // Send part of the data on one tcp connection
     loop {
-        sent += tcpls_client.send_on_connection(0, Some(&mut pipe)).unwrap();
+        sent += tcpls_client.send_on_connection(&Token(0), Some(&mut pipe)).unwrap();
         if sent >= 30000 {break}
     }
 
@@ -497,7 +499,7 @@ fn send_fragmented_records_on_two_connections() {
     //Send the rest of data on the second connection
 
     loop {
-        sent = tcpls_client.send_on_connection(0, Some(&mut pipe2)).unwrap();
+        sent = tcpls_client.send_on_connection(&Token(0), Some(&mut pipe2)).unwrap();
         if sent == 0 {break}
     }
 
