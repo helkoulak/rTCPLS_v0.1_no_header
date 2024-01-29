@@ -1,7 +1,7 @@
 //! Assorted public API tests.
 use std::cell::RefCell;
 use std::fmt;
-use std::io::{self, IoSlice, Read, Write};
+use std::io::{self, ErrorKind, IoSlice, Read, Write};
 use std::mem;
 use std::ops::{Deref, DerefMut};
 use std::panic::AssertUnwindSafe;
@@ -16,12 +16,13 @@ use rustls::internal::msgs::codec::Codec;
 use rustls::server::{AllowAnyAnonymousOrAuthenticatedClient, ClientHello, ResolvesServerCert};
 #[cfg(feature = "secret_extraction")]
 use rustls::ConnectionTrafficSecrets;
-use rustls::{sign, CertificateError, ConnectionCommon, Error, KeyLog, PeerIncompatible, PeerMisbehaved, SideData, Connection, AlertDescription};
+use rustls::{sign, CertificateError, ConnectionCommon, Error, KeyLog, PeerIncompatible, PeerMisbehaved, SideData, Connection};
 use rustls::{CipherSuite, ProtocolVersion, SignatureScheme};
 use rustls::{ClientConfig, ClientConnection};
 use rustls::{ServerConfig, ServerConnection};
 use rustls::{Stream, StreamOwned};
 use rustls::{SupportedCipherSuite, ALL_CIPHER_SUITES};
+use rustls::Error::General;
 use rustls::recvbuf::ReaderAppBufs;
 
 mod common;
@@ -329,6 +330,21 @@ fn receive_tcpls_tokens_from_server() {
         assert_eq!(client_tokens.get(i), server_tokens.get(i));
     }
 
+}
+
+#[test]
+fn clients_rejects_empty_tcpls_tokens_extension_from_server() {
+    let mut server_config = make_server_config(KeyType::Rsa);
+    let mut client_config = make_client_config_with_versions(KeyType::Rsa, &[&rustls::version::TLS13]);
+    client_config.enable_tcpls = true;
+    let (mut client, mut server, mut recv_svr, mut recv_clnt) =
+        make_pair_for_arc_configs(&Arc::new(client_config), &Arc::new(server_config));
+
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
+    }));
+
+    assert!(result.is_err())
 }
 #[test]
 fn receive_out_of_order_tls_records_single_stream() {
