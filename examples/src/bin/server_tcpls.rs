@@ -18,6 +18,7 @@ extern crate serde_derive;
 extern crate core;
 
 use docopt::Docopt;
+use mio::Token;
 
 use ring::digest;
 
@@ -28,7 +29,7 @@ use rustls::recvbuf::RecvBufMap;
 use rustls::tcpls::{server_create_listener, TcplsSession};
 
 // Token for our listening socket.
-const LISTENER: mio::Token = mio::Token(0);
+const LISTENER: mio::Token = mio::Token(100);
 
 // Which mode the server operates in.
 #[derive(Clone)]
@@ -60,7 +61,7 @@ impl TlsServer {
         Self {
             server,
             connections: HashMap::new(),
-            next_id: 2,
+            next_id: 0,
             tls_config: cfg,
             mode,
         }
@@ -178,8 +179,9 @@ impl OpenConnection {
         // If we're readable: read some TLS.  Then
         // see if that yielded new plaintext.  Then
         // see if the backend is readable too.
+        let token = &ev.token();
         if ev.is_readable() {
-            self.do_read(recv_map);
+            self.do_read(recv_map, token);
             if !self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() {
                 self.verify_received(recv_map);
             }
@@ -269,9 +271,9 @@ impl OpenConnection {
         self.back = None;
     }
 
-    fn do_read(&mut self, app_buffers: &mut RecvBufMap) {
+    fn do_read(&mut self, app_buffers: &mut RecvBufMap, token: &Token) {
         // Read some TLS data.
-        match self.tcpls_session.recv_on_connection(0) {
+        match self.tcpls_session.recv_on_connection(token) {
             Err(err) => {
                 if let io::ErrorKind::WouldBlock = err.kind() {
                     return;
@@ -530,8 +532,9 @@ pub struct Args {
 
 pub fn build_tls_server_config_args(args: &Args) -> Arc<rustls::ServerConfig> {
     tcpls::build_tls_server_config(args.flag_auth.clone(), args.flag_require_auth, args.flag_suite.clone(),
-                                   args.flag_protover.clone(),  args.flag_certs.clone(), args.flag_key.clone(),
-                                   args.flag_ocsp.clone(), args.flag_resumption, args.flag_tickets, args.flag_proto.clone())
+                                   args.flag_protover.clone(), args.flag_certs.clone(), args.flag_key.clone(),
+                                   args.flag_ocsp.clone(), args.flag_resumption, args.flag_tickets, args.flag_proto.clone(),
+    )
 }
 
 fn main() {
@@ -555,7 +558,9 @@ fn main() {
     let config = build_tls_server_config_args(&args);
 
     let mut listener = server_create_listener("0.0.0.0:443", args.flag_port.unwrap());
+
     let mut poll = mio::Poll::new().unwrap();
+
     poll.registry()
         .register(&mut listener, LISTENER, mio::Interest::READABLE)
         .unwrap();

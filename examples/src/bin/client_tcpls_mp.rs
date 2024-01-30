@@ -368,7 +368,6 @@ fn build_tls_client_config_args(args: &Args) -> Arc<rustls::ClientConfig> {
 /// somewhere.
 fn main() {
 
-
     let version = env!("CARGO_PKG_NAME").to_string() + ", version: " + env!("CARGO_PKG_VERSION");
 
     let args: Args = Docopt::new(USAGE)
@@ -383,7 +382,8 @@ fn main() {
 
     let mut recv_map = RecvBufMap::new();
 
-    let dest_address = lookup_address(args.arg_hostname.as_str(), args.flag_port.unwrap());
+    let dest_add1 = lookup_address("0.0.0.0", 8443);
+    let dest_add2 = lookup_address("0.0.0.0", 8444);
 
     let mut client = TlsClient::new();
 
@@ -391,8 +391,9 @@ fn main() {
 
     let server_name = args.arg_hostname.as_str().try_into().expect("invalid DNS name");
 
-    client.tcpls_session.tcpls_connect(dest_address, Some(config), server_name, false);
-
+    client.tcpls_session.tcpls_connect(dest_add1, Some(config), Some(server_name), false);
+    // Create second tcp conection
+    client.tcpls_session.tcpls_connect(dest_add2, None, None, false);
 
     let mut poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(50);
