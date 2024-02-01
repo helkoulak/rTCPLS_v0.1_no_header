@@ -64,40 +64,42 @@ impl TcplsSession {
         &mut self,
         dest_address: SocketAddr,
         config: Option<Arc<ClientConfig>>,
-        server_name: ServerName,
+        server_name: Option<ServerName>,
         is_server: bool,
     ) {
         assert_ne!(is_server, true);
-        assert_eq!(self.next_conn_id, DEFAULT_CONNECTION_ID);
 
         let socket = TcpStream::connect(dest_address).expect("TCP connection establishment failed");
 
-        match config {
-            Some(ref client_config) => (),
-            None => panic!("No ClientConfig supplied"),
-        };
-        let client_conn = ClientConnection::new(config.as_ref().unwrap().clone(), server_name)
-            .expect("Establishment of TLS session failed");
-        let _ = self.tls_conn.insert(Connection::from(client_conn));
-        let _ = self.tls_config.insert(TlsConfig::Client(config.unwrap()));
+        if self.next_conn_id == DEFAULT_CONNECTION_ID {
+            match config {
+                Some(ref client_config) => (),
+                None => panic!("No ClientConfig supplied"),
+            };
+            let client_conn = ClientConnection::new(config.as_ref().unwrap().clone(), server_name.unwrap())
+                .expect("Establishment of TLS session failed");
+            let _ = self.tls_conn.insert(Connection::from(client_conn));
+            let _ = self.tls_config.insert(TlsConfig::Client(config.unwrap()));
 
-        self.create_tcpls_connection_object(socket, false);
+            self.create_tcpls_connection_object(socket);
+        } else {
+            self.outstanding_tcp_conns.insert(self.next_conn_id as u64, OutstandingTcpConnection::new(socket));
+            self.next_conn_id += 1;
+        }
 
     }
 
-    pub fn join_tcp_connection( &mut self, dest_address: SocketAddr) -> Result<(), Error> {
+    pub fn join_tcp_connection(&mut self,  id: u64) -> Result<(), Error> {
         assert_eq!(self.tls_conn.as_ref().unwrap().side, Side::Client);
-
-        let mut socket = TcpStream::connect(dest_address).expect("TCP connection establishment failed");
 
         let mut client_conn = match self.tls_conn.as_mut().unwrap() {
             Connection::Client(conn) => conn,
-            Connection::Server(conn) => panic!("Server connection found. Client connection required")
+            Connection::Server(_conn) => panic!("Server connection found. Client connection required")
         };
 
         // Emit fake client hello containing the TcplsJoin extension
 
-        let mut ch_payload = get_sample_clienthellopayload();
+        let mut ch_payload = get_sample_ch_payload();
 
         //Get next available token and push TcplsJoin Extension in ch payload
         let tcpls_token = match client_conn.get_next_tcpls_token() {
@@ -107,7 +109,7 @@ impl TcplsSession {
         ch_payload.extensions.push(ClientExtension::TcplsJoin(tcpls_token));
 
 
-        let mut chp = HandshakeMessagePayload {
+        let  chp = HandshakeMessagePayload {
             typ: HandshakeType::ClientHello,
             payload: HandshakePayload::ClientHello(ch_payload)
         };
@@ -118,19 +120,17 @@ impl TcplsSession {
         };
 
             trace!("Sending fake ClientHello {:#?}", ch);
-            socket.write(PlainMessage::from(ch)
+            self.outstanding_tcp_conns.get_mut(&id).unwrap().socket.write(PlainMessage::from(ch)
                 .into_unencrypted_opaque()
                 .encode()
                 .as_slice())
                 .expect("Sending fake client hello failed");
 
-        self.outstanding_tcp_conns.insert(self.next_conn_id as u64, OutstandingTcpConnection::new(socket));
-        self.next_conn_id += 1;
         Ok(())
     }
 
 
-    pub fn create_tcpls_connection_object(&mut self, socket: TcpStream, is_server: bool) -> u32 {
+    pub fn create_tcpls_connection_object(&mut self, socket: TcpStream) -> u32 {
         let mut tcp_conn = TcpConnection::new(socket, self.next_conn_id);
 
         let new_id = self.next_conn_id;
@@ -156,9 +156,10 @@ impl TcplsSession {
         config: Arc<ServerConfig>,
     ) -> Result<u32, io::Error> {
         let mut conn_id= 0;
-        let (socket, remote_address) = listener
-            .accept()
-            .expect("encountered error while accepting connection");
+        let (socket, _remote_add) = match listener.accept() {
+            Ok((socket, remote_add)) => (socket, remote_add),
+            Err(err) => return Err(err),
+        };
 
         if self.next_conn_id == DEFAULT_CONNECTION_ID {
             self.is_server = true;
@@ -167,9 +168,10 @@ impl TcplsSession {
                 .expect("Establishing a TLS session has failed");
             let _ = self.tls_conn.insert(Connection::from(server_conn));
             let _ = self.tls_config.insert(TlsConfig::from(config));
-            conn_id = self.create_tcpls_connection_object(socket, true);
+            conn_id = self.create_tcpls_connection_object(socket);
         }else {
             self.outstanding_tcp_conns.insert(self.next_conn_id as u64, OutstandingTcpConnection::new(socket));
+            conn_id = self.next_conn_id;
             self.next_conn_id += 1;
         }
 
@@ -184,7 +186,7 @@ impl TcplsSession {
     }
     
 
-    pub fn send_on_connection(&mut self, token: &Token, wr: Option<&mut dyn io::Write>) -> Result<usize, Error> {
+    pub fn send_on_connection(&mut self, id: u64, wr: Option<&mut dyn io::Write>) -> Result<usize, Error> {
         let tls_conn = self.tls_conn.as_mut().unwrap();
 
         let (has_pending, pending_at) = match tls_conn.record_layer.streams.has_pending {
@@ -200,7 +202,7 @@ impl TcplsSession {
             Some(socket) => socket,
             None => &mut self
                 .tcp_connections
-                .get_mut(&(token.0 as u64))
+                .get_mut(&id)
                 .unwrap()
                 .socket,
         };
@@ -255,8 +257,8 @@ impl TcplsSession {
     }
 
     /// Receive data on specified TCP socket
-    pub fn recv_on_connection(&mut self, token: &Token) -> Result<usize, io::Error> {
-        let mut socket = match self.tcp_connections.get_mut(&(token.0 as u64)) {
+    pub fn recv_on_connection(&mut self, id: u64) -> Result<usize, io::Error> {
+        let socket = match self.tcp_connections.get_mut(&id) {
             Some(conn) => &mut conn.socket,
             None => panic!("Socket of specified TCP connection does not exist")
         };
@@ -279,11 +281,11 @@ impl TcplsSession {
 
         Ok(io_state)
     }
-    pub fn process_join_request(&mut self, token: Token) -> Result<(), Error> {
+    pub fn process_join_request(&mut self, id: u64) -> Result<(), Error> {
 
-        let bytes_to_process = self.outstanding_tcp_conns.get_mut(&(token.0 as u64)).unwrap().used;
+        let bytes_to_process = self.outstanding_tcp_conns.get_mut(&id).unwrap().used;
 
-        let mut rd = codec::Reader::init(&self.outstanding_tcp_conns.get_mut(&(token.0 as u64)).unwrap().rcv_buf[..bytes_to_process]);
+        let mut rd = codec::Reader::init(&self.outstanding_tcp_conns.get_mut(&id).unwrap().rcv_buf[..bytes_to_process]);
         let m = match OpaqueMessage::read(&mut rd) {
             Ok(m) => m,
             Err(msg_err) => {
@@ -314,16 +316,16 @@ impl TcplsSession {
             Side::Client => {
                 //
                  if !msg.is_handshake_type(HandshakeType::ServerHello) {
-                     self.outstanding_tcp_conns.remove(&(token.0 as u64)).unwrap()
+                     self.outstanding_tcp_conns.remove(&id).unwrap()
                          .socket.shutdown(Shutdown::Both).expect("Error while shutting connection down");
                      return Err(Error::General("Expected Server Hello".to_string()))
                  }
             },
             Side::Server => {
                 if msg.is_handshake_type(HandshakeType::ClientHello) {
-                    self.handle_fake_client_hello(&msg, token).expect("Processing ch failed");
+                    self.handle_fake_client_hello(&msg, id).expect("Processing ch failed");
                 } else {
-                    self.outstanding_tcp_conns.remove(&(token.0 as u64)).unwrap()
+                    self.outstanding_tcp_conns.remove(&id).unwrap()
                         .socket.shutdown(Shutdown::Both).expect("Error while shutting connection down");
                     return Err(Error::General("Expected Client Hello".to_string()))
                 }
@@ -333,16 +335,16 @@ impl TcplsSession {
 
 
         //Upon successful token validation join socket into tcpls session
-        self.join_outstanding_tcp_conn(&token);
+        self.join_outstanding_tcp_conn(id);
 
         Ok(())
 
     }
 
-    fn join_outstanding_tcp_conn(&mut self, token: &Token) {
-        let socket = self.outstanding_tcp_conns.remove(&(token.0 as u64)).unwrap().socket;
-        self.tcp_connections.insert(token.0 as u64, TcpConnection {
-            connection_id: token.0 as u32,
+    fn join_outstanding_tcp_conn(&mut self, id: u64) {
+        let socket = self.outstanding_tcp_conns.remove(&id).unwrap().socket;
+        self.tcp_connections.insert(id, TcpConnection {
+            connection_id: id as u32,
             socket,
             local_address_id: 0,
             remote_address_id: 0,
@@ -352,16 +354,16 @@ impl TcplsSession {
             state: TcplsConnectionState::CLOSED,
         });
     }
-    fn handle_fake_client_hello(&mut self,  m: &Message, token: Token) -> Result<(), Error>{
+    fn handle_fake_client_hello(&mut self,  m: &Message, id: u64) -> Result<(), Error>{
         let client_hello = match self.process_fake_client_hello(&m) {
             Ok(chp) => chp,
             Err(e) => return Err(e),
         };
-        self.emit_fake_server_hello(client_hello, token);
+        self.emit_fake_server_hello(client_hello, id);
         Ok(())
     }
 
-    fn emit_fake_server_hello(&mut self, client_hello: &ClientHelloPayload, token: Token) {
+    fn emit_fake_server_hello(&mut self, client_hello: &ClientHelloPayload, id: u64) {
         let mut extensions = Vec::new();
 
         let kse = client_hello.get_keyshare_extension().unwrap();
@@ -386,7 +388,7 @@ impl TcplsSession {
         };
 
         trace!("sending fake server hello {:?}", sh);
-        self.outstanding_tcp_conns.get_mut(&(token.0 as u64)).unwrap().socket.write(PlainMessage::from(sh)
+        self.outstanding_tcp_conns.get_mut(&id).unwrap().socket.write(PlainMessage::from(sh)
             .into_unencrypted_opaque()
             .encode()
             .as_slice())
@@ -428,6 +430,17 @@ impl TcplsSession {
 
         Ok(client_hello)
     }
+
+    pub fn get_socket(&mut self, id: u64) -> &mut TcpStream {
+        match self.tcp_connections.get_mut(&id) {
+            Some(socket) => &mut socket.socket,
+            None => match self.outstanding_tcp_conns.get_mut(&id) {
+                Some(socket) => &mut socket.socket,
+                None => panic!("No socket found for the provided token"),
+            },
+        }
+    }
+
 }
 
 
@@ -719,6 +732,7 @@ pub fn build_tls_server_config(
     resumption: bool,
     tickets: bool,
     proto: Vec<String>,
+    token_cap: usize,
 ) -> Arc<ServerConfig> {
     let client_auth = if client_verify.is_some() {
         let roots = load_certs(client_verify.as_ref().unwrap());
@@ -775,13 +789,18 @@ pub fn build_tls_server_config(
         .map(|proto| proto.as_bytes().to_vec())
         .collect::<Vec<_>>();
 
+    config.max_tcpls_tokens_cap = token_cap;
     Arc::new(config)
 }
 
-pub fn server_create_listener(local_address: &str, port: u16) -> TcpListener {
+pub fn server_create_listener(local_address: &str, port: Option<u16>) -> TcpListener {
     let mut addr: SocketAddr = local_address.parse().unwrap();
 
-    addr.set_port(port);
+    match port {
+        Some(port) => addr.set_port(port),
+        None => (),
+    };
+
 
     TcpListener::bind(addr).expect("cannot listen on port")
 }
@@ -790,7 +809,7 @@ pub fn server_new_tls_connection(config: Arc<ServerConfig>) -> ServerConnection 
     ServerConnection::new(config).expect("Establishing a TLS session has failed")
 }
 
-fn get_sample_clienthellopayload() -> ClientHelloPayload {
+fn get_sample_ch_payload() -> ClientHelloPayload {
     ClientHelloPayload {
         client_version: ProtocolVersion::TLSv1_2,
         random: Random::from([0; 32]),
