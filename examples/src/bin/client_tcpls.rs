@@ -12,14 +12,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use docopt::Docopt;
-use env_logger::builder;
-use env_logger::fmt::Color::White;
+use mio::Token;
 use ring::digest;
-
-use rustls::{client, OwnedTrustAnchor, RootCertStore, };
 use rustls::recvbuf::RecvBufMap;
-use rustls::tcpls::{build_tls_client_config, DEFAULT_CONNECTION_ID, lookup_address, TcplsSession};
-use rustls::tcpls::TlsConfig::Client;
+use rustls::tcpls::{build_tls_client_config, lookup_address, TcplsSession};
 
 const CLIENT: mio::Token = mio::Token(0);
 
@@ -44,29 +40,16 @@ impl TlsClient {
     /// Handles events sent to the TlsClient by mio::Poll
     fn handle_event(&mut self, ev: &mio::event::Event, recv_map: &mut RecvBufMap) {
 
-        assert_eq!(ev.token(), CLIENT);
+        let token = &ev.token();
 
-        if ev.is_readable() && self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking(){
-           self.do_read(recv_map);
+        if ev.is_readable() {
+           self.do_read(recv_map, token);
         }
 
-        if ev.is_writable() && self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking(){
-            self.do_write();
+        if ev.is_writable() {
+            self.do_write(token);
         }
-
-        if ev.is_writable() && ! self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() {
-
-           self.send_file("Cargo.toml", 0).expect("");
-            self.send_file("Cargo.lock", 1).expect("");
-            self.send_file("TLS_HS_Client", 2).expect("");
-            self.tcpls_session.send_on_connection(0, None).expect("sending on socket has failed");
-            
-        }
-
-
-        if ev.is_readable() && ! self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() {
-            self.do_read(recv_map);
-        }
+        
 
         if self.is_closed() {
             println!("Connection closed");
@@ -82,11 +65,11 @@ impl TlsClient {
     }
 
     /// We're ready to do a read.
-    fn do_read(&mut self, app_buffers: &mut RecvBufMap) {
+    fn do_read(&mut self, app_buffers: &mut RecvBufMap, token: &Token) {
         // Read TLS data.  This fails if the underlying TCP connection
         // is broken.
 
-        match self.tcpls_session.recv_on_connection(0) {
+        match self.tcpls_session.recv_on_connection(token.0 as u64) {
             Err(error) => {
                 if error.kind() == io::ErrorKind::WouldBlock {
                     return;
@@ -138,9 +121,9 @@ impl TlsClient {
         }
     }
 
-    fn do_write(&mut self) {
+    fn do_write(&mut self, token: &Token) {
 
-        self.tcpls_session.send_on_connection(0, None).unwrap();
+        self.tcpls_session.send_on_connection(token.0 as u64, None).unwrap();
     }
 
     /// Registers self as a 'listener' in mio::Registry
@@ -203,7 +186,7 @@ impl TlsClient {
         data.extend(hash.as_ref());
 
         // Print the hash as a hexadecimal string
-        println!("\n \n File bytes on stream {:?} : \n {:?} \n \n SHA-256 Hash {:?} \n Total length: {:?} \n", stream, file_contents, hash, len);
+       // println!("\n \n File bytes on stream {:?} : \n {:?} \n \n SHA-256 Hash {:?} \n Total length: {:?} \n", stream, file_contents, hash, len);
 
         self.tcpls_session.stream_send(stream, data.as_ref(), false).expect("buffering failed");
 
@@ -224,19 +207,7 @@ impl TlsClient {
         digest::digest(algorithm, data)
     }
 
-   /* fn read_file_and_calculate_hash(file_path: &str) -> Result<(Vec<u8>, Digest), Error> {
-        // Open the file
-        let mut file = File::open(file_path)?;
 
-        // Read the file contents into a byte vector
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer)?;
-
-        // Calculate the SHA-256 hash
-        let hash = ring::digest::digest(&ring::digest::SHA256, &buffer);
-
-        Ok((buffer,hash))
-    }*/
 }
 impl io::Write for TlsClient {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
@@ -390,7 +361,12 @@ fn main() {
 
     let server_name = args.arg_hostname.as_str().try_into().expect("invalid DNS name");
 
-    client.tcpls_session.tcpls_connect(dest_address, config, server_name, false);
+    client.tcpls_session.tcpls_connect(dest_address, Some(config), Some(server_name), false);
+
+   //Send three files on three streams
+    client.send_file("Cargo.toml", 0).expect("");
+    client.send_file("Cargo.lock", 1).expect("");
+    client.send_file("TLS_HS_Client", 2).expect("");
 
 
     let mut poll = mio::Poll::new().unwrap();
