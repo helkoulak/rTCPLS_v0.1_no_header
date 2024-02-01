@@ -291,7 +291,7 @@ impl TcplsSession {
             Err(msg_err) => {
                 let err_kind = match msg_err {
                     MessageError::TooShortForHeader | MessageError::TooShortForLength => {
-                        InvalidMessage::MessageTooShort
+                        return Ok(())
                     }
                     MessageError::InvalidEmptyPayload => InvalidMessage::InvalidEmptyPayload,
                     MessageError::MessageTooLarge => InvalidMessage::MessageTooLarge,
