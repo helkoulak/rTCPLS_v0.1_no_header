@@ -29,7 +29,7 @@ use rustls::recvbuf::RecvBufMap;
 use rustls::tcpls::{server_create_listener, TcplsSession};
 
 // Token for our listening socket.
-const LISTENER: mio::Token = mio::Token(100);
+const LISTENER: Token = Token(100);
 
 // Which mode the server operates in.
 #[derive(Clone)]
@@ -48,44 +48,45 @@ enum ServerMode {
 /// This binds together a TCP listening socket, some outstanding
 /// connections, and a TLS server configuration.
 struct TlsServer {
-    server: TcpListener,
-    connections: HashMap<mio::Token, OpenConnection>,
+    listener: TcpListener,
     next_id: usize,
     tls_config: Arc<rustls::ServerConfig>,
+
+    closing: bool,
+    closed: bool,
     mode: ServerMode,
+    back: Option<TcpStream>,
+    sent_http_response: bool,
+    tcpls_session: TcplsSession,
 
 }
 
 impl TlsServer {
-    fn new(server: TcpListener, mode: ServerMode, cfg: Arc<rustls::ServerConfig>) -> Self {
+    fn new(listener: TcpListener, mode: ServerMode, cfg: Arc<rustls::ServerConfig>) -> Self {
         Self {
-            server,
-            connections: HashMap::new(),
+            listener,
+
             next_id: 0,
             tls_config: cfg,
             mode,
+            back: None,
+            sent_http_response: false,
+
+            closing: false,
+            closed: false,
+            tcpls_session: TcplsSession::new(true),
         }
     }
 
     fn accept(&mut self, registry: &mio::Registry, recv_map: &RecvBufMap) -> Result<(), io::Error> {
         loop {
-            match self.server.accept() {
-                Ok((socket, addr)) => {
-                    debug!("Accepting new connection from {:?}", addr);
+            match self.tcpls_session.server_accept_connection(&mut self.listener, self.tls_config.clone()) {
+                Ok((conn_id)) => {
+                    debug!("Accepting new connection of id {:?}", conn_id);
 
-                    let tls_conn =
-                        Connection::from(tcpls::server_new_tls_connection(Arc::clone(&self.tls_config)));
-                    let mode = self.mode.clone();
+                    let token = Token(conn_id as usize);
 
-                    let token = mio::Token(self.next_id);
-                    self.next_id += 1;
-
-                    let mut connection = OpenConnection::new(token, mode);
-                    connection.tcpls_session.create_tcpls_connection_object(socket, true);
-                    connection.tcpls_session.tls_conn = Some(tls_conn);
-                    connection.register(registry, recv_map);
-                    self.connections
-                        .insert(token, connection);
+                    self.register(registry, recv_map, token)
                 }
                 Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(()),
                 Err(err) => {
@@ -102,96 +103,20 @@ impl TlsServer {
     fn conn_event(&mut self, registry: &mio::Registry, event: &mio::event::Event, recv_map: &mut RecvBufMap) {
         let token = event.token();
 
-        if self.connections.contains_key(&token) {
-            self.connections
-                .get_mut(&token)
-                .unwrap()
-                .handle_event(registry, event, recv_map);
+        self.handle_event(registry, event, recv_map);
 
-            if self.connections[&token].is_closed() {
-                self.connections.remove(&token);
-            }
-        }
     }
-}
-
-/// This is a connection which has been accepted by the server,
-/// and is currently being served.
-///
-/// It has a TCP-level stream, a TLS-level connection state, and some
-/// other state/metadata.
-struct OpenConnection {
-    token: mio::Token,
-    closing: bool,
-    closed: bool,
-    mode: ServerMode,
-    back: Option<TcpStream>,
-    sent_http_response: bool,
-    tcpls_session: TcplsSession,
-}
-
-/// Open a plaintext TCP-level connection for forwarded connections.
-fn open_back(mode: &ServerMode) -> Option<TcpStream> {
-    match *mode {
-        ServerMode::Forward(ref port) => {
-            let addr = net::SocketAddrV4::new(net::Ipv4Addr::new(127, 0, 0, 1), *port);
-            let conn = TcpStream::connect(net::SocketAddr::V4(addr)).unwrap();
-            Some(conn)
-        }
-        _ => None,
-    }
-}
-
-/// This used to be conveniently exposed by mio: map EWOULDBLOCK
-/// errors to something less-errory.
-fn try_read(r: io::Result<usize>) -> io::Result<Option<usize>> {
-    match r {
-        Ok(len) => Ok(Some(len)),
-        Err(e) => {
-            if e.kind() == io::ErrorKind::WouldBlock {
-                Ok(None)
-            } else {
-                Err(e)
-            }
-        }
-    }
-}
-
-impl OpenConnection {
-    fn new(
-        token: mio::Token,
-        mode: ServerMode,
-    ) -> Self {
-        let back = open_back(&mode);
-        Self {
-            token,
-            closing: false,
-            closed: false,
-            mode,
-            back,
-            sent_http_response: false,
-            tcpls_session: TcplsSession::new(true),
-        }
-    }
-
-    /// We're a connection, and we have something to do.
     fn handle_event(&mut self, registry: &mio::Registry, ev: &mio::event::Event, recv_map: &mut RecvBufMap) {
         // If we're readable: read some TLS.  Then
         // see if that yielded new plaintext.  Then
         // see if the backend is readable too.
         let token = &ev.token();
         if ev.is_readable() {
-            self.do_read(recv_map, token);
-            if !self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() {
-                self.verify_received(recv_map);
-            }
+            self.do_read(recv_map, token.0 as u64);
 
             self.try_back_read();
 
         }
-
-
-
 
 
         if ev.is_writable() {
@@ -210,7 +135,7 @@ impl OpenConnection {
             self.closed = true;
             self.deregister(registry);
         } else {
-            self.reregister(registry, recv_map);
+            self.reregister(registry, recv_map, *token);
         }
     }
 
@@ -233,7 +158,7 @@ impl OpenConnection {
 
 
 
-            hash_index = match OpenConnection::find_pattern(&stream.1.as_ref_consumed(), vec![0x0f, 0x0f, 0x0f, 0x0f].as_slice()) {
+            hash_index = match find_pattern(&stream.1.as_ref_consumed(), vec![0x0f, 0x0f, 0x0f, 0x0f].as_slice()) {
                 Some(n) => n + 4,
                 None => panic!("hash prefix does not exist"),
             };
@@ -241,10 +166,10 @@ impl OpenConnection {
             assert_eq!(&stream.1.as_ref_consumed()[hash_index..], self.calculate_sha256_hash(&stream.1.as_ref_consumed()[2..hash_index - 4]).as_ref());
             debug!("\n \n Bytes received on stream {:?} : \n \n {:?} \n \n SHA-256 Hash {:?} \n Total length: {:?} \n",
                 stream.1.id,
-                &stream.1.as_ref_consumed()[2..hash_index - 4],
+                &stream.1.as_ref_consumed()[..hash_index - 4],
                 &stream.1.as_ref_consumed()[hash_index..].iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>(),
                 unprocessed_len);
-             stream.1.consume(received_len);
+            stream.1.consume(received_len + 2);
         }
     }
 
@@ -252,14 +177,7 @@ impl OpenConnection {
         let algorithm = &digest::SHA256;
         digest::digest(algorithm, data)
     }
-    pub fn find_pattern(data: &[u8], pattern: &[u8]) -> Option<usize> {
-        for i in 0..data.len() {
-            if data[i..].starts_with(pattern) {
-                return Some(i);
-            }
-        }
-        None
-    }
+
 
     /// Close the backend connection for forwarded sessions.
     fn close_back(&mut self) {
@@ -271,9 +189,9 @@ impl OpenConnection {
         self.back = None;
     }
 
-    fn do_read(&mut self, app_buffers: &mut RecvBufMap, token: &Token) {
+    fn do_read(&mut self, app_buffers: &mut RecvBufMap, id: u64) {
         // Read some TLS data.
-        match self.tcpls_session.recv_on_connection(token) {
+        match self.tcpls_session.recv_on_connection(id) {
             Err(err) => {
                 if let io::ErrorKind::WouldBlock = err.kind() {
                     return;
@@ -403,27 +321,27 @@ impl OpenConnection {
         }
     }
 
-    fn register(&mut self, registry: &mio::Registry, app_buf: &RecvBufMap) {
+    fn register(&mut self, registry: &mio::Registry, app_buf: &RecvBufMap, token: Token) {
         let event_set = self.event_set(app_buf);
         registry
-            .register(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket, self.token, event_set)
+            .register(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket, token, event_set)
             .unwrap();
 
         if self.back.is_some() {
             registry
                 .register(
                     self.back.as_mut().unwrap(),
-                    self.token,
+                    token,
                     mio::Interest::READABLE,
                 )
                 .unwrap();
         }
     }
 
-    fn reregister(&mut self, registry: &mio::Registry, app_buf: &RecvBufMap) {
+    fn reregister(&mut self, registry: &mio::Registry, app_buf: &RecvBufMap, token: Token) {
         let event_set = self.event_set(app_buf);
         registry
-            .reregister(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket, self.token, event_set)
+            .reregister(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket, token, event_set)
             .unwrap();
     }
 
@@ -458,6 +376,43 @@ impl OpenConnection {
         self.closed
     }
 }
+
+pub fn find_pattern(data: &[u8], pattern: &[u8]) -> Option<usize> {
+    for i in 0..data.len() {
+        if data[i..].starts_with(pattern) {
+            return Some(i);
+        }
+    }
+    None
+}
+/// Open a plaintext TCP-level connection for forwarded connections.
+fn open_back(mode: &ServerMode) -> Option<TcpStream> {
+    match *mode {
+        ServerMode::Forward(ref port) => {
+            let addr = net::SocketAddrV4::new(net::Ipv4Addr::new(127, 0, 0, 1), *port);
+            let conn = TcpStream::connect(net::SocketAddr::V4(addr)).unwrap();
+            Some(conn)
+        }
+        _ => None,
+    }
+}
+
+/// This used to be conveniently exposed by mio: map EWOULDBLOCK
+/// errors to something less-errory.
+fn try_read(r: io::Result<usize>) -> io::Result<Option<usize>> {
+    match r {
+        Ok(len) => Ok(Some(len)),
+        Err(e) => {
+            if e.kind() == io::ErrorKind::WouldBlock {
+                Ok(None)
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
+
 
 const USAGE: &str = "
 Runs a TLS server on :PORT.  The default PORT is 443.
@@ -531,10 +486,11 @@ pub struct Args {
 
 
 pub fn build_tls_server_config_args(args: &Args) -> Arc<rustls::ServerConfig> {
-    tcpls::build_tls_server_config(args.flag_auth.clone(), args.flag_require_auth, args.flag_suite.clone(),
-                                   args.flag_protover.clone(), args.flag_certs.clone(), args.flag_key.clone(),
-                                   args.flag_ocsp.clone(), args.flag_resumption, args.flag_tickets, args.flag_proto.clone(),
-    )
+    tcpls::build_tls_server_config(args.flag_auth.clone(), args.flag_require_auth,
+                                   args.flag_suite.clone(), args.flag_protover.clone(),
+                                   args.flag_certs.clone(), args.flag_key.clone(),
+                                   args.flag_ocsp.clone(), args.flag_resumption,
+                                   args.flag_tickets, args.flag_proto.clone(), 5)
 }
 
 fn main() {
@@ -557,7 +513,7 @@ fn main() {
 
     let config = build_tls_server_config_args(&args);
 
-    let mut listener = server_create_listener("0.0.0.0:443", args.flag_port.unwrap());
+    let mut listener = server_create_listener("0.0.0.0:443", Some(args.flag_port.unwrap()));
 
     let mut poll = mio::Poll::new().unwrap();
 
@@ -586,10 +542,19 @@ fn main() {
                         .accept(poll.registry(), &recv_map)
                         .expect("error accepting socket");
                 }
-                _ => tcpls_server.conn_event(poll.registry(), event, &mut recv_map),
+                _ => {
+                    tcpls_server.conn_event(poll.registry(), event, &mut recv_map);
+                    if !tcpls_server
+                        .tcpls_session
+                        .tls_conn
+                        .as_ref()
+                        .unwrap().is_handshaking() {
+                        tcpls_server
+                            .verify_received(&mut recv_map);
+                    }
+                }
             }
         }
     }
-   
 }
 
