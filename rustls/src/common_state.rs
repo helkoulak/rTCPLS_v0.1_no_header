@@ -1,4 +1,4 @@
-
+use std::collections::hash_map;
 use crate::enums::{AlertDescription, ContentType, HandshakeType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerMisbehaved};
 use crate::key;
@@ -22,7 +22,7 @@ use crate::suites::PartiallyExtractedSecrets;
 use crate::suites::SupportedCipherSuite;
 use crate::tcpls::frame::Frame;
 
-use crate::tcpls::stream::DEFAULT_STREAM_ID;
+use crate::tcpls::stream::{DEFAULT_STREAM_ID, SimpleIdHashMap, Stream};
 
 #[cfg(feature = "tls12")]
 use crate::tls12::ConnectionSecrets;
@@ -52,7 +52,7 @@ pub struct CommonState {
 
     pub(crate) tcpls_tokens: Vec<TcplsToken>,
     pub(crate) join_msg_received: bool,
-    sendable_plaintext: ChunkVecBuffer,
+    sendable_plaintext: PlainBufsMap,
 
     queued_key_update_message: Option<Vec<u8>>,
 
@@ -87,7 +87,7 @@ impl CommonState {
             received_plaintext: ChunkVecBuffer::new(Some(DEFAULT_RECEIVED_PLAINTEXT_LIMIT)),
             tcpls_tokens: Vec::new(),
             join_msg_received: false,
-            sendable_plaintext: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
+            sendable_plaintext: PlainBufsMap::default(),
             message_deframer: MessageDeframer::default(),
 
             queued_key_update_message: None,
@@ -362,9 +362,15 @@ impl CommonState {
             let len = match limit {
                 Limit::Yes => self
                     .sendable_plaintext
+                    .get_or_create_plain_buf(id)
+                    .unwrap()
+                    .send_plain_buf
                     .append_limited_copy(data),
                 Limit::No => self
                     .sendable_plaintext
+                    .get_or_create_plain_buf(id)
+                    .unwrap()
+                    .send_plain_buf
                     .append(data.to_vec()),
             };
             return len;
@@ -435,7 +441,7 @@ impl CommonState {
     /// [`Connection::write_tls`]: crate::Connection::write_tls
     /// [`Connection::process_new_packets`]: crate::Connection::process_received
     pub fn set_buffer_limit(&mut self, limit: Option<usize>, id: u16) {
-        self.sendable_plaintext.set_limit(limit);
+        self.sendable_plaintext.get_or_create_plain_buf(id).unwrap().send_plain_buf.set_limit(limit);
         self.record_layer.streams.get_or_create(id).unwrap().send.set_limit(limit);
     }
 
@@ -446,8 +452,17 @@ impl CommonState {
             return;
         }
 
-        while let Some(buf) = self.sendable_plaintext.pop() {
-            self.send_plain(&buf, Limit::No, DEFAULT_STREAM_ID, false);
+        if self.sendable_plaintext.plain_map.is_empty() {
+            return;
+        }
+
+        let keys: Vec<_> = self.sendable_plaintext.plain_map.keys().cloned().collect();
+
+        for key in keys   {
+            let mut stream = self.sendable_plaintext.plain_map.remove(&key).unwrap();
+            while let Some(buf) = stream.send_plain_buf.pop() {
+                self.send_plain(&buf, Limit::No, stream.id, false);
+            }
         }
     }
 
@@ -696,7 +711,42 @@ impl CommonState {
             self.queue_message(message, DEFAULT_STREAM_ID);
         }
     }
+
+
+
 }
+
+pub(crate) struct SendPlainTextBuf {
+    pub(crate) send_plain_buf: ChunkVecBuffer,
+    pub(crate) id: u16,
+}
+#[derive(Default)]
+pub(crate) struct PlainBufsMap {
+    pub(crate) plain_map: SimpleIdHashMap<SendPlainTextBuf>
+}
+
+impl PlainBufsMap {
+    pub(crate) fn get_or_create_plain_buf(
+        &mut self, stream_id: u16,
+    ) -> Result<&mut SendPlainTextBuf, Error> {
+        let stream = match self.plain_map.entry(stream_id as u64) {
+            hash_map::Entry::Vacant(v) => {
+
+                let s = SendPlainTextBuf {
+                    send_plain_buf: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
+                    id: stream_id,
+                };
+
+                v.insert(s)
+            },
+
+            hash_map::Entry::Occupied(v) => v.into_mut(),
+        };
+
+        Ok(stream)
+    }
+}
+
 
 /// Values of this structure are returned from [`Connection::process_new_packets`]
 /// and tell the caller the current I/O state of the TLS connection.
