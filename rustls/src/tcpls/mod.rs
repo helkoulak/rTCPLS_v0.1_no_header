@@ -10,7 +10,6 @@ use std::sync::Arc;
 use log::trace;
 
 use mio::net::{TcpListener, TcpStream};
-use mio::Token;
 use crate::{ALL_CIPHER_SUITES, ALL_VERSIONS, Certificate, CipherSuite, ClientConfig, ClientConnection, Connection, ContentType, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, Error, HandshakeType, InvalidMessage, IoState, KeyLogFile, NamedGroup, PeerMisbehaved, PrivateKey, ProtocolVersion, RootCertStore, server, ServerConfig, ServerConnection, ServerName, Side, SignatureScheme, SupportedCipherSuite, SupportedProtocolVersion, Ticketer, version};
 use crate::AlertDescription::IllegalParameter;
 use crate::InvalidMessage::{InvalidContentType, InvalidEmptyPayload};
@@ -21,7 +20,8 @@ use crate::msgs::message::{Message, MessageError, MessagePayload, OpaqueMessage,
 use crate::PeerMisbehaved::{InvalidTcplsJoinToken, TcplsJoinExtensionNotFound};
 use crate::recvbuf::RecvBufMap;
 use crate::tcpls::network_address::AddressMap;
-use crate::tcpls::stream::{DEFAULT_BUFFER_LIMIT, SimpleIdHashMap};
+use crate::tcpls::outstanding_conn::OutstandingTcpConn;
+use crate::tcpls::stream::SimpleIdHashMap;
 use crate::verify::{
     AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
 };
@@ -30,6 +30,7 @@ pub mod frame;
 pub mod network_address;
 pub mod ranges;
 pub mod stream;
+pub mod outstanding_conn;
 
 pub const DEFAULT_CONNECTION_ID:u32 = 0;
 
@@ -37,7 +38,6 @@ pub struct TcplsSession {
     pub tls_config: Option<TlsConfig>,
     pub tls_conn: Option<Connection>,
     pub tcp_connections: SimpleIdHashMap<TcpConnection>,
-    pub outstanding_tcp_conns: SimpleIdHashMap<OutstandingTcpConnection>,
     pub next_conn_id: u32,
     pub address_map: AddressMap,
     pub is_server: bool,
@@ -51,7 +51,6 @@ impl TcplsSession {
             tls_config: None,
             tls_conn: None,
             tcp_connections: SimpleIdHashMap::default(),
-            outstanding_tcp_conns: SimpleIdHashMap::default(),
             next_conn_id: DEFAULT_CONNECTION_ID,
             address_map: AddressMap::new(),
             is_server,
@@ -83,7 +82,11 @@ impl TcplsSession {
 
             self.create_tcpls_connection_object(socket);
         } else {
-            self.outstanding_tcp_conns.insert(self.next_conn_id as u64, OutstandingTcpConnection::new(socket));
+            self.tls_conn.as_mut()
+                .unwrap()
+                .outstanding_tcp_conns
+                .as_mut_ref()
+                .insert(self.next_conn_id as u64, OutstandingTcpConn::new(socket));
             self.next_conn_id += 1;
         }
 
@@ -120,10 +123,32 @@ impl TcplsSession {
         };
 
             trace!("Sending fake ClientHello {:#?}", ch);
-            self.outstanding_tcp_conns.get_mut(&id).unwrap().socket.write(PlainMessage::from(ch)
-                .into_unencrypted_opaque()
-                .encode()
-                .as_slice())
+
+        let request = PlainMessage::from(ch)
+            .into_unencrypted_opaque()
+            .encode();
+
+
+
+        if self.tls_conn.as_ref().unwrap().is_handshaking() {
+            self.tls_conn.as_mut()
+                .unwrap()
+                .outstanding_tcp_conns
+                .as_mut_ref()
+                .get_mut(&id)
+                .unwrap().buffer_request(request);
+                return Ok(())
+        };
+
+
+            self.tls_conn.as_mut()
+                .unwrap()
+                .outstanding_tcp_conns
+                .as_mut_ref()
+                .get_mut(&id)
+                .unwrap()
+                .socket
+                .write(request.as_slice())
                 .expect("Sending fake client hello failed");
 
         Ok(())
@@ -170,7 +195,10 @@ impl TcplsSession {
             let _ = self.tls_config.insert(TlsConfig::from(config));
             conn_id = self.create_tcpls_connection_object(socket);
         }else {
-            self.outstanding_tcp_conns.insert(self.next_conn_id as u64, OutstandingTcpConnection::new(socket));
+            self.tls_conn
+                .as_mut()
+                .unwrap()
+                .outstanding_tcp_conns.as_mut_ref().insert(self.next_conn_id as u64, OutstandingTcpConn::new(socket));
             conn_id = self.next_conn_id;
             self.next_conn_id += 1;
         }
@@ -283,9 +311,20 @@ impl TcplsSession {
     }
     pub fn process_join_request(&mut self, id: u64) -> Result<(), Error> {
 
-        let bytes_to_process = self.outstanding_tcp_conns.get_mut(&id).unwrap().used;
+        let bytes_to_process = self.tls_conn
+            .as_mut()
+            .unwrap()
+            .outstanding_tcp_conns
+            .as_mut_ref()
+            .get_mut(&id)
+            .unwrap().used;
 
-        let mut rd = codec::Reader::init(&self.outstanding_tcp_conns.get_mut(&id).unwrap().rcv_buf[..bytes_to_process]);
+        let mut rd = codec::Reader::init(&self.tls_conn.as_mut()
+            .unwrap()
+            .outstanding_tcp_conns
+            .as_mut_ref()
+            .get_mut(&id).unwrap().rcv_buf[..bytes_to_process]);
+
         let m = match OpaqueMessage::read(&mut rd) {
             Ok(m) => m,
             Err(msg_err) => {
@@ -316,7 +355,8 @@ impl TcplsSession {
             Side::Client => {
                 //
                  if !msg.is_handshake_type(HandshakeType::ServerHello) {
-                     self.outstanding_tcp_conns.remove(&id).unwrap()
+                     self.tls_conn.as_mut()
+                         .unwrap().outstanding_tcp_conns.as_mut_ref().remove(&id).unwrap()
                          .socket.shutdown(Shutdown::Both).expect("Error while shutting connection down");
                      return Err(Error::General("Expected Server Hello".to_string()))
                  }
@@ -325,7 +365,8 @@ impl TcplsSession {
                 if msg.is_handshake_type(HandshakeType::ClientHello) {
                     self.handle_fake_client_hello(&msg, id).expect("Processing ch failed");
                 } else {
-                    self.outstanding_tcp_conns.remove(&id).unwrap()
+                    self.tls_conn.as_mut()
+                        .unwrap().outstanding_tcp_conns.as_mut_ref().remove(&id).unwrap()
                         .socket.shutdown(Shutdown::Both).expect("Error while shutting connection down");
                     return Err(Error::General("Expected Client Hello".to_string()))
                 }
@@ -335,14 +376,15 @@ impl TcplsSession {
 
 
         //Upon successful token validation join socket into tcpls session
-        self.join_outstanding_tcp_conn(id);
+        self.join_conn_to_session(id);
 
         Ok(())
 
     }
 
-    fn join_outstanding_tcp_conn(&mut self, id: u64) {
-        let socket = self.outstanding_tcp_conns.remove(&id).unwrap().socket;
+    fn join_conn_to_session(&mut self, id: u64) {
+        let socket = self.tls_conn.as_mut()
+            .unwrap().outstanding_tcp_conns.as_mut_ref().remove(&id).unwrap().socket;
         self.tcp_connections.insert(id, TcpConnection {
             connection_id: id as u32,
             socket,
@@ -388,7 +430,8 @@ impl TcplsSession {
         };
 
         trace!("sending fake server hello {:?}", sh);
-        self.outstanding_tcp_conns.get_mut(&id).unwrap().socket.write(PlainMessage::from(sh)
+        self.tls_conn.as_mut()
+            .unwrap().outstanding_tcp_conns.as_mut_ref().get_mut(&id).unwrap().socket.write(PlainMessage::from(sh)
             .into_unencrypted_opaque()
             .encode()
             .as_slice())
@@ -434,7 +477,8 @@ impl TcplsSession {
     pub fn get_socket(&mut self, id: u64) -> &mut TcpStream {
         match self.tcp_connections.get_mut(&id) {
             Some(socket) => &mut socket.socket,
-            None => match self.outstanding_tcp_conns.get_mut(&id) {
+            None => match self.tls_conn.as_mut()
+                .unwrap().outstanding_tcp_conns.as_mut_ref().get_mut(&id) {
                 Some(socket) => &mut socket.socket,
                 None => panic!("No socket found for the provided token"),
             },
@@ -444,35 +488,7 @@ impl TcplsSession {
 }
 
 
-pub struct OutstandingTcpConnection {
-    pub socket: TcpStream,
 
-    /// Temporary receive buffer to receive the fake ch/sh messages on.
-    /// It will be deallocated after joining the outstanding tcp connection to the tcpls session
-    pub rcv_buf: Vec<u8>,
-
-    pub used: usize,
-}
-
-impl OutstandingTcpConnection {
-
-    pub fn new(socket: TcpStream) -> Self {
-        Self{
-            socket,
-            rcv_buf: vec![0u8; DEFAULT_BUFFER_LIMIT],
-            used: 0,
-        }
-    }
-
-    pub fn try_receive_join_request(&mut self) -> Result<usize, io::Error>{
-       let read = match self.socket.read(&mut self.rcv_buf) {
-           Ok(read) => read,
-           Err(e) => return Err(e),
-       };
-        self.used += read;
-        Ok(read)
-    }
-}
 
 pub enum TlsConfig {
     Client(Arc<ClientConfig>),

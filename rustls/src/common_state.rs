@@ -21,8 +21,9 @@ use crate::recvbuf::RecvBufMap;
 use crate::suites::PartiallyExtractedSecrets;
 use crate::suites::SupportedCipherSuite;
 use crate::tcpls::frame::Frame;
+use crate::tcpls::outstanding_conn::OutstandingConnMap;
 
-use crate::tcpls::stream::{DEFAULT_STREAM_ID, SimpleIdHashMap, Stream};
+use crate::tcpls::stream::{DEFAULT_STREAM_ID, SimpleIdHashMap};
 
 #[cfg(feature = "tls12")]
 use crate::tls12::ConnectionSecrets;
@@ -53,7 +54,7 @@ pub struct CommonState {
     pub(crate) tcpls_tokens: Vec<TcplsToken>,
     pub(crate) join_msg_received: bool,
     sendable_plaintext: PlainBufsMap,
-
+    pub outstanding_tcp_conns: OutstandingConnMap,
     queued_key_update_message: Option<Vec<u8>>,
 
     #[allow(dead_code)] // only read for QUIC
@@ -83,7 +84,7 @@ impl CommonState {
             received_middlebox_ccs: 0,
             peer_certificates: None,
             message_fragmenter: MessageFragmenter::default(),
-
+            outstanding_tcp_conns: OutstandingConnMap::default(),
             received_plaintext: ChunkVecBuffer::new(Some(DEFAULT_RECEIVED_PLAINTEXT_LIMIT)),
             tcpls_tokens: Vec::new(),
             join_msg_received: false,
@@ -389,6 +390,7 @@ impl CommonState {
     pub(crate) fn start_outgoing_traffic(&mut self) {
         self.may_send_application_data = true;
         self.flush_plaintext();
+        self.outstanding_tcp_conns.flush_requests();
     }
 
     pub(crate) fn start_traffic(&mut self) {
