@@ -844,6 +844,7 @@ fn get_sample_ch_payload() -> ClientHelloPayload {
             ClientExtension::NamedGroups(vec![NamedGroup::X25519]),
             ClientExtension::SignatureAlgorithms(vec![SignatureScheme::ECDSA_NISTP256_SHA256]),
             ClientExtension::SupportedVersions(vec![ProtocolVersion::TLSv1_3]),
+            ClientExtension::KeyShare(vec![KeyShareEntry::new(NamedGroup::X25519, &[1, 2, 3])]),
 
         ],
     }
