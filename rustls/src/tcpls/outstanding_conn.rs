@@ -59,9 +59,9 @@ impl OutstandingConnMap {
     }
 
     pub fn wants_read(&self) -> bool {
-        let mut all_empty = false;
+        let mut all_empty = true;
         for send in &self.map {
-            all_empty = all_empty || self.map.get(send.0).unwrap().rcv_buf.is_empty();
+            all_empty = all_empty && (self.map.get(send.0).unwrap().used == 0);
         }
         all_empty
     }
