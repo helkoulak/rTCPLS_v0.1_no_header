@@ -400,7 +400,7 @@ impl TcplsSession {
             nbr_bytes_received: 0,
             nbr_records_received: 0,
             is_primary: false,
-            state: TcplsConnectionState::CLOSED,
+            state: TcplsConnectionState::CONNECTED,
         });
     }
     fn handle_fake_client_hello(&mut self,  m: &Message, id: u64) -> Result<(), Error>{
@@ -442,7 +442,7 @@ impl TcplsSession {
             .into_unencrypted_opaque()
             .encode()
             .as_slice())
-            .expect("Sending fake client hello failed");
+            .expect("Sending fake server hello failed");
     }
 
     fn process_fake_client_hello<'a>(
