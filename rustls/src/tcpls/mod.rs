@@ -15,7 +15,7 @@ use crate::AlertDescription::IllegalParameter;
 use crate::InvalidMessage::{InvalidContentType, InvalidEmptyPayload};
 use crate::msgs::codec;
 use crate::msgs::enums::{Compression, ECPointFormat, ExtensionType};
-use crate::msgs::handshake::{ClientExtension, ClientHelloPayload, HandshakeMessagePayload, HandshakePayload, HasServerExtensions, Random, ServerExtension, ServerHelloPayload, SessionId};
+use crate::msgs::handshake::{ClientExtension, ClientHelloPayload, HandshakeMessagePayload, HandshakePayload, HasServerExtensions, KeyShareEntry, Random, ServerExtension, ServerHelloPayload, SessionId};
 use crate::msgs::message::{Message, MessageError, MessagePayload, OpaqueMessage, PlainMessage};
 use crate::PeerMisbehaved::{InvalidTcplsJoinToken, TcplsJoinExtensionNotFound};
 use crate::recvbuf::RecvBufMap;
@@ -127,18 +127,6 @@ impl TcplsSession {
         let request = PlainMessage::from(ch)
             .into_unencrypted_opaque()
             .encode();
-
-
-
-        if self.tls_conn.as_ref().unwrap().is_handshaking() {
-            self.tls_conn.as_mut()
-                .unwrap()
-                .outstanding_tcp_conns
-                .as_mut_ref()
-                .get_mut(&id)
-                .unwrap().buffer_request(request);
-                return Ok(())
-        };
 
 
             self.tls_conn.as_mut()

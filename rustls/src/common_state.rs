@@ -390,7 +390,6 @@ impl CommonState {
     pub(crate) fn start_outgoing_traffic(&mut self) {
         self.may_send_application_data = true;
         self.flush_plaintext();
-        self.outstanding_tcp_conns.flush_requests();
     }
 
     pub(crate) fn start_traffic(&mut self) {
