@@ -95,6 +95,18 @@ impl TcplsSession {
     pub fn join_tcp_connection(&mut self,  id: u64) -> Result<(), Error> {
         assert_eq!(self.tls_conn.as_ref().unwrap().side, Side::Client);
 
+        // Check if request to join not already sent
+        match self.tls_conn.as_mut()
+            .unwrap()
+            .outstanding_tcp_conns
+            .as_mut_ref()
+            .get_mut(&id)
+            .unwrap()
+            .request_sent {
+            true => return Ok(()),
+            false => (),
+        };
+
         let mut client_conn = match self.tls_conn.as_mut().unwrap() {
             Connection::Client(conn) => conn,
             Connection::Server(_conn) => panic!("Server connection found. Client connection required")
@@ -138,6 +150,13 @@ impl TcplsSession {
                 .socket
                 .write(request.as_slice())
                 .expect("Sending fake client hello failed");
+        self.tls_conn.as_mut()
+            .unwrap()
+            .outstanding_tcp_conns
+            .as_mut_ref()
+            .get_mut(&id)
+            .unwrap()
+            .request_sent = true;
 
         Ok(())
     }
