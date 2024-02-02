@@ -115,10 +115,8 @@ impl TlsServer {
         // see if the backend is readable too.
         let token = ev.token();
         if ev.is_readable() {
-            self.do_read(recv_map, token);
-            if !self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() {
-                self.verify_received(recv_map);
-            }
+            self.do_read(recv_map, token.0 as u64);
+
 
             self.try_back_read();
         }
@@ -131,7 +129,7 @@ impl TlsServer {
             let _ = self
                 .tcpls_session
                 .tcp_connections
-                .get_mut(&0)
+                .get_mut(&(token.0 as u64))
                 .unwrap()
                 .socket
                 .shutdown(net::Shutdown::Both);
@@ -191,9 +189,14 @@ impl TlsServer {
         self.back = None;
     }
 
-    fn do_read(&mut self, app_buffers: &mut RecvBufMap, token: Token) {
+    fn do_read(&mut self, app_buffers: &mut RecvBufMap, id: u64) {
+        if self.tcpls_session.tls_conn.as_mut().unwrap().outstanding_tcp_conns.as_mut_ref().contains_key(&id) {
+            self.process_join_reponse(id);
+            return;
+        }
+
         // Read some TLS data.
-        match self.tcpls_session.recv_on_connection(&token) {
+        match self.tcpls_session.recv_on_connection(id) {
             Err(err) => {
                 if let io::ErrorKind::WouldBlock = err.kind() {
                     return;
@@ -322,9 +325,9 @@ impl TlsServer {
     }
 
     fn register(&mut self, registry: &mio::Registry, app_buf: &RecvBufMap, token: Token) {
-        let event_set = self.event_set(app_buf);
+        let event_set = self.event_set(app_buf, token.0 as u64 );
 
-        let mut socket = self.tcpls_session.get_socket(token);
+        let mut socket = self.tcpls_session.get_socket(token.0 as u64);
 
        match registry
             .register(socket, token, event_set) {
@@ -345,9 +348,9 @@ impl TlsServer {
     }
 
     fn reregister(&mut self, registry: &mio::Registry, app_buf: &RecvBufMap, token: Token) {
-        let event_set = self.event_set(app_buf);
+        let event_set = self.event_set(app_buf, token.0 as u64);
 
-        let mut socket = self.tcpls_session.get_socket(token);
+        let mut socket = self.tcpls_session.get_socket(token.0 as u64);
         registry
             .reregister(socket, token, event_set)
             .unwrap();
@@ -367,8 +370,11 @@ impl TlsServer {
 
     /// What IO events we're currently waiting for,
     /// based on wants_read/wants_write.
-    fn event_set(&self, app_buf: &RecvBufMap) -> mio::Interest {
-        let rd = self.tcpls_session.tls_conn.as_ref().unwrap().wants_read(app_buf);
+    fn event_set(&mut self, app_buf: &RecvBufMap, id: u64) -> mio::Interest {
+        let rd = match self.tcpls_session.tls_conn.as_mut().unwrap().outstanding_tcp_conns.as_mut_ref().contains_key(&id) {
+            true => self.tcpls_session.tls_conn.as_mut().unwrap().outstanding_tcp_conns.wants_read(),
+            false => self.tcpls_session.tls_conn.as_mut().unwrap().wants_read(app_buf),
+        };;
         let wr = self.tcpls_session.tls_conn.as_ref().unwrap().wants_write();
 
         if rd && wr {
@@ -382,6 +388,29 @@ impl TlsServer {
 
     fn is_closed(&self) -> bool {
         self.closed
+    }
+
+    pub(crate) fn process_join_reponse(&mut self, id: u64) {
+        match self.tcpls_session
+            .tls_conn
+            .as_mut()
+            .unwrap()
+            .outstanding_tcp_conns
+            .as_mut_ref()
+            .get_mut(&id)
+            .unwrap()
+            .receive_join_request() {
+            Ok(bytes) => (),
+            Err(ref error) => if error.kind() == io::ErrorKind::WouldBlock {
+                return;
+            },
+            Err(error) => panic!("{:?}", error),
+        }
+
+        match self.tcpls_session.process_join_request(id) {
+            Ok(()) => return,
+            Err(err) => panic!("{:?}", err),
+        };
     }
 }
 
@@ -549,7 +578,7 @@ fn main() {
 
     let mut events = mio::Events::with_capacity(256);
     loop {
-        poll.poll(&mut events, Some(Duration::new(5, 0))).unwrap();
+        poll.poll(&mut events, None).unwrap(); //Some(Duration::new(5, 0))
 
         for event in events.iter() {
             match event.token() {
@@ -558,7 +587,10 @@ fn main() {
                         .accept(poll.registry(), &recv_map, event.token())
                         .expect("error accepting socket");
                 }
-                _ => tcpls_server.conn_event(poll.registry(), event, &mut recv_map),
+                _ => {
+                    tcpls_server.conn_event(poll.registry(), event, &mut recv_map);
+                    tcpls_server.verify_received(&mut recv_map);
+                },
             }
         }
     }
