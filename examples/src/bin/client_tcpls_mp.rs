@@ -9,18 +9,11 @@ use std::io::{Read, Write};
 use std::ops::{Deref, DerefMut};
 use std::str;
 use std::sync::Arc;
-use std::time::Duration;
-
 use docopt::Docopt;
-use env_logger::builder;
-use env_logger::fmt::Color::White;
 use mio::Token;
 use ring::digest;
-
-use rustls::{client, OwnedTrustAnchor, RootCertStore, };
 use rustls::recvbuf::RecvBufMap;
-use rustls::tcpls::{build_tls_client_config, DEFAULT_CONNECTION_ID, lookup_address, TcplsSession};
-use rustls::tcpls::TlsConfig::Client;
+use rustls::tcpls::{build_tls_client_config, lookup_address, TcplsSession};
 
 const CLIENT1: mio::Token = mio::Token(0);
 const CLIENT2: mio::Token = mio::Token(1);
@@ -30,6 +23,7 @@ struct TlsClient {
     closing: bool,
     clean_closure: bool,
     tcpls_session: TcplsSession,
+    all_joined: bool,
 
 }
 
@@ -39,6 +33,7 @@ impl TlsClient {
             closing: false,
             clean_closure: false,
             tcpls_session: TcplsSession::new(false),
+            all_joined: false,
         }
     }
 
@@ -53,6 +48,14 @@ impl TlsClient {
 
         if ev.is_writable() {
             self.do_write(token.0 as u64);
+        }
+
+        if  self.all_joined {
+            self.send_file("Cargo.toml", 0).expect("");
+            self.send_file("Cargo.lock", 1).expect("");
+            self.send_file("TLS_HS_Client", 2).expect("");
+            self.do_write(token.0 as u64);
+            print!("sent on connection {:?}", token.0)
         }
 
 
@@ -141,6 +144,7 @@ impl TlsClient {
             self.tcpls_session.send_on_connection(id, None).expect("Send on connection failed");
         }
 
+
     }
 
     /// Registers self as a 'listener' in mio::Registry
@@ -167,11 +171,11 @@ impl TlsClient {
     fn event_set(&mut self, app_buf: & RecvBufMap, id: u64) -> mio::Interest {
 
         let rd = match self.tcpls_session.tls_conn.as_mut().unwrap().outstanding_tcp_conns.as_mut_ref().contains_key(&id) {
-            true => self.tcpls_session.tls_conn.as_mut().unwrap().outstanding_tcp_conns.wants_read(),
+            true => self.tcpls_session.tls_conn.as_mut().unwrap().outstanding_tcp_conns.wants_read(id),
             false => self.tcpls_session.tls_conn.as_mut().unwrap().wants_read(app_buf),
             };
         let wr = match self.tcpls_session.tls_conn.as_mut().unwrap().outstanding_tcp_conns.as_mut_ref().contains_key(&id) {
-            true => self.tcpls_session.tls_conn.as_mut().unwrap().outstanding_tcp_conns.wants_write(),
+            true => self.tcpls_session.tls_conn.as_mut().unwrap().outstanding_tcp_conns.wants_write(id),
             false => self.tcpls_session.tls_conn.as_mut().unwrap().wants_write(),
         };
 
@@ -252,7 +256,13 @@ impl TlsClient {
         }
 
         match self.tcpls_session.process_join_request(id) {
-            Ok(()) => return,
+            Ok(()) => {
+                self.all_joined = self.tcpls_session.tls_conn.as_mut()
+                    .unwrap()
+                    .outstanding_tcp_conns
+                    .as_mut_ref().is_empty();
+                return
+            },
             Err(err) => panic!("{:?}", err),
         };
     }
@@ -389,10 +399,6 @@ fn main() {
     // Create second tcp conection
     client.tcpls_session.tcpls_connect(dest_add2, None, None, false);
 
-
-    client.send_file("Cargo.toml", 0).expect("");
-    client.send_file("Cargo.lock", 1).expect("");
-    client.send_file("TLS_HS_Client", 2).expect("");
 
     let mut poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(50);

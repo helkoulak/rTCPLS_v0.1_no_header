@@ -135,7 +135,7 @@ impl TlsServer {
                 .shutdown(net::Shutdown::Both);
             self.close_back();
             self.closed = true;
-            self.deregister(registry);
+            self.deregister(registry, token.0 as u64);
         } else {
             self.reregister(registry, recv_map, token);
         }
@@ -169,7 +169,7 @@ impl TlsServer {
                 &stream.1.as_ref_consumed()[2..hash_index - 4],
                 &stream.1.as_ref_consumed()[hash_index..].iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>(),
                 unprocessed_len);
-            stream.1.consume(received_len);
+            stream.1.empty_stream();
         }
     }
 
@@ -356,9 +356,9 @@ impl TlsServer {
             .unwrap();
     }
 
-    fn deregister(&mut self, registry: &mio::Registry) {
+    fn deregister(&mut self, registry: &mio::Registry, id: u64) {
         registry
-            .deregister(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket)
+            .deregister(&mut self.tcpls_session.tcp_connections.get_mut(&id).unwrap().socket)
             .unwrap();
 
         if self.back.is_some() {
@@ -372,7 +372,7 @@ impl TlsServer {
     /// based on wants_read/wants_write.
     fn event_set(&mut self, app_buf: &RecvBufMap, id: u64) -> mio::Interest {
         let rd = match self.tcpls_session.tls_conn.as_mut().unwrap().outstanding_tcp_conns.as_mut_ref().contains_key(&id) {
-            true => self.tcpls_session.tls_conn.as_mut().unwrap().outstanding_tcp_conns.wants_read(),
+            true => self.tcpls_session.tls_conn.as_mut().unwrap().outstanding_tcp_conns.wants_read(id),
             false => self.tcpls_session.tls_conn.as_mut().unwrap().wants_read(app_buf),
         };;
         let wr = self.tcpls_session.tls_conn.as_ref().unwrap().wants_write();
@@ -578,6 +578,7 @@ fn main() {
 
     let mut events = mio::Events::with_capacity(256);
     loop {
+        tcpls_server.verify_received(&mut recv_map);
         poll.poll(&mut events, None).unwrap(); //Some(Duration::new(5, 0))
 
         for event in events.iter() {
@@ -589,7 +590,6 @@ fn main() {
                 }
                 _ => {
                     tcpls_server.conn_event(poll.registry(), event, &mut recv_map);
-                    tcpls_server.verify_received(&mut recv_map);
                 },
             }
         }

@@ -281,16 +281,6 @@ struct Args {
     arg_hostname: String,
 }
 
-
-
-
-
-
-
-
-
-
-
 #[cfg(feature = "dangerous_configuration")]
 mod danger {
     pub struct NoCertificateVerification {}
