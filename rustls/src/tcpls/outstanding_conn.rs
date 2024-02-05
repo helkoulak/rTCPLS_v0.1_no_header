@@ -50,20 +50,12 @@ impl OutstandingConnMap {
         &mut self.map
     }
 
-    pub fn wants_write(&self) -> bool {
-        let mut wants_write = false;
-        for send in &self.map {
-            wants_write = wants_write || (self.map.get(send.0).unwrap().request_sent == false);
-        }
-        wants_write
+    pub fn wants_write(&self, id: u64) -> bool {
+        self.map.get(&id).unwrap().request_sent == false
     }
 
-    pub fn wants_read(&self) -> bool {
-        let mut all_empty = true;
-        for send in &self.map {
-            all_empty = all_empty && (self.map.get(send.0).unwrap().used == 0);
-        }
-        all_empty
+    pub fn wants_read(&self, id: u64) -> bool {
+        self.map.get(&id).unwrap().used == 0
     }
 
 }
