@@ -121,6 +121,16 @@ impl RecvBuf {
         self.len = 0;
     }
 
+    pub fn empty_stream(&mut self) {
+        for byte in self.data.iter_mut() {
+            *byte = 0;
+        }
+        self.offset = 0;
+        self.consumed = 0;
+        self.len = 0;
+
+    }
+
     /// Read data out of this object, writing it into `buf`
     /// and returning how many bytes were written there.
     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
