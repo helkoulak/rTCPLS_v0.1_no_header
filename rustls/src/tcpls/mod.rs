@@ -221,7 +221,7 @@ impl TcplsSession {
     }
     
 
-    pub fn send_on_connection(&mut self, id: u64, wr: Option<&mut dyn io::Write>) -> Result<usize, Error> {
+    pub fn send_on_connection(&mut self, conn_id: u64, wr: Option<&mut dyn io::Write>) -> Result<usize, Error> {
         let tls_conn = self.tls_conn.as_mut().unwrap();
 
         let (has_pending, pending_at) = match tls_conn.record_layer.streams.has_pending {
@@ -237,7 +237,7 @@ impl TcplsSession {
             Some(socket) => socket,
             None => &mut self
                 .tcp_connections
-                .get_mut(&id)
+                .get_mut(&conn_id)
                 .unwrap()
                 .socket,
         };
