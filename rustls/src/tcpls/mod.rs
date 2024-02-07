@@ -21,7 +21,7 @@ use crate::PeerMisbehaved::{InvalidTcplsJoinToken, TcplsJoinExtensionNotFound};
 use crate::recvbuf::RecvBufMap;
 use crate::tcpls::network_address::AddressMap;
 use crate::tcpls::outstanding_conn::OutstandingTcpConn;
-use crate::tcpls::stream::SimpleIdHashMap;
+use crate::tcpls::stream::{SimpleIdHashMap, StreamIter};
 use crate::verify::{
     AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
 };
@@ -222,7 +222,7 @@ impl TcplsSession {
     }
     
 
-    pub fn send_on_connection(&mut self, conn_id: u64, wr: Option<&mut dyn io::Write>) -> Result<usize, Error> {
+    pub fn send_on_connection(&mut self, conn_id: u64, wr: Option<&mut dyn io::Write>, flushables: Option<StreamIter>) -> Result<usize, Error> {
         let tls_conn = self.tls_conn.as_mut().unwrap();
 
         let (has_pending, pending_at) = match tls_conn.record_layer.streams.has_pending {
@@ -230,8 +230,10 @@ impl TcplsSession {
             None => (false, 0),
         };
 
+        let stream_iter = flushables.unwrap_or_else(|| tls_conn.record_layer.streams.flushable());
+
         // Iterator over flushable streams. If applicable, Start with the stream that has a remainder of a partially sent record
-        let flushable_streams = tls_conn.record_layer.streams.flushable().skip_while(|&id| id != pending_at as u64 && has_pending);
+        let flushable_streams = stream_iter.skip_while(|&id| id != pending_at as u64 && has_pending);
 
         let mut done = 0;
         let socket = match wr {
