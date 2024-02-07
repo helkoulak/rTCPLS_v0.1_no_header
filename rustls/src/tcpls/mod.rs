@@ -94,6 +94,7 @@ impl TcplsSession {
 
     pub fn join_tcp_connection(&mut self,  id: u64) -> Result<(), Error> {
         assert_eq!(self.tls_conn.as_ref().unwrap().side, Side::Client);
+        assert!(!self.tls_conn.as_ref().unwrap().is_handshaking());
 
         // Check if request to join not already sent
         match self.tls_conn.as_mut()
