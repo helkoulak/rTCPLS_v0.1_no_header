@@ -329,6 +329,8 @@ impl StreamMap {
     pub fn collected(&self) -> StreamIter { StreamIter::from(&self.collected) }
 
 
+    pub fn streams_to_flush(&self, flushables: SimpleIdHashSet) -> StreamIter {StreamIter::from(&flushables)}
+
     /// Returns the set of ids of open streams
     pub fn open_streams(&self) -> SimpleIdHashSet {
         let mut id_set = SimpleIdHashSet::default();
