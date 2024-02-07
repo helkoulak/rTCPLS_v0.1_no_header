@@ -10,6 +10,7 @@ use std::ops::{Deref, DerefMut};
 use std::str;
 use std::sync::Arc;
 use docopt::Docopt;
+use mio::net::SocketAddr;
 use mio::Token;
 use ring::digest;
 use rustls::recvbuf::RecvBufMap;
@@ -24,7 +25,7 @@ struct TlsClient {
     clean_closure: bool,
     tcpls_session: TcplsSession,
     all_joined: bool,
-
+    counter: usize,
 }
 
 impl TlsClient {
@@ -34,6 +35,7 @@ impl TlsClient {
             clean_closure: false,
             tcpls_session: TcplsSession::new(false),
             all_joined: false,
+            counter: 3,
         }
     }
 
@@ -50,12 +52,20 @@ impl TlsClient {
             self.do_write(token.0 as u64);
         }
 
-        if  self.all_joined {
+        if  self.all_joined && self.counter != 0{
             self.send_file("Cargo.toml", 0).expect("");
             self.send_file("Cargo.lock", 1).expect("");
             self.send_file("TLS_HS_Client", 2).expect("");
+            self.send_file("Cargo.toml", 3).expect("");
+            self.send_file("Cargo.lock", 4).expect("");
+            self.send_file("TLS_HS_Client", 5).expect("");
+            self.send_file("Cargo.toml", 6).expect("");
+            self.send_file("Cargo.lock", 7).expect("");
+            self.send_file("TLS_HS_Client", 8).expect("");
+            self.send_file("Cargo.toml", 9).expect("");
             self.do_write(token.0 as u64);
-            print!("sent on connection {:?}", token.0)
+            print!("sent on connection {:?} \n", token.0);
+            self.counter -= 1;
         }
 
 
@@ -75,13 +85,15 @@ impl TlsClient {
     /// We're ready to do a read.
     fn do_read(&mut self, app_buffers: &mut RecvBufMap, id: u64) {
         if self.tcpls_session.tls_conn.as_mut().unwrap().outstanding_tcp_conns.as_mut_ref().contains_key(&id) {
-            self.process_join_reponse(id);
+            if !self.tcpls_session.tls_conn.as_mut().unwrap().is_handshaking() {
+                self.process_join_reponse(id);
+            }
             return;
         }
         // Read TLS data.  This fails if the underlying TCP connection
         // is broken.
 
-        match self.tcpls_session.recv_on_connection(id) {
+        match self.tcpls_session.recv_on_connection(id as u32) {
             Err(error) => {
                 if error.kind() == io::ErrorKind::WouldBlock {
                     return;
@@ -105,7 +117,7 @@ impl TlsClient {
         // Reading some TLS data might have yielded new TLS
         // messages to process.  Errors from this indicate
         // TLS protocol problems and are fatal.
-        let io_state = match self.tcpls_session.stream_recv(app_buffers) {
+        let io_state = match self.tcpls_session.stream_recv(app_buffers, id as u32) {
             Ok(io_state) => io_state,
             Err(err) => {
                 println!("TLS error: {:?}", err);
@@ -141,7 +153,7 @@ impl TlsClient {
             return;
         }
         if self.tcpls_session.tcp_connections.contains_key(&id) {
-            self.tcpls_session.send_on_connection(id, None).expect("Send on connection failed");
+            self.tcpls_session.send_on_connection(id, None, None).expect("Send on connection failed");
         }
 
 

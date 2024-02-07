@@ -43,7 +43,7 @@ impl TlsClient {
         let token = &ev.token();
 
         if ev.is_readable() {
-           self.do_read(recv_map, token);
+           self.do_read(recv_map, token.0 as u64);
         }
 
         if ev.is_writable() {
@@ -65,11 +65,11 @@ impl TlsClient {
     }
 
     /// We're ready to do a read.
-    fn do_read(&mut self, app_buffers: &mut RecvBufMap, token: &Token) {
+    fn do_read(&mut self, app_buffers: &mut RecvBufMap, id: u64) {
         // Read TLS data.  This fails if the underlying TCP connection
         // is broken.
 
-        match self.tcpls_session.recv_on_connection(token.0 as u64) {
+        match self.tcpls_session.recv_on_connection(id as u32) {
             Err(error) => {
                 if error.kind() == io::ErrorKind::WouldBlock {
                     return;
@@ -93,7 +93,7 @@ impl TlsClient {
         // Reading some TLS data might have yielded new TLS
         // messages to process.  Errors from this indicate
         // TLS protocol problems and are fatal.
-        let io_state = match self.tcpls_session.stream_recv(app_buffers) {
+        let io_state = match self.tcpls_session.stream_recv(app_buffers, id as u32) {
             Ok(io_state) => io_state,
             Err(err) => {
                 println!("TLS error: {:?}", err);
@@ -123,7 +123,7 @@ impl TlsClient {
 
     fn do_write(&mut self, token: &Token) {
 
-        self.tcpls_session.send_on_connection(token.0 as u64, None).unwrap();
+        self.tcpls_session.send_on_connection(token.0 as u64, None, None ).unwrap();
     }
 
     /// Registers self as a 'listener' in mio::Registry

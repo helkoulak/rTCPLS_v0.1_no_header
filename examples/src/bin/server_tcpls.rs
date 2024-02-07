@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::io;
 use std::io::{Read, Write};
 use std::net;
+use std::process::id;
 
 use std::time::Duration;
 
@@ -191,7 +192,7 @@ impl TlsServer {
 
     fn do_read(&mut self, app_buffers: &mut RecvBufMap, id: u64) {
         // Read some TLS data.
-        match self.tcpls_session.recv_on_connection(id) {
+        match self.tcpls_session.recv_on_connection(id as u32) {
             Err(err) => {
                 if let io::ErrorKind::WouldBlock = err.kind() {
                     return;
@@ -212,7 +213,7 @@ impl TlsServer {
         // Reading some TLS data might have yielded new TLS
         // messages to process.  Errors from this indicate
         // TLS protocol problems and are fatal.
-        let io_state = match self.tcpls_session.stream_recv(app_buffers) {
+        let io_state = match self.tcpls_session.stream_recv(app_buffers, id as u32 ) {
             Ok(io_state) => io_state,
             Err(err) => {
                 println!("TLS error: {:?}", err);
