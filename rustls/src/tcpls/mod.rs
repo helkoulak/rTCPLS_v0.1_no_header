@@ -319,6 +319,7 @@ impl TcplsSession {
     }
     pub fn process_join_request(&mut self, id: u64) -> Result<(), Error> {
 
+        assert!(!self.tls_conn.as_ref().unwrap().is_handshaking());
         let bytes_to_process = self.tls_conn
             .as_mut()
             .unwrap()
