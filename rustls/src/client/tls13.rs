@@ -795,7 +795,7 @@ fn emit_finished_tls13(
             payload: HandshakePayload::Finished(verify_data_payload),
         }),
     };
-
+    trace!("sending finished {:?}", m);
     transcript.add_message(&m);
     common.send_msg(m, true, DEFAULT_STREAM_ID);
 }
