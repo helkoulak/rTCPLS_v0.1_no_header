@@ -329,7 +329,15 @@ impl StreamMap {
     pub fn collected(&self) -> StreamIter { StreamIter::from(&self.collected) }
 
 
-    pub fn streams_to_flush(&self, flushables: SimpleIdHashSet) -> StreamIter {StreamIter::from(&flushables)}
+    pub fn streams_to_flush(&self, flushables: &mut SimpleIdHashSet, include_pending: bool) -> StreamIter {
+        if include_pending {
+           match self.has_pending {
+               Some(id) => flushables.insert(id as u64),
+               None => false,
+           };
+        }
+        StreamIter::from(&flushables)
+    }
 
     /// Returns the set of ids of open streams
     pub fn open_streams(&self) -> SimpleIdHashSet {

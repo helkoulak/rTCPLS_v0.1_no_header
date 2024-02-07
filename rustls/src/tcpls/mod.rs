@@ -230,10 +230,9 @@ impl TcplsSession {
             None => (false, 0),
         };
 
+        //Flush streams selected by the app or flush all
         let stream_iter = flushables.unwrap_or_else(|| tls_conn.record_layer.streams.flushable());
 
-        // Iterator over flushable streams. If applicable, Start with the stream that has a remainder of a partially sent record
-        let flushable_streams = stream_iter.skip_while(|&id| id != pending_at as u64 && has_pending);
 
         let mut done = 0;
         let socket = match wr {
@@ -245,7 +244,7 @@ impl TcplsSession {
                 .socket,
         };
 
-        for id in flushable_streams {
+        for id in stream_iter {
 
             let stream = match tls_conn.record_layer.streams.get_mut(id as u16) {
                 Some(stream) => {
