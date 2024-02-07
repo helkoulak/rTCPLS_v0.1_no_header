@@ -293,11 +293,12 @@ impl TcplsSession {
     }
 
     /// Receive data on specified TCP socket
-    pub fn recv_on_connection(&mut self, id: u64) -> Result<usize, io::Error> {
-        let socket = match self.tcp_connections.get_mut(&id) {
+    pub fn recv_on_connection(&mut self, id: u32) -> Result<usize, io::Error> {
+        let socket = match self.tcp_connections.get_mut(&(id as u64)) {
             Some(conn) => &mut conn.socket,
             None => panic!("Socket of specified TCP connection does not exist")
         };
+        self.tls_conn.as_mut().unwrap().set_connection_in_use(id);
        self.tls_conn.as_mut().unwrap().read_tls(socket)
     }
 
@@ -305,11 +306,14 @@ impl TcplsSession {
     pub fn stream_recv(
         &mut self,
         app_buffers: &mut RecvBufMap,
+        conn_id: u32,
     ) -> Result<IoState, Error> {
 
         let tls_conn = self.tls_conn.as_mut().unwrap();
+        // Set deframer buffer to use
+        tls_conn.set_connection_in_use(conn_id);
 
-            let io_state = match tls_conn.process_new_packets(app_buffers) {
+        let io_state = match tls_conn.process_new_packets(app_buffers) {
                 Ok(io_state) => io_state,
                 Err(err) => return Err(err),
             };

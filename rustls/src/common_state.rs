@@ -6,7 +6,7 @@ use crate::key;
 use crate::log::{debug, error, warn};
 use crate::msgs::alert::AlertMessagePayload;
 use crate::msgs::base::Payload;
-use crate::msgs::deframer::MessageDeframer;
+use crate::msgs::deframer::MessageDeframerMap;
 use crate::msgs::enums::{AlertLevel, KeyUpdateRequest};
 use crate::msgs::fragmenter::MessageFragmenter;
 use crate::msgs::handshake::TcplsToken;
@@ -47,9 +47,12 @@ pub struct CommonState {
     pub(crate) received_middlebox_ccs: u8,
     pub(crate) peer_certificates: Option<Vec<key::Certificate>>,
     message_fragmenter: MessageFragmenter,
-    pub(crate) message_deframer: MessageDeframer,
+    pub(crate) deframers_map: MessageDeframerMap,
+
 
     pub(crate) received_plaintext: ChunkVecBuffer,
+    /// id of currently used tcp connection
+    pub(crate) conn_in_use: u32,
 
     pub(crate) tcpls_tokens: Vec<TcplsToken>,
     pub(crate) join_msg_received: bool,
@@ -86,10 +89,12 @@ impl CommonState {
             message_fragmenter: MessageFragmenter::default(),
             outstanding_tcp_conns: OutstandingConnMap::default(),
             received_plaintext: ChunkVecBuffer::new(Some(DEFAULT_RECEIVED_PLAINTEXT_LIMIT)),
+            conn_in_use: 0,
             tcpls_tokens: Vec::new(),
             join_msg_received: false,
             sendable_plaintext: PlainBufsMap::default(),
-            message_deframer: MessageDeframer::default(),
+            deframers_map: MessageDeframerMap::new(),
+
 
             queued_key_update_message: None,
 
@@ -101,6 +106,10 @@ impl CommonState {
         }
     }
 
+    /// sets the id of the currently active tcp connection
+    pub fn set_connection_in_use(&mut self, conn_id: u32) {
+        self.conn_in_use = conn_id;
+    }
 
 
     /// Returns true if the caller should call [`Connection::write_tls`] as soon as possible.

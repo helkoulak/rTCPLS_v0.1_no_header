@@ -1,19 +1,20 @@
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, hash_map};
 use std::io;
 use std::ops::Range;
 
 use super::base::Payload;
 use super::codec::Codec;
-use super::message::PlainMessage;
+use super::message::{MAX_WIRE_SIZE, PlainMessage};
 use crate::enums::{ContentType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerMisbehaved};
-use crate::msgs::{codec, message};
+use crate::msgs::codec;
 use crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
 use crate::msgs::message::{BorrowedOpaqueMessage, MessageError};
 use crate::record_layer::{Decrypted, RecordLayer};
 use crate::recvbuf::{RecvBuf, RecvBufMap};
 use crate::tcpls::frame::{TcplsHeader, TCPLS_HEADER_SIZE};
+use crate::tcpls::stream::SimpleIdHashMap;
 
 
 /// This deframer works to reconstruct TLS messages from a stream of arbitrary-sized reads.
@@ -22,6 +23,9 @@ use crate::tcpls::frame::{TcplsHeader, TCPLS_HEADER_SIZE};
 /// QUIC connections will call `push()` to append handshake payload data directly.
 #[derive(Default)]
 pub struct MessageDeframer {
+
+    /// Id of active TCP connection
+    id: u64,
 
     /// Set if the peer is not talking TLS, but some other
     /// protocol.  The caller should abort the connection, because
@@ -48,13 +52,22 @@ pub struct MessageDeframer {
 }
 
 impl MessageDeframer {
+    pub fn new(id: u64) -> MessageDeframer {
+        MessageDeframer{
+            id,
+            ..Default::default()
+        }
+    }
 
-    /// Return any decrypted messages that the deframer has been able to parse.
+
+        /// Return any decrypted messages that the deframer has been able to parse.
     ///
     /// Returns an `Error` if the deframer failed to parse some message contents or if decryption
     /// failed, `Ok(None)` if no full message is buffered or if trial decryption failed, and
     /// `Ok(Some(_))` if a valid message was found and decrypted successfully.
     pub fn pop(&mut self, record_layer: &mut RecordLayer, app_buffers: &mut RecvBufMap) -> Result<Option<Deframed>, Error> {
+        println!("length of deframer buffer is {:?} \n", self.buf.len());
+        println!("Used  {:?} \n", self.used);
         if let Some(last_err) = self.last_error.clone() {
             return Err(last_err);
         } else if self.used == 0 {
@@ -157,6 +170,8 @@ impl MessageDeframer {
                     TcplsHeader::decode_tcpls_header_from_slice(
                         &record_layer.decrypt_header(sample, &m.payload[..TCPLS_HEADER_SIZE]).expect("decrypting header failed")
                     );
+                println!("Decoded Header components: chunk_num{:?} lenght {:?} stream_id {:?}",
+                         header_decoded.chunk_num, header_decoded.offset_step, header_decoded.stream_id);
             }
             if m.typ != ContentType::Handshake {
                 self.record_info.insert(start as u64, RangeBufInfo::from(header_decoded.chunk_num, header_decoded.stream_id, end - start));
@@ -381,7 +396,7 @@ impl MessageDeframer {
         // At this point, the buffer resizing logic below should reduce the buffer size.
         let allow_max = match self.joining_hs {
             Some(_) => MAX_HANDSHAKE_SIZE as usize,
-            None => message::MAX_WIRE_SIZE,
+            None => MAX_WIRE_SIZE,
         };
 
         if self.used >= allow_max {
@@ -512,6 +527,30 @@ impl MessageDeframer {
     }
 }
 
+#[derive(Default)]
+pub struct MessageDeframerMap {
+    deframers: SimpleIdHashMap<MessageDeframer>,
+}
+
+impl MessageDeframerMap {
+    pub fn new() -> MessageDeframerMap {
+        MessageDeframerMap {
+            ..Default::default()
+        }
+    }
+
+    pub(crate) fn get_or_create_deframer(&mut self, connection_id: u64) -> &mut MessageDeframer {
+        match self.deframers.entry(connection_id) {
+            hash_map::Entry::Vacant(v) => {
+                v.insert(MessageDeframer::new(connection_id))
+            },
+            hash_map::Entry::Occupied(v) => v.into_mut(),
+        }
+    }
+
+
+}
+
 enum HandshakePayloadState {
     /// Waiting for more data.
     Blocked,
@@ -636,7 +675,7 @@ const DISCARD_THRESHOLD: usize =  MAX_FRAGMENT_LEN ;
 mod tests {
     use std::cmp::Ordering;
     use super::{DISCARD_THRESHOLD, MessageDeframer};
-    use crate::msgs::message::{MAX_WIRE_SIZE, Message};
+    use crate::msgs::message::Message;
     use crate::record_layer::RecordLayer;
     use crate::{ContentType, Error, InvalidMessage};
 

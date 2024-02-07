@@ -339,23 +339,26 @@ impl<Data> ConnectionCommon<Data> {
     /// Returns an object that allows reading plaintext.
     pub fn reader(&mut self) -> Reader {
         let common = &mut self.core.common_state;
+        let active_conn = common.conn_in_use;
+
         Reader {
             received_plaintext: &mut common.received_plaintext,
             // Are we done? i.e., have we processed all received messages, and received a
             // close_notify to indicate that no new messages will arrive?
             peer_cleanly_closed: common.has_received_close_notify
-                && !common.message_deframer.has_pending(),
+                && !common.deframers_map.get_or_create_deframer(active_conn as u64).has_pending(),
             has_seen_eof: common.has_seen_eof,
         }
     }
 
     pub fn reader_app_bufs(&mut self) -> ReaderAppBufs {
         let common = &mut self.core.common_state;
+        let active_conn = common.conn_in_use;
         ReaderAppBufs {
             // Are we done? i.e., have we processed all received messages, and received a
             // close_notify to indicate that no new messages will arrive?
             peer_cleanly_closed: common.has_received_close_notify
-                && !common.message_deframer.has_pending(),
+                && !common.deframers_map.get_or_create_deframer(active_conn as u64).has_pending(),
             has_seen_eof: common.has_seen_eof,
         }
     }
@@ -525,6 +528,7 @@ impl<Data> ConnectionCommon<Data> {
     /// [`process_new_packets()`]: ConnectionCommon::process_new_packets
     /// [`reader()`]: ConnectionCommon::reader_app_bufs
     pub fn read_tls(&mut self, rd: &mut dyn io::Read) -> Result<usize, io::Error> {
+        let active_conn = self.conn_in_use;
         if self.received_plaintext.is_full() {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
@@ -532,7 +536,7 @@ impl<Data> ConnectionCommon<Data> {
             ));
         }
 
-        let res = self.core.common_state.message_deframer.read(rd);
+        let res = self.core.common_state.deframers_map.get_or_create_deframer(active_conn as u64).read(rd);
         if let Ok(0) = res {
             self.has_seen_eof = true;
         }
@@ -668,9 +672,13 @@ impl<Data> ConnectionCore<Data> {
 
     /// Pull a message out of the deframer and send any messages that need to be sent as a result.
     fn deframe(&mut self, app_buffers: &mut RecvBufMap) -> Result<Option<PlainMessage>, Error> {
+        let active_conn = self.common_state.conn_in_use;
+
         match self
             .common_state
-            .message_deframer
+            .deframers_map
+            .get_or_create_deframer(active_conn as u64)
+
             .pop(&mut self.common_state.record_layer, app_buffers)
         {
             Ok(Some(Deframed {
