@@ -491,9 +491,11 @@ fn receive_out_of_order_tls_records_multiple_streams() {
 
     //Send all data
     loop {
-        if tcpls_client.send_on_connection(&Token(0), Some(&mut pipe)).unwrap() == 0 {break}
+        if tcpls_client.send_on_connection(0, Some(&mut pipe), None).unwrap() == 0 {break}
+        //Process records sent from client to server
+        pipe.sess.process_new_packets(&mut recv_svr).expect("TODO: panic message");
     }
-    //send records from client to server
+    //Process remaining sent records from client to server
     server.process_new_packets(&mut recv_svr).expect("TODO: panic message");
 
     //test that data was received in order
@@ -550,7 +552,8 @@ fn send_fragmented_records_on_two_connections() {
     // The receiving side will read a maximum of 4096 bytes in one shot. This will force fragmentation of records while sending.
     // Send part of the data on one tcp connection
     loop {
-        sent += tcpls_client.send_on_connection(&Token(0), Some(&mut pipe)).unwrap();
+        sent += tcpls_client.send_on_connection(0, Some(&mut pipe), None).unwrap();
+        pipe.sess.process_new_packets(&mut recv_svr).unwrap();
         if sent >= 30000 {break}
     }
 
@@ -559,11 +562,12 @@ fn send_fragmented_records_on_two_connections() {
     //Send the rest of data on the second connection
 
     loop {
-        sent = tcpls_client.send_on_connection(&Token(0), Some(&mut pipe2)).unwrap();
+        sent = tcpls_client.send_on_connection(0, Some(&mut pipe2), None).unwrap();
+        pipe2.sess.process_new_packets(&mut recv_svr).unwrap();
         if sent == 0 {break}
     }
 
-    //Process data
+    //Process remaining data
     server.process_new_packets(&mut recv_svr).unwrap();
 
 

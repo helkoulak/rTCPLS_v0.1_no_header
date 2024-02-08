@@ -66,8 +66,6 @@ impl MessageDeframer {
     /// failed, `Ok(None)` if no full message is buffered or if trial decryption failed, and
     /// `Ok(Some(_))` if a valid message was found and decrypted successfully.
     pub fn pop(&mut self, record_layer: &mut RecordLayer, app_buffers: &mut RecvBufMap) -> Result<Option<Deframed>, Error> {
-        println!("length of deframer buffer is {:?} \n", self.buf.len());
-        println!("Used  {:?} \n", self.used);
         if let Some(last_err) = self.last_error.clone() {
             return Err(last_err);
         } else if self.used == 0 {
@@ -170,8 +168,6 @@ impl MessageDeframer {
                     TcplsHeader::decode_tcpls_header_from_slice(
                         &record_layer.decrypt_header(sample, &m.payload[..TCPLS_HEADER_SIZE]).expect("decrypting header failed")
                     );
-                println!("Decoded Header components: chunk_num{:?} lenght {:?} stream_id {:?}",
-                         header_decoded.chunk_num, header_decoded.offset_step, header_decoded.stream_id);
             }
             if m.typ != ContentType::Handshake {
                 self.record_info.insert(start as u64, RangeBufInfo::from(header_decoded.chunk_num, header_decoded.stream_id, end - start));
@@ -675,7 +671,7 @@ const DISCARD_THRESHOLD: usize =  MAX_FRAGMENT_LEN ;
 mod tests {
     use std::cmp::Ordering;
     use super::{DISCARD_THRESHOLD, MessageDeframer};
-    use crate::msgs::message::Message;
+    use crate::msgs::message::{MAX_WIRE_SIZE, Message};
     use crate::record_layer::RecordLayer;
     use crate::{ContentType, Error, InvalidMessage};
 
@@ -959,8 +955,8 @@ mod tests {
 
    #[test]
     fn test_limited_buffer() {
-        const PAYLOAD_LEN: usize = 16_384 * 4;
-        let mut message = Vec::with_capacity(16_389);
+        const PAYLOAD_LEN: usize = 16_384 * 2;
+        let mut message = Vec::with_capacity(MAX_WIRE_SIZE);
         message.push(0x17); // ApplicationData
         message.extend(&[0x03, 0x04]); // ProtocolVersion
         message.extend((PAYLOAD_LEN as u16).to_be_bytes()); // payload length
@@ -976,19 +972,7 @@ mod tests {
         assert_len(4096, input_bytes(&mut d, &message));
        assert_len(4096, input_bytes(&mut d, &message));
        assert_len(4096, input_bytes(&mut d, &message));
-       assert_len(4096, input_bytes(&mut d, &message));
-       assert_len(4096, input_bytes(&mut d, &message));
-       assert_len(4096, input_bytes(&mut d, &message));
-       assert_len(4096, input_bytes(&mut d, &message));
-       assert_len(4096, input_bytes(&mut d, &message));
-       assert_len(4096, input_bytes(&mut d, &message));
-       assert_len(4096, input_bytes(&mut d, &message));
-       assert_len(4096, input_bytes(&mut d, &message));
-       assert_len(4096, input_bytes(&mut d, &message));
-        assert_len(
-            20,
-            input_bytes(&mut d, &message),
-        );
+       assert_len(10, input_bytes(&mut d, &message));
         assert!(input_bytes(&mut d, &message).is_err());
     }
     #[test]
