@@ -164,7 +164,7 @@ impl TcplsSession {
 
 
     pub fn create_tcpls_connection_object(&mut self, socket: TcpStream) -> u32 {
-        let mut tcp_conn = TcpConnection::new(socket, self.next_conn_id);
+        let mut tcp_conn = TcpConnection::new(socket, self.next_conn_id, TcplsConnectionState::CONNECTED);
 
         let new_id = self.next_conn_id;
         tcp_conn.local_address_id = self.address_map.next_local_address_id;
@@ -536,7 +536,7 @@ pub struct TcpConnection {
 }
 
 impl TcpConnection {
-    pub fn new(socket: TcpStream, id: u32) -> Self {
+    pub fn new(socket: TcpStream, id: u32, state: TcplsConnectionState) -> Self {
         Self {
             connection_id: id,
             socket,
@@ -545,7 +545,7 @@ impl TcpConnection {
             nbr_bytes_received: 0,
             nbr_records_received: 0,
             is_primary: false,
-            state: TcplsConnectionState::CLOSED,
+            state,
         }
     }
 }
