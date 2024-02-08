@@ -10,14 +10,19 @@ use std::ops::{Deref, DerefMut};
 use std::str;
 use std::sync::Arc;
 use docopt::Docopt;
+use log::debug;
 use mio::net::SocketAddr;
 use mio::Token;
 use ring::digest;
+use rustls::internal::msgs::codec::u24;
 use rustls::recvbuf::RecvBufMap;
 use rustls::tcpls::{build_tls_client_config, lookup_address, TcplsSession};
+use rustls::tcpls::stream::{SimpleIdHashSet, StreamIter};
 
-const CLIENT1: mio::Token = mio::Token(0);
-const CLIENT2: mio::Token = mio::Token(1);
+const CONNECTION1: mio::Token = mio::Token(0);
+const CONNECTION2: mio::Token = mio::Token(1);
+
+const CONNECTION3: mio::Token = mio::Token(2);
 
 
 struct TlsClient {
@@ -25,7 +30,7 @@ struct TlsClient {
     clean_closure: bool,
     tcpls_session: TcplsSession,
     all_joined: bool,
-    counter: usize,
+    sending_ids: SimpleIdHashSet,
 }
 
 impl TlsClient {
@@ -35,7 +40,7 @@ impl TlsClient {
             clean_closure: false,
             tcpls_session: TcplsSession::new(false),
             all_joined: false,
-            counter: 3,
+            sending_ids: SimpleIdHashSet::default(),
         }
     }
 
@@ -45,29 +50,49 @@ impl TlsClient {
         let token = &ev.token();
 
         if ev.is_readable()  {
-           self.do_read(recv_map, token.0 as u64);
+            self.do_read(recv_map, token.0 as u64);
+            if !self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() && !self.sending_ids.contains(&(token.0 as u64)){
+                let mut stream_iter = StreamIter::default();
+                let mut id_set = SimpleIdHashSet::default();
+
+                print!("Client sends on connection {:?} \n", token.0);
+                if token.0 == 0 {
+                    self.send_file("Cargo.toml", 0).expect("");
+                    self.send_file("Cargo.lock", 1).expect("");
+                    self.send_file("TLS_HS_Client", 2).expect("");
+                    self.send_file("Cargo.toml", 3).expect("");
+                    id_set.insert(0);
+                    id_set.insert(1);
+                    id_set.insert(2);
+                    id_set.insert(3);
+                }
+                if token.0 == 1 {
+                    self.send_file("Cargo.lock", 4).expect("");
+                    self.send_file("TLS_HS_Client", 5).expect("");
+                    self.send_file("Cargo.toml", 6).expect("");
+                    id_set.insert(4);
+                    id_set.insert(5);
+                    id_set.insert(6);
+                }
+                if token.0 == 2 {
+                    self.send_file("Cargo.lock", 7).expect("");
+                    self.send_file("TLS_HS_Client", 8).expect("");
+                    self.send_file("Cargo.toml", 9).expect("");
+                    id_set.insert(7);
+                    id_set.insert(8);
+                    id_set.insert(9);
+                }
+                stream_iter = self.tcpls_session.tls_conn.as_mut().unwrap().streams_to_flush(&mut id_set, true);
+                self.tcpls_session.send_on_connection(token.0 as u64, None, Some(stream_iter));
+                self.sending_ids.insert(token.0 as u64);
+            }
+
+
         }
 
         if ev.is_writable() {
             self.do_write(token.0 as u64);
         }
-
-        if  self.all_joined && self.counter != 0{
-            self.send_file("Cargo.toml", 0).expect("");
-            self.send_file("Cargo.lock", 1).expect("");
-            self.send_file("TLS_HS_Client", 2).expect("");
-            self.send_file("Cargo.toml", 3).expect("");
-            self.send_file("Cargo.lock", 4).expect("");
-            self.send_file("TLS_HS_Client", 5).expect("");
-            self.send_file("Cargo.toml", 6).expect("");
-            self.send_file("Cargo.lock", 7).expect("");
-            self.send_file("TLS_HS_Client", 8).expect("");
-            self.send_file("Cargo.toml", 9).expect("");
-            self.do_write(token.0 as u64);
-            print!("sent on connection {:?} \n", token.0);
-            self.counter -= 1;
-        }
-
 
         if self.is_closed() {
             println!("Connection closed");
@@ -126,17 +151,6 @@ impl TlsClient {
             }
         };
 
-        // Having read some TLS data, and processed any new messages,
-        // we might have new plaintext as a result.
-        //
-        // Read it and then write it to stdout.
-        /*if io_state.plaintext_bytes_to_read() > 0 {
-            let mut plaintext = Vec::new();
-            plaintext.resize(io_state.plaintext_bytes_to_read(), 0u8);
-            self.tcpls_session.tls_conn.as_mut().unwrap().reader().read_exact(&mut plaintext).unwrap();
-            io::stdout().write_all(&plaintext).unwrap();
-        }*/
-
         // If wethat fails, the peer might have started a clean TLS-level
         // session closure.
         if io_state.peer_has_closed() {
@@ -153,6 +167,7 @@ impl TlsClient {
             return;
         }
         if self.tcpls_session.tcp_connections.contains_key(&id) {
+
             self.tcpls_session.send_on_connection(id, None, None).expect("Send on connection failed");
         }
 
@@ -227,7 +242,7 @@ impl TlsClient {
         data.extend(hash.as_ref());
 
         // Print the hash as a hexadecimal string
-        println!("\n \n File bytes on stream {:?} : \n {:?} \n \n SHA-256 Hash {:?} \n Total length: {:?} \n", stream, file_contents, hash, len);
+       // println!("\n \n File bytes on stream {:?} : \n {:?} \n \n SHA-256 Hash {:?} \n Total length: {:?} \n", stream, file_contents, hash, len);
 
         self.tcpls_session.stream_send(stream, data.as_ref(), false).expect("buffering failed");
 
@@ -400,6 +415,7 @@ fn main() {
 
     let dest_add1 = lookup_address("0.0.0.0", 8443);
     let dest_add2 = lookup_address("0.0.0.0", 8444);
+    let dest_add3 = lookup_address("0.0.0.0", 8445);
 
     let mut client = TlsClient::new();
 
@@ -410,12 +426,15 @@ fn main() {
     client.tcpls_session.tcpls_connect(dest_add1, Some(config), Some(server_name), false);
     // Create second tcp conection
     client.tcpls_session.tcpls_connect(dest_add2, None, None, false);
+    // Create third tcp conection
+    client.tcpls_session.tcpls_connect(dest_add3, None, None, false);
 
 
     let mut poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(50);
-    client.register(poll.registry(), &recv_map, CLIENT1);
-    client.register(poll.registry(), &recv_map, CLIENT2);
+    client.register(poll.registry(), &recv_map, CONNECTION1);
+    client.register(poll.registry(), &recv_map, CONNECTION2);
+    client.register(poll.registry(), &recv_map, CONNECTION3);
     loop {
         poll.poll(&mut events, None).unwrap();
 

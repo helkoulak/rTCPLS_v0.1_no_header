@@ -25,10 +25,12 @@ use ring::digest;
 use rustls::{self, tcpls};
 use rustls::recvbuf::RecvBufMap;
 use rustls::tcpls::{server_create_listener, TcplsSession};
+use rustls::tcpls::stream::SimpleIdHashMap;
 
 // Token for our listening socket.
 const LISTENER1: mio::Token = mio::Token(100);
 const LISTENER2: mio::Token = mio::Token(101);
+const LISTENER3: mio::Token = mio::Token(102);
 
 // Which mode the server operates in.
 #[derive(Clone)]
@@ -47,7 +49,7 @@ enum ServerMode {
 /// This binds together a TCP listening socket, some outstanding
 /// connections, and a TLS server configuration.
 struct TlsServer {
-    listeners: HashMap<Token,TcpListener>,
+    listeners: SimpleIdHashMap<TcpListener>,
     next_id: usize,
     tls_config: Arc<rustls::ServerConfig>,
 
@@ -62,7 +64,7 @@ struct TlsServer {
 }
 
 impl TlsServer {
-    fn new(listeners: HashMap<Token, TcpListener>, mode: ServerMode, cfg: Arc<rustls::ServerConfig>) -> Self {
+    fn new(listeners: SimpleIdHashMap<TcpListener>, mode: ServerMode, cfg: Arc<rustls::ServerConfig>) -> Self {
         Self {
             listeners,
 
@@ -81,7 +83,7 @@ impl TlsServer {
 
     fn accept(&mut self, registry: &mio::Registry, recv_map: &RecvBufMap, listener: Token) -> Result<(), io::Error> {
         loop {
-            match self.tcpls_session.server_accept_connection(self.listeners.get_mut(&listener).unwrap(), self.tls_config.clone()) {
+            match self.tcpls_session.server_accept_connection(self.listeners.get_mut(&(listener.0 as u64)).unwrap(), self.tls_config.clone()) {
                 Ok(conn_id) => {
                     debug!("Accepting new connection of id {:?}", conn_id);
 
@@ -141,7 +143,7 @@ impl TlsServer {
         }
     }
 
-    pub fn verify_received(&mut self, recv_map: &mut RecvBufMap) {
+    pub fn verify_received(&mut self, recv_map: &mut RecvBufMap, conn_id: u64) {
         let mut hash_index = 0;
 
 
@@ -163,7 +165,7 @@ impl TlsServer {
                 None => panic!("hash prefix does not exist"),
             };
 
-            self.total_received += unprocessed_len;
+            self.tcpls_session.tcp_connections.get_mut(&conn_id).unwrap().nbr_bytes_received += unprocessed_len as u32;
             assert_eq!(&stream.1.as_ref_consumed()[hash_index..], self.calculate_sha256_hash(&stream.1.as_ref_consumed()[2..hash_index - 4]).as_ref());
             /*print!("\n \n Bytes received on stream {:?} : \n \n {:?} \n \n SHA-256 Hash {:?} \n Total length: {:?} \n",
                 stream.1.id,
@@ -172,7 +174,7 @@ impl TlsServer {
                 unprocessed_len);*/
             stream.1.empty_stream();
         }
-        println!("Total received {:?}", self.total_received)
+        println!("Total received on connection {:?} is {:?} bytes \n", conn_id,  self.tcpls_session.tcp_connections.get_mut(&conn_id).unwrap().nbr_bytes_received)
     }
 
     fn calculate_sha256_hash(&mut self, data: &[u8]) -> digest::Digest {
@@ -559,6 +561,7 @@ fn main() {
 
     let mut listener1 = server_create_listener("0.0.0.0:8443", None);
     let mut listener2 = server_create_listener("0.0.0.0:8444", None);
+    let mut listener3 = server_create_listener("0.0.0.0:8445", None);
 
     let mut poll = mio::Poll::new().unwrap();
 
@@ -570,9 +573,14 @@ fn main() {
         .register(&mut listener2, LISTENER2, mio::Interest::READABLE)
         .unwrap();
 
-    let mut listneres = HashMap::new();
-    listneres.insert(LISTENER1, listener1);
-    listneres.insert(LISTENER2, listener2);
+    poll.registry()
+        .register(&mut listener3, LISTENER3, mio::Interest::READABLE)
+        .unwrap();
+
+    let mut listneres = SimpleIdHashMap::default();
+    listneres.insert(LISTENER1.0 as u64, listener1);
+    listneres.insert(LISTENER2.0 as u64, listener2);
+    listneres.insert(LISTENER3.0 as u64, listener3);
 
     let mode = if args.cmd_echo {
         ServerMode::Echo
@@ -590,7 +598,7 @@ fn main() {
 
         for event in events.iter() {
             match event.token() {
-                LISTENER1 | LISTENER2 => {
+                LISTENER1 | LISTENER2 | LISTENER3 => {
                     tcpls_server
                         .accept(poll.registry(), &recv_map, event.token())
                         .expect("error accepting socket");
@@ -598,7 +606,7 @@ fn main() {
                 _ => {
                     tcpls_server.conn_event(poll.registry(), event, &mut recv_map);
                     if !tcpls_server.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking(){
-                        tcpls_server.verify_received(&mut recv_map);
+                        tcpls_server.verify_received(&mut recv_map, event.token().0 as u64);
                     }
                 },
             }

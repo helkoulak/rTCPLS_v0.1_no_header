@@ -535,10 +535,10 @@ impl MessageDeframerMap {
         }
     }
 
-    pub(crate) fn get_or_create_deframer(&mut self, connection_id: u64) -> &mut MessageDeframer {
-        match self.deframers.entry(connection_id) {
+    pub(crate) fn get_or_create_deframer(&mut self, conn_id: u64) -> &mut MessageDeframer {
+        match self.deframers.entry(conn_id) {
             hash_map::Entry::Vacant(v) => {
-                v.insert(MessageDeframer::new(connection_id))
+                v.insert(MessageDeframer::new(conn_id))
             },
             hash_map::Entry::Occupied(v) => v.into_mut(),
         }
@@ -664,7 +664,7 @@ const MAX_HANDSHAKE_SIZE: u32 = 0xffff;
 
 const READ_SIZE: usize = 4096;
 
-const DISCARD_THRESHOLD: usize =  MAX_FRAGMENT_LEN ;
+const DISCARD_THRESHOLD: usize =  READ_SIZE ;
 
 
 #[cfg(test)]

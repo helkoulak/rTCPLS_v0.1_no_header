@@ -23,7 +23,7 @@ use crate::suites::SupportedCipherSuite;
 use crate::tcpls::frame::Frame;
 use crate::tcpls::outstanding_conn::OutstandingConnMap;
 
-use crate::tcpls::stream::{DEFAULT_STREAM_ID, SimpleIdHashMap};
+use crate::tcpls::stream::{DEFAULT_STREAM_ID, SimpleIdHashMap, SimpleIdHashSet, StreamIter};
 
 #[cfg(feature = "tls12")]
 use crate::tls12::ConnectionSecrets;
@@ -111,6 +111,9 @@ impl CommonState {
         self.conn_in_use = conn_id;
     }
 
+    pub fn streams_to_flush(&self, flushables: &mut SimpleIdHashSet, include_pending: bool) -> StreamIter {
+        self.record_layer.streams.streams_to_flush(flushables, include_pending)
+    }
 
     /// Returns true if the caller should call [`Connection::write_tls`] as soon as possible.
     ///
