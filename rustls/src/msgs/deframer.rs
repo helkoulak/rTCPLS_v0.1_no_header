@@ -978,7 +978,7 @@ mod tests {
     #[test]
     fn discard_processed_data_if_threshold_reached(){
         let mut receive_map = RecvBufMap::new();
-        const PAYLOAD_LEN1: usize = 10000;
+        const PAYLOAD_LEN1: usize = 3000;
         const PAYLOAD_LEN2: usize = DISCARD_THRESHOLD;
         let mut message1 = Vec::with_capacity(17000);
         message1.push(0x17); // ApplicationData
@@ -998,7 +998,7 @@ mod tests {
 
         rl.set_not_handshaking();
 
-        // 1000 is < DISCARD_THRESHOLD -> no discard
+        // 3000 is < DISCARD_THRESHOLD -> no discard
         d.buf.extend_from_slice(message1.as_slice());
         d.used += message1.len();
         d.pop(&mut rl, &mut receive_map).unwrap();
