@@ -167,11 +167,10 @@ impl TlsServer {
 
             self.tcpls_session.tcp_connections.get_mut(&conn_id).unwrap().nbr_bytes_received += unprocessed_len as u32;
             assert_eq!(&stream.1.as_ref_consumed()[hash_index..], self.calculate_sha256_hash(&stream.1.as_ref_consumed()[2..hash_index - 4]).as_ref());
-            /*print!("\n \n Bytes received on stream {:?} : \n \n {:?} \n \n SHA-256 Hash {:?} \n Total length: {:?} \n",
+            print!("\n \n Bytes received on stream {:?} : \n \n SHA-256 Hash {:?} \n Total length: {:?} \n",
                 stream.1.id,
-                &stream.1.as_ref_consumed()[2..hash_index - 4],
                 &stream.1.as_ref_consumed()[hash_index..].iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>(),
-                unprocessed_len);*/
+                unprocessed_len);
             stream.1.empty_stream();
         }
         println!("Total received on connection {:?} is {:?} bytes \n", conn_id,  self.tcpls_session.tcp_connections.get_mut(&conn_id).unwrap().nbr_bytes_received)
@@ -218,7 +217,7 @@ impl TlsServer {
                 self.closing = true;
                 return;
             }
-            Ok(bytes) => {println!("{:?} bytes received on connection {:?} \n", bytes, id)}
+            Ok(_) => {},
         };
 
         // Reading some TLS data might have yielded new TLS

@@ -5,13 +5,9 @@ use mio::net::{TcpListener, TcpStream};
 #[macro_use]
 extern crate log;
 
-use std::collections::HashMap;
-
 use std::io;
 use std::io::{Read, Write};
 use std::net;
-use std::process::id;
-
 use std::time::Duration;
 
 #[macro_use]
@@ -25,7 +21,7 @@ use ring::digest;
 
 
 
-use rustls::{self, Connection, tcpls};
+use rustls::{self, tcpls};
 use rustls::recvbuf::RecvBufMap;
 use rustls::tcpls::{server_create_listener, TcplsSession};
 
@@ -50,7 +46,6 @@ enum ServerMode {
 /// connections, and a TLS server configuration.
 struct TlsServer {
     listener: TcpListener,
-    next_id: usize,
     tls_config: Arc<rustls::ServerConfig>,
 
     closing: bool,
@@ -66,8 +61,6 @@ impl TlsServer {
     fn new(listener: TcpListener, mode: ServerMode, cfg: Arc<rustls::ServerConfig>) -> Self {
         Self {
             listener,
-
-            next_id: 0,
             tls_config: cfg,
             mode,
             back: None,
@@ -82,7 +75,7 @@ impl TlsServer {
     fn accept(&mut self, registry: &mio::Registry, recv_map: &RecvBufMap) -> Result<(), io::Error> {
         loop {
             match self.tcpls_session.server_accept_connection(&mut self.listener, self.tls_config.clone()) {
-                Ok((conn_id)) => {
+                Ok(conn_id) => {
                     debug!("Accepting new connection of id {:?}", conn_id);
 
                     let token = Token(conn_id as usize);
@@ -102,7 +95,6 @@ impl TlsServer {
     }
 
     fn conn_event(&mut self, registry: &mio::Registry, event: &mio::event::Event, recv_map: &mut RecvBufMap) {
-        let token = event.token();
 
         self.handle_event(registry, event, recv_map);
 
@@ -165,12 +157,11 @@ impl TlsServer {
             };
 
             assert_eq!(&stream.1.as_ref_consumed()[hash_index..], self.calculate_sha256_hash(&stream.1.as_ref_consumed()[2..hash_index - 4]).as_ref());
-            debug!("\n \n Bytes received on stream {:?} : \n \n {:?} \n \n SHA-256 Hash {:?} \n Total length: {:?} \n",
+            debug!("\n \n Bytes received on stream {:?} : \n \n SHA-256 Hash {:?} \n Total length: {:?} \n",
                 stream.1.id,
-                &stream.1.as_ref_consumed()[..hash_index - 4],
                 &stream.1.as_ref_consumed()[hash_index..].iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>(),
                 unprocessed_len);
-            stream.1.consume(received_len + 2);
+            stream.1.empty_stream();
         }
     }
 
@@ -213,7 +204,7 @@ impl TlsServer {
         // Reading some TLS data might have yielded new TLS
         // messages to process.  Errors from this indicate
         // TLS protocol problems and are fatal.
-        let io_state = match self.tcpls_session.stream_recv(app_buffers, id as u32 ) {
+        match self.tcpls_session.stream_recv(app_buffers, id as u32 ) {
             Ok(io_state) => io_state,
             Err(err) => {
                 println!("TLS error: {:?}", err);
@@ -264,50 +255,6 @@ impl TlsServer {
         };
     }
 
-    /// Process some amount of received plaintext.
-    fn incoming_plaintext(&mut self, buf: &[u8]) {
-        match self.mode {
-            ServerMode::Echo => {
-                self.tcpls_session
-                    .tls_conn
-                    .as_mut()
-                    .unwrap()
-                    .writer()
-                    .write_all(buf)
-                    .unwrap();
-            }
-            ServerMode::Http => {
-                self.send_http_response_once();
-            }
-            ServerMode::Forward(_) => {
-                self.back
-                    .as_mut()
-                    .unwrap()
-                    .write_all(buf)
-                    .unwrap();
-            }
-        }
-    }
-
-    fn send_http_response_once(&mut self) {
-        let response =
-            b"HTTP/1.0 200 OK\r\nConnection: close\r\n\r\nHello world from rustls tlsserver\r\n";
-        if !self.sent_http_response {
-            self.tcpls_session
-                .tls_conn
-                .as_mut()
-                .unwrap()
-                .writer()
-                .write_all(response)
-                .unwrap();
-            self.sent_http_response = true;
-            self.tcpls_session
-                .tls_conn
-                .as_mut()
-                .unwrap()
-                .send_close_notify();
-        }
-    }
 
     fn tls_write(&mut self) -> io::Result<usize> {
         self.tcpls_session.tls_conn.as_mut().unwrap()
@@ -386,17 +333,7 @@ pub fn find_pattern(data: &[u8], pattern: &[u8]) -> Option<usize> {
     }
     None
 }
-/// Open a plaintext TCP-level connection for forwarded connections.
-fn open_back(mode: &ServerMode) -> Option<TcpStream> {
-    match *mode {
-        ServerMode::Forward(ref port) => {
-            let addr = net::SocketAddrV4::new(net::Ipv4Addr::new(127, 0, 0, 1), *port);
-            let conn = TcpStream::connect(net::SocketAddr::V4(addr)).unwrap();
-            Some(conn)
-        }
-        _ => None,
-    }
-}
+
 
 /// This used to be conveniently exposed by mio: map EWOULDBLOCK
 /// errors to something less-errory.

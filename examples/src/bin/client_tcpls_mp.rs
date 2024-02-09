@@ -49,7 +49,6 @@ impl TlsClient {
         if ev.is_readable()  {
             self.do_read(recv_map, token.0 as u64);
             if !self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() && !self.sending_ids.contains(&(token.0 as u64)){
-                let mut stream_iter = StreamIter::default();
                 let mut id_set = SimpleIdHashSet::default();
 
                 print!("Client sends on connection {:?} \n", token.0);
@@ -79,8 +78,8 @@ impl TlsClient {
                     id_set.insert(8);
                     id_set.insert(9);
                 }
-                stream_iter = self.tcpls_session.tls_conn.as_mut().unwrap().streams_to_flush(&mut id_set, true);
-                self.tcpls_session.send_on_connection(token.0 as u64, None, Some(stream_iter));
+                let stream_iter = self.tcpls_session.tls_conn.as_mut().unwrap().streams_to_flush(&mut id_set, true);
+                self.tcpls_session.send_on_connection(token.0 as u64, None, Some(stream_iter)).expect("Sending on connection failed");
                 self.sending_ids.insert(token.0 as u64);
             }
 
@@ -95,13 +94,6 @@ impl TlsClient {
             println!("Connection closed");
             process::exit(if self.clean_closure { 0 } else { 1 });
         }
-    }
-
-    fn read_source_to_end(&mut self, rd: &mut dyn io::Read) -> io::Result<usize> {
-        let mut buf = Vec::new();
-        let len = rd.read_to_end(&mut buf)?;
-        self.tcpls_session.tls_conn.as_mut().unwrap().writer().write_all(&buf).unwrap();
-        Ok(len)
     }
 
     /// We're ready to do a read.
@@ -244,13 +236,6 @@ impl TlsClient {
 
     }
 
-    fn read_file_to_bytes(file_path: &str) -> io::Result<Vec<u8>> {
-        let mut file = File::open(file_path)?;
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer)?;
-        Ok(buffer)
-    }
-
     fn calculate_sha256_hash(data: &[u8]) -> digest::Digest {
         let algorithm = &digest::SHA256;
         digest::digest(algorithm, data)
@@ -268,7 +253,7 @@ impl TlsClient {
             .get_mut(&id)
             .unwrap()
             .receive_join_request() {
-            Ok(bytes) => (),
+            Ok(_bytes) => (),
             Err(ref error) => if error.kind() == io::ErrorKind::WouldBlock {
                 return;
             },
@@ -364,20 +349,7 @@ mod danger {
     }
 }
 
-#[cfg(feature = "dangerous_configuration")]
-fn apply_dangerous_options(args: &Args, cfg: &mut rustls::ClientConfig) {
-    if args.flag_insecure {
-        cfg.dangerous()
-            .set_certificate_verifier(Arc::new(danger::NoCertificateVerification {}));
-    }
-}
 
-#[cfg(not(feature = "dangerous_configuration"))]
-fn apply_dangerous_options(args: &Args, _: &mut rustls::ClientConfig) {
-    if args.flag_insecure {
-        panic!("This build does not support --insecure.");
-    }
-}
 /// Build a `ClientConfig` from our arguments
 fn build_tls_client_config_args(args: &Args) -> Arc<rustls::ClientConfig> {
 

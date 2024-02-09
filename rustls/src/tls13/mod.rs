@@ -234,7 +234,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
 
     fn encrypt_zc(&mut self, msg: BorrowedPlainMessage, seq: u64, stream_id: u32, tcpls_header: &TcplsHeader, frame_header: Option<Frame>) -> Result<Vec<u8>, Error> {
         let stream_header_len =  match frame_header.as_ref() {
-            Some(header) => STREAM_FRAME_HEADER_SIZE,
+            Some(_header) => STREAM_FRAME_HEADER_SIZE,
             None => 0,
         };
         let tag_length =  self.enc_key.algorithm().tag_len();

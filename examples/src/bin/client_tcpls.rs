@@ -2,7 +2,6 @@
 extern crate serde_derive;
 
 use std::process;
-use std::fs::File;
 use std::io;
 use std::io::{Read, Write};
 
@@ -16,6 +15,7 @@ use mio::Token;
 use ring::digest;
 use rustls::recvbuf::RecvBufMap;
 use rustls::tcpls::{build_tls_client_config, lookup_address, TcplsSession};
+use rustls::tcpls::stream::SimpleIdHashSet;
 
 const CLIENT: mio::Token = mio::Token(0);
 
@@ -29,7 +29,7 @@ struct TlsClient {
 }
 
 impl TlsClient {
-    fn new( ) -> Self {
+    fn new() -> Self {
         Self {
             closing: false,
             clean_closure: false,
@@ -39,17 +39,32 @@ impl TlsClient {
 
     /// Handles events sent to the TlsClient by mio::Poll
     fn handle_event(&mut self, ev: &mio::event::Event, recv_map: &mut RecvBufMap) {
-
         let token = &ev.token();
 
         if ev.is_readable() {
-           self.do_read(recv_map, token.0 as u64);
+            self.do_read(recv_map, token.0 as u64);
+
+            if !self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() {
+                //Send three byte arrays on three streams
+                let mut id_set = SimpleIdHashSet::default();
+
+                self.send_data(vec![0u8; 64000].as_slice(), 0).expect("");
+                self.send_data(vec![1u8; 64000].as_slice(), 1).expect("");
+                self.send_data(vec![2u8; 64000].as_slice(), 2).expect("");
+
+                id_set.insert(0);
+                id_set.insert(1);
+                id_set.insert(2);
+
+                let stream_iter = self.tcpls_session.tls_conn.as_mut().unwrap().streams_to_flush(&mut id_set, true);
+                self.tcpls_session.send_on_connection(token.0 as u64, None, Some(stream_iter)).expect("Sending on connection failed");
+            }
         }
 
         if ev.is_writable() {
             self.do_write(token);
         }
-        
+
 
         if self.is_closed() {
             println!("Connection closed");
@@ -57,12 +72,6 @@ impl TlsClient {
         }
     }
 
-    fn read_source_to_end(&mut self, rd: &mut dyn io::Read) -> io::Result<usize> {
-        let mut buf = Vec::new();
-        let len = rd.read_to_end(&mut buf)?;
-        self.tcpls_session.tls_conn.as_mut().unwrap().writer().write_all(&buf).unwrap();
-        Ok(len)
-    }
 
     /// We're ready to do a read.
     fn do_read(&mut self, app_buffers: &mut RecvBufMap, id: u64) {
@@ -102,16 +111,6 @@ impl TlsClient {
             }
         };
 
-        // Having read some TLS data, and processed any new messages,
-        // we might have new plaintext as a result.
-        //
-        // Read it and then write it to stdout.
-        /*if io_state.plaintext_bytes_to_read() > 0 {
-            let mut plaintext = Vec::new();
-            plaintext.resize(io_state.plaintext_bytes_to_read(), 0u8);
-            self.tcpls_session.tls_conn.as_mut().unwrap().reader().read_exact(&mut plaintext).unwrap();
-            io::stdout().write_all(&plaintext).unwrap();
-        }*/
 
         // If wethat fails, the peer might have started a clean TLS-level
         // session closure.
@@ -122,8 +121,7 @@ impl TlsClient {
     }
 
     fn do_write(&mut self, token: &Token) {
-
-        self.tcpls_session.send_on_connection(token.0 as u64, None, None ).unwrap();
+        self.tcpls_session.send_on_connection(token.0 as u64, None, None).unwrap();
     }
 
     /// Registers self as a 'listener' in mio::Registry
@@ -135,8 +133,7 @@ impl TlsClient {
     }
 
     /// Reregisters self as a 'listener' in mio::Registry.
-    fn reregister(&mut self, registry: &mio::Registry, recv_map: & RecvBufMap) {
-
+    fn reregister(&mut self, registry: &mio::Registry, recv_map: &RecvBufMap) {
         let interest = self.event_set(recv_map);
         registry
             .reregister(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket, CLIENT, interest)
@@ -145,8 +142,7 @@ impl TlsClient {
 
     /// Use wants_read/wants_write to register for different mio-level
     /// IO readiness events.
-    fn event_set(&mut self, app_buf: & RecvBufMap) -> mio::Interest {
-
+    fn event_set(&mut self, app_buf: &RecvBufMap) -> mio::Interest {
         let rd = self.tcpls_session.tls_conn.as_mut().unwrap().wants_read(app_buf);
         let wr = self.tcpls_session.tls_conn.as_mut().unwrap().wants_write();
 
@@ -164,72 +160,43 @@ impl TlsClient {
     }
 
 
-
-    fn send_file(&mut self, file_name: &str, stream: u16) -> io::Result<()> {
+    fn send_data(&mut self, input: &[u8], stream: u16) -> io::Result<()> {
         let mut data = Vec::new();
         // Total length to send
-        let mut len:u16 = 0;
-        // Specify the file path you want to hash
-        let file_path = file_name; // Replace with the actual file path
+        let mut len: u16 = 0;
 
-        // Read the file into a byte vector
-        let mut file_contents = TlsClient::read_file_to_bytes(file_path)?;
-        len += file_contents.len() as u16;
-        // Calculate the hash of the file contents using SHA-256
-        let hash = TlsClient::calculate_sha256_hash(&file_contents);
+        len += input.len() as u16;
+        // Calculate the hash of input using SHA-256
+        let hash = TlsClient::calculate_sha256_hash(input);
         len += hash.algorithm().output_len as u16;
         len += 4;
-        // Append total length and hash value to the serialized file to be sent to the peer
-        data.extend_from_slice( [((len >> 8) & 0xFF) as u8, ((len & 0xFF) as u8)].as_slice());
-        data.extend_from_slice(file_contents.as_slice());
+        // Append total length and hash value to the input to be sent to the peer
+        data.extend_from_slice([((len >> 8) & 0xFF) as u8, ((len & 0xFF) as u8)].as_slice());
+        data.extend_from_slice(input);
         data.extend(vec![0x0F, 0x0F, 0x0F, 0x0F]);
         data.extend(hash.as_ref());
 
         // Print the hash as a hexadecimal string
-       // println!("\n \n File bytes on stream {:?} : \n {:?} \n \n SHA-256 Hash {:?} \n Total length: {:?} \n", stream, file_contents, hash, len);
+        // println!("\n \n File bytes on stream {:?} : \n {:?} \n \n SHA-256 Hash {:?} \n Total length: {:?} \n", stream, file_contents, hash, len);
 
         self.tcpls_session.stream_send(stream, data.as_ref(), false).expect("buffering failed");
 
 
         Ok(())
-
     }
 
-    fn read_file_to_bytes(file_path: &str) -> io::Result<Vec<u8>> {
-        let mut file = File::open(file_path)?;
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer)?;
-        Ok(buffer)
-    }
 
     fn calculate_sha256_hash(data: &[u8]) -> digest::Digest {
         let algorithm = &digest::SHA256;
         digest::digest(algorithm, data)
     }
-
-
-}
-impl io::Write for TlsClient {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-
-        self.tcpls_session.tls_conn.as_mut().unwrap().writer().write(bytes)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.tcpls_session.tls_conn.as_mut().unwrap().writer().flush()
-    }
 }
 
-impl io::Read for TlsClient {
-    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
 
-        self.tcpls_session.tls_conn.as_mut().unwrap().reader().read(bytes)
-    }
-}
 
 const USAGE: &str = "
 Connects to the TLS server at hostname:PORT.  The default PORT
-is 443.  By default, this reads a request from stdin (to EOF)
+is 8443.  By default, this reads a request from stdin (to EOF)
 before making the connection.  --http replaces this with a
 basic HTTP GET request for /.
 
@@ -300,20 +267,8 @@ mod danger {
     }
 }
 
-#[cfg(feature = "dangerous_configuration")]
-fn apply_dangerous_options(args: &Args, cfg: &mut rustls::ClientConfig) {
-    if args.flag_insecure {
-        cfg.dangerous()
-            .set_certificate_verifier(Arc::new(danger::NoCertificateVerification {}));
-    }
-}
 
-#[cfg(not(feature = "dangerous_configuration"))]
-fn apply_dangerous_options(args: &Args, _: &mut rustls::ClientConfig) {
-    if args.flag_insecure {
-        panic!("This build does not support --insecure.");
-    }
-}
+
 /// Build a `ClientConfig` from our arguments
 fn build_tls_client_config_args(args: &Args) -> Arc<rustls::ClientConfig> {
 
@@ -353,10 +308,6 @@ fn main() {
 
     client.tcpls_session.tcpls_connect(dest_address, Some(config), Some(server_name), false);
 
-   //Send three files on three streams
-    client.send_file("Cargo.toml", 0).expect("");
-    client.send_file("Cargo.lock", 1).expect("");
-    client.send_file("TLS_HS_Client", 2).expect("");
 
 
     let mut poll = mio::Poll::new().unwrap();

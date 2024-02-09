@@ -256,7 +256,7 @@ fn emit_fake_client_hello(client_config: &Arc<ClientConfig>, common: &mut Common
     // We don't do renegotiation at all, in fact.
     cipher_suites.push(CipherSuite::TLS_EMPTY_RENEGOTIATION_INFO_SCSV);
 
-    let mut chp = HandshakeMessagePayload {
+    let chp = HandshakeMessagePayload {
         typ: HandshakeType::ClientHello,
         payload: HandshakePayload::ClientHello(ClientHelloPayload {
             client_version: ProtocolVersion::TLSv1_2,

@@ -9,7 +9,6 @@ use super::message::{MAX_WIRE_SIZE, PlainMessage};
 use crate::enums::{ContentType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerMisbehaved};
 use crate::msgs::codec;
-use crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
 use crate::msgs::message::{BorrowedOpaqueMessage, MessageError};
 use crate::record_layer::{Decrypted, RecordLayer};
 use crate::recvbuf::{RecvBuf, RecvBufMap};

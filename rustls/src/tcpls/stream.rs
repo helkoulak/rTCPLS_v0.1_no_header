@@ -237,7 +237,7 @@ impl StreamMap {
                     return Err(Error::Done);
                 }
 
-                let mut s = Stream::new(stream_id);
+                let s = Stream::new(stream_id);
 
                 let is_writable = s.is_writable();
 
