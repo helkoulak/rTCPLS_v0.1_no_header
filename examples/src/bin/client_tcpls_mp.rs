@@ -10,11 +10,8 @@ use std::ops::{Deref, DerefMut};
 use std::str;
 use std::sync::Arc;
 use docopt::Docopt;
-use log::debug;
-use mio::net::SocketAddr;
 use mio::Token;
 use ring::digest;
-use rustls::internal::msgs::codec::u24;
 use rustls::recvbuf::RecvBufMap;
 use rustls::tcpls::{build_tls_client_config, lookup_address, TcplsSession};
 use rustls::tcpls::stream::{SimpleIdHashSet, StreamIter};
@@ -57,27 +54,27 @@ impl TlsClient {
 
                 print!("Client sends on connection {:?} \n", token.0);
                 if token.0 == 0 {
-                    self.send_file("Cargo.toml", 0).expect("");
-                    self.send_file("Cargo.lock", 1).expect("");
-                    self.send_file("TLS_HS_Client", 2).expect("");
-                    self.send_file("Cargo.toml", 3).expect("");
+                    self.send_data(vec![0u8; 64000].as_slice(), 0).expect("");
+                    self.send_data(vec![1u8; 64000].as_slice(), 1).expect("");
+                    self.send_data(vec![2u8; 64000].as_slice(), 2).expect("");
+                    self.send_data(vec![3u8; 64000].as_slice(), 3).expect("");
                     id_set.insert(0);
                     id_set.insert(1);
                     id_set.insert(2);
                     id_set.insert(3);
                 }
                 if token.0 == 1 {
-                    self.send_file("Cargo.lock", 4).expect("");
-                    self.send_file("TLS_HS_Client", 5).expect("");
-                    self.send_file("Cargo.toml", 6).expect("");
+                    self.send_data(vec![4u8; 64000].as_slice(), 4).expect("");
+                    self.send_data(vec![5u8; 64000].as_slice(), 5).expect("");
+                    self.send_data(vec![6u8; 64000].as_slice(), 6).expect("");
                     id_set.insert(4);
                     id_set.insert(5);
                     id_set.insert(6);
                 }
                 if token.0 == 2 {
-                    self.send_file("Cargo.lock", 7).expect("");
-                    self.send_file("TLS_HS_Client", 8).expect("");
-                    self.send_file("Cargo.toml", 9).expect("");
+                    self.send_data(vec![7u8; 64000].as_slice(), 7).expect("");
+                    self.send_data(vec![8u8; 64000].as_slice(), 8).expect("");
+                    self.send_data(vec![9u8; 64000].as_slice(), 9).expect("");
                     id_set.insert(7);
                     id_set.insert(8);
                     id_set.insert(9);
@@ -221,23 +218,19 @@ impl TlsClient {
 
 
 
-    fn send_file(&mut self, file_name: &str, stream: u16) -> io::Result<()> {
+    fn send_data(&mut self, input: &[u8], stream: u16) -> io::Result<()> {
         let mut data = Vec::new();
         // Total length to send
         let mut len:u16 = 0;
-        // Specify the file path you want to hash
-        let file_path = file_name; // Replace with the actual file path
 
-        // Read the file into a byte vector
-        let file_contents = TlsClient::read_file_to_bytes(file_path)?;
-        len += file_contents.len() as u16;
-        // Calculate the hash of the file contents using SHA-256
-        let hash = TlsClient::calculate_sha256_hash(&file_contents);
+        len += input.len() as u16;
+        // Calculate the hash of input using SHA-256
+        let hash = TlsClient::calculate_sha256_hash(input);
         len += hash.algorithm().output_len as u16;
         len += 4;
-        // Append total length and hash value to the serialized file to be sent to the peer
+        // Append total length and hash value to the input to be sent to the peer
         data.extend_from_slice( [((len >> 8) & 0xFF) as u8, ((len & 0xFF) as u8)].as_slice());
-        data.extend_from_slice(file_contents.as_slice());
+        data.extend_from_slice(input);
         data.extend(vec![0x0F, 0x0F, 0x0F, 0x0F]);
         data.extend(hash.as_ref());
 
