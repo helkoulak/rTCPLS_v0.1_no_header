@@ -217,6 +217,14 @@ impl RecvBufMap {
     pub fn has_readable(&self) -> bool {
         !self.readable.is_empty()
     }
+    /// Total number of bytes available for read in all receive buffers
+    pub fn bytes_to_read(&self) -> usize {
+        let mut bytes = 0;
+        for stream in &self.readable {
+            bytes += self.buffers.get(&stream).unwrap().as_ref_consumed().len()
+        }
+        bytes
+    }
 
     /*pub(crate) fn read_mut(&mut self, stream_id: u64, stream: &mut Stream) -> Result<&mut [u8], Error> {
         let buf = match self.buffers.entry(stream_id) {

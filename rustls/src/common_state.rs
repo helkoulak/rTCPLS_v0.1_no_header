@@ -667,10 +667,10 @@ impl CommonState {
             && (self.may_send_application_data || self.record_layer.streams.all_empty())
     }
 
-    pub(crate) fn current_io_state(&self) -> IoState {
+    pub(crate) fn current_io_state(&self, app_buf: Option<&RecvBufMap>) -> IoState {
         IoState {
             tls_bytes_to_write: self.record_layer.streams.total_to_write(),
-            plaintext_bytes_to_read: self.received_plaintext.len(),
+            plaintext_bytes_to_read: app_buf.unwrap().bytes_to_read(),
             peer_has_closed: self.has_received_close_notify,
         }
     }

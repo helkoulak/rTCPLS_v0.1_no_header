@@ -667,7 +667,7 @@ impl<Data> ConnectionCore<Data> {
         }
 
         self.state = Ok(state);
-        Ok(self.common_state.current_io_state())
+        Ok(self.common_state.current_io_state(Some(app_buffers)))
     }
 
     /// Pull a message out of the deframer and send any messages that need to be sent as a result.
