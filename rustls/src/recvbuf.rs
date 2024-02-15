@@ -57,6 +57,7 @@ impl RecvBuf {
         &self.data
     }
 
+    ///Gives an immutable reference to the still unconsumed slice of the buffer
     pub fn as_ref_consumed(&self) -> & [u8] {
         &self.data[self.consumed..self.offset as usize]
     }
