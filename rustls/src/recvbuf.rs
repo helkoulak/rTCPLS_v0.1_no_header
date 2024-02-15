@@ -2,7 +2,7 @@ use std::{cmp, io};
 use std::collections::hash_map;
 use std::collections::hash_map::{Iter, IterMut};
 use std::io::Error;
-use crate::tcpls::stream::{DEFAULT_BUFFER_LIMIT, SimpleIdHashMap};
+use crate::tcpls::stream::{DEFAULT_BUFFER_LIMIT, SimpleIdHashMap, SimpleIdHashSet, StreamIter};
 
 /// This is the receive buffer of a stream
 #[derive(Default)]
@@ -147,6 +147,10 @@ impl RecvBuf {
 #[derive(Debug)]
 pub struct RecvBufMap {
     buffers: SimpleIdHashMap<RecvBuf>,
+    /// Set of stream IDs corresponding to streams that have outstanding data
+    /// to read. This is used to generate a `StreamIter` of streams without
+    /// having to iterate over the full list of streams.
+    readable: SimpleIdHashSet,
 }
 
 impl RecvBufMap {
@@ -192,6 +196,26 @@ impl RecvBufMap {
 
     pub fn get_iter_mut(&mut self) -> IterMut<'_, u64, RecvBuf> {
         self.buffers.iter_mut()
+    }
+
+
+    /// Removes the stream ID from the readable streams set.
+    pub fn remove_readable(&mut self, stream_id: u64) {
+        self.readable.remove(&stream_id);
+    }
+
+    /// Creates an iterator over streams that have outstanding data to read.
+    pub fn readable(&self) -> StreamIter {
+       StreamIter::from(&self.readable)
+    }
+
+    pub fn insert_readable(&mut self, stream_id: u64) {
+        self.readable.insert(stream_id);
+    }
+
+    /// Returns true if there are any streams that have data to read.
+    pub fn has_readable(&self) -> bool {
+        !self.readable.is_empty()
     }
 
     /*pub(crate) fn read_mut(&mut self, stream_id: u64, stream: &mut Stream) -> Result<&mut [u8], Error> {

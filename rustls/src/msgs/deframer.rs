@@ -215,6 +215,7 @@ impl MessageDeframer {
 
             // If it's not a handshake message, just return it -- no joining necessary.
             if msg.typ != ContentType::Handshake {
+                app_buffers.insert_readable(record_layer.get_stream_in_use() as u64);
                 self.record_info.get_mut(&(start as u64)).unwrap().processed = true;
                 match self.calculate_discard_range() {
                    true =>

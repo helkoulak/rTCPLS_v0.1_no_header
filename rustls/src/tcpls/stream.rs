@@ -174,10 +174,6 @@ pub struct StreamMap {
     /// enough flow control credits to send at least some of that data.
     flushable: SimpleIdHashSet,
 
-    /// Set of stream IDs corresponding to streams that have outstanding data
-    /// to read. This is used to generate a `StreamIter` of streams without
-    /// having to iterate over the full list of streams.
-    pub readable: SimpleIdHashSet,
 
     /// Set of stream IDs corresponding to streams that have enough flow control
     /// capacity to be written to, and is not finished. This is used to generate
@@ -255,19 +251,7 @@ impl StreamMap {
         Ok(stream)
     }
 
-    /// Adds the stream ID to the readable streams set.
-    ///
-    /// If the stream was already in the list, this does nothing.
-    pub fn insert_readable(&mut self, id: u64) {
-        if !self.readable.contains(&id) {
-            self.readable.insert(id);
-        }
-    }
 
-    /// Removes the stream ID from the readable streams set.
-    pub fn remove_readable(&mut self, stream_id: u64) {
-        self.readable.remove(&stream_id);
-    }
 
     /// Adds the stream ID to the writable streams set.
     ///
@@ -314,10 +298,7 @@ impl StreamMap {
     pub fn remove_collected(&mut self, stream_id: u64) { self.collected.remove(&stream_id); }
 
 
-    /// Creates an iterator over streams that have outstanding data to read.
-    pub fn readable(&self) -> StreamIter {
-        StreamIter::from(&self.readable)
-    }
+
 
     /// Creates an iterator over streams that can be written to.
     pub fn writable(&self) -> StreamIter { StreamIter::from(&self.writable) }
@@ -369,10 +350,6 @@ impl StreamMap {
         all_empty
     }
 
-    /// Returns true if there are any streams that have data to read.
-    pub fn has_readable(&self) -> bool {
-        !self.readable.is_empty()
-    }
 
 
     /// Returns the number of active streams in the map.
@@ -408,7 +385,7 @@ pub struct StreamIter {
 
 impl StreamIter {
     #[inline]
-    fn from(streams: &SimpleIdHashSet) -> Self {
+    pub fn from(streams: &SimpleIdHashSet) -> Self {
         StreamIter {
             streams: streams.iter().copied().collect(),
             index: 0,

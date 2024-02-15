@@ -147,31 +147,30 @@ impl TlsServer {
         let mut hash_index = 0;
 
 
-        for stream in recv_map.get_iter_mut() {
-            if stream.1.is_empty() || stream.1.is_consumed() {
-                continue
-            }
+        for id in recv_map.readable() {
+            let mut stream = recv_map.get_mut(id as u16).unwrap();
 
-            let received_len: usize = u16::from_be_bytes([stream.1.as_ref_consumed()[0], stream.1.as_ref_consumed()[1]]) as usize;
-            let unprocessed_len = stream.1.as_ref_consumed()[2..].len();
+            let received_len: usize = u16::from_be_bytes([stream.as_ref_consumed()[0], stream.as_ref_consumed()[1]]) as usize;
+            let unprocessed_len = stream.as_ref_consumed()[2..].len();
 
             if received_len != unprocessed_len {
                 continue
             }
 
 
-            hash_index = match find_pattern(&stream.1.as_ref_consumed(), vec![0x0f, 0x0f, 0x0f, 0x0f].as_slice()) {
+            hash_index = match find_pattern(&stream.as_ref_consumed(), vec![0x0f, 0x0f, 0x0f, 0x0f].as_slice()) {
                 Some(n) => n + 4,
                 None => panic!("hash prefix does not exist"),
             };
 
             self.tcpls_session.tcp_connections.get_mut(&conn_id).unwrap().nbr_bytes_received += unprocessed_len as u32;
-            assert_eq!(&stream.1.as_ref_consumed()[hash_index..], self.calculate_sha256_hash(&stream.1.as_ref_consumed()[2..hash_index - 4]).as_ref());
+            assert_eq!(&stream.as_ref_consumed()[hash_index..], self.calculate_sha256_hash(&stream.as_ref_consumed()[2..hash_index - 4]).as_ref());
             print!("\n \n Bytes received on stream {:?} : \n \n SHA-256 Hash {:?} \n Total length: {:?} \n",
-                stream.1.id,
-                &stream.1.as_ref_consumed()[hash_index..].iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>(),
+                id,
+                &stream.as_ref_consumed()[hash_index..].iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>(),
                 unprocessed_len);
-            stream.1.empty_stream();
+            stream.empty_stream();
+            recv_map.remove_readable(id);
         }
         println!("Total received on connection {:?} is {:?} bytes \n", conn_id,  self.tcpls_session.tcp_connections.get_mut(&conn_id).unwrap().nbr_bytes_received)
     }
