@@ -14,6 +14,7 @@ use rustls::{Certificate, PrivateKey};
 use rustls::{ClientConfig, ClientConnection};
 use rustls::{ConnectionCommon, ServerConfig, ServerConnection, SideData};
 use rustls::recvbuf::RecvBufMap;
+use rustls::tcpls::stream::DEFAULT_STREAM_ID;
 
 
 macro_rules! embed_files {
@@ -98,6 +99,7 @@ embed_files! {
 pub fn transfer(
     left: &mut (impl DerefMut + Deref<Target = ConnectionCommon<impl SideData>>),
     right: &mut (impl DerefMut + Deref<Target = ConnectionCommon<impl SideData>>),
+    id: Option<u16>,
 ) -> usize {
     let mut buf = [0u8; 262144];
     let mut total = 0;
@@ -105,7 +107,7 @@ pub fn transfer(
     while left.wants_write() {
         let sz = {
             let into_buf: &mut dyn io::Write = &mut &mut buf[..];
-            left.write_tls(into_buf, 0).unwrap()
+            left.write_tls(into_buf, id.unwrap_or_else(|| DEFAULT_STREAM_ID)).unwrap()
         };
         total += sz;
         if sz == 0 {
@@ -395,9 +397,9 @@ pub fn do_handshake(
 ) -> (usize, usize) {
     let (mut to_client, mut to_server) = (0, 0);
     while server.is_handshaking() || client.is_handshaking() {
-        to_server += transfer(client, server);
+        to_server += transfer(client, server, None);
         server.process_new_packets(serv).unwrap();
-        to_client += transfer(server, client);
+        to_client += transfer(server, client, None);
         client.process_new_packets(clnt).unwrap();
     }
     (to_server, to_client)
@@ -416,11 +418,11 @@ pub fn do_handshake_until_error(
     clnt: &mut RecvBufMap,
 ) -> Result<(), ErrorFromPeer> {
     while server.is_handshaking() || client.is_handshaking() {
-        transfer(client, server);
+        transfer(client, server, None);
         server
             .process_new_packets(serv)
             .map_err(ErrorFromPeer::Server)?;
-        transfer(server, client);
+        transfer(server, client, None);
         client
             .process_new_packets(clnt)
             .map_err(ErrorFromPeer::Client)?;
@@ -438,7 +440,7 @@ pub fn do_handshake_until_both_error(
     match do_handshake_until_error(client, server, serv, clnt) {
         Err(server_err @ ErrorFromPeer::Server(_)) => {
             let mut errors = vec![server_err];
-            transfer(server, client);
+            transfer(server, client, None);
             let client_err = client
                 .process_new_packets(clnt)
                 .map_err(ErrorFromPeer::Client)
@@ -449,7 +451,7 @@ pub fn do_handshake_until_both_error(
 
         Err(client_err @ ErrorFromPeer::Client(_)) => {
             let mut errors = vec![client_err];
-            transfer(client, server);
+            transfer(client, server, None);
             let server_err = server
                 .process_new_packets(serv)
                 .map_err(ErrorFromPeer::Server)

@@ -78,7 +78,7 @@ fn exercise_key_log_file_for_client() {
             assert_eq!(5, client.writer().write(b"hello").unwrap());
 
             do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
-            transfer(&mut client, &mut server);
+            transfer(&mut client, &mut server, None);
             server.process_new_packets(&mut recv_svr).unwrap();
         }
     })
@@ -106,7 +106,7 @@ fn exercise_key_log_file_for_server() {
             assert_eq!(5, client.writer().write(b"hello").unwrap());
 
             do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
-            transfer(&mut client, &mut server);
+            transfer(&mut client, &mut server, None);
             server.process_new_packets(&mut recv_svr).unwrap();
         }
     })
