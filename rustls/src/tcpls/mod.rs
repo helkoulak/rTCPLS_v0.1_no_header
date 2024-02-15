@@ -304,7 +304,7 @@ impl TcplsSession {
     }
 
 
-    pub fn stream_recv(
+    pub fn process_received(
         &mut self,
         app_buffers: &mut RecvBufMap,
         conn_id: u32,
