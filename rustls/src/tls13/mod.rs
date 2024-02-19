@@ -244,9 +244,24 @@ impl MessageEncrypter for Tls13MessageEncrypter {
 
         let mut payload_len = plaintext_len + stream_header_len + 1 + tag_length;
         let record_payload_length = payload_len + TCPLS_HEADER_SIZE;
-        let mut input = vec![0; plaintext_len + stream_header_len + 1];
-        let mut b = octets::OctetsMut::with_slice(&mut input);
 
+        let nonce = make_nonce(&self.iv, seq, stream_id);
+
+      // let mut output= prepare_output(&tcpls_header, record_payload_length).expect("output vector preparation failed");
+        // Prepare output buffer
+        let mut output = vec![0; PACKET_OVERHEAD + record_payload_length];
+        let mut b = octets::OctetsMut::with_slice(&mut output);
+        //TLS record header
+        // Application data
+        b.put_u8(0x17).unwrap();
+        // TLSv1_2
+        b.put_u16(0x0303).unwrap();
+        // payload length
+        b.put_u16(record_payload_length as u16).unwrap();
+        // TCPLS header
+        b.put_u32(tcpls_header.chunk_num).unwrap();
+        b.put_u16(tcpls_header.offset_step).unwrap();
+        b.put_u16(tcpls_header.stream_id).unwrap();
         b.put_bytes(msg.payload).unwrap();
 
         match frame_header {
@@ -261,15 +276,10 @@ impl MessageEncrypter for Tls13MessageEncrypter {
             },
         }
 
-
-        let nonce = make_nonce(&self.iv, seq, stream_id);
-
-       let mut output= prepare_output(&tcpls_header, record_payload_length).expect("output vector preparation failed");
-
         let aad = make_tls13_aad_for_enc(output.as_slice());
 
         self.enc_key
-            .seal_in_output_append_tag(nonce, aad, &input, &mut output, PACKET_OVERHEAD + TCPLS_HEADER_SIZE)
+            .seal_in_place_append_tag(nonce, aad, &mut output, PACKET_OVERHEAD + TCPLS_HEADER_SIZE, plaintext_len + stream_header_len + 1 )
             .map_err(|_| Error::General("encrypt failed".to_string()))?;
 
         // Take the LSBs of calculated tag as input sample for hash function

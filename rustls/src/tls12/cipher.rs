@@ -256,7 +256,7 @@ impl MessageEncrypter for ChaCha20Poly1305MessageEncrypter {
         buf.extend_from_slice(m.payload);
 
         self.enc_key
-            .seal_in_place_append_tag(nonce, aad, &mut buf)
+            .seal_in_place_append_tag(nonce, aad, &mut buf, 0,total_len)
             .map_err(|_| Error::EncryptError)?;
 
         Ok(buf)

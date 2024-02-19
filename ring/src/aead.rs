@@ -600,17 +600,16 @@ impl LessSafeKey {
     /// Deprecated. Renamed to `seal_in_place_append_tag()`.
     #[deprecated(note = "Renamed to `seal_in_place_append_tag`.")]
     #[inline]
-    pub fn seal_in_place<A, InOut>(
+    pub fn seal_in_place<A>(
         &self,
         nonce: Nonce,
         aad: Aad<A>,
-        in_out: &mut InOut,
+        in_out: &mut [u8],
     ) -> Result<(), error::Unspecified>
     where
         A: AsRef<[u8]>,
-        InOut: AsMut<[u8]> + for<'in_out> Extend<&'in_out u8>,
     {
-        self.seal_in_place_append_tag(nonce, aad, in_out)
+        self.seal_in_place_append_tag(nonce, aad, in_out, 0, in_out.len())
     }
 
     /// Like [`SealingKey::seal_in_place_append_tag()`], except it accepts an
@@ -618,18 +617,25 @@ impl LessSafeKey {
     ///
     /// `nonce` must be unique for every use of the key to seal data.
     #[inline]
-    pub fn seal_in_place_append_tag<A, InOut>(
+    pub fn seal_in_place_append_tag<A>(
         &self,
         nonce: Nonce,
         aad: Aad<A>,
-        in_out: &mut InOut,
+        in_out: &mut [u8],
+        offset: usize,
+        plaintext_len: usize,
     ) -> Result<(), error::Unspecified>
     where
         A: AsRef<[u8]>,
-        InOut: AsMut<[u8]> + for<'in_out> Extend<&'in_out u8>,
     {
-        self.seal_in_place_separate_tag(nonce, aad, in_out.as_mut())
-            .map(|tag| in_out.extend(tag.as_ref()))
+        let tag = self.seal_in_place_separate_tag(nonce, aad, &mut in_out[offset..offset + plaintext_len]).unwrap();
+        let mut i = 0;
+        // append tag to output
+        for b in &mut in_out[(offset + plaintext_len)..] {
+            *b = tag.0[i];
+            i += 1;
+        }
+        Ok(())
     }
 
     #[inline]
