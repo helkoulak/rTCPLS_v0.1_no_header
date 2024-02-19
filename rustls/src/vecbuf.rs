@@ -28,16 +28,17 @@ impl ChunkVecBuffer {
             ..Default::default()
         }
     }
-
+    #[inline]
     pub(crate)  fn get_current_offset(&self) -> u64 {
         self.current_offset
     }
 
     /// Output is of type u16 as maximum payload size for a TLS record is 16384 bytes
+    #[inline]
     pub(crate)  fn get_offset_diff(&self) -> u16 {
         self.current_offset.saturating_sub(self.previous_offset) as u16
     }
-
+    #[inline]
     pub(crate)  fn advance_offset(&mut self, added: u64) {
         self.previous_offset = self.current_offset;
         self.current_offset += added;
@@ -50,19 +51,21 @@ impl ChunkVecBuffer {
     /// data is not an error.
     ///
     /// A [`None`] limit is interpreted as no limit.
+    #[inline]
     pub(crate)  fn set_limit(&mut self, new_limit: Option<usize>) {
         self.limit = new_limit;
     }
 
     /// If we're empty
+    #[inline]
     pub(crate)  fn is_empty(&self) -> bool {
         self.chunks.is_empty()
     }
-
+    #[inline]
     pub(crate)  fn shuffle_records(&mut self, n: usize) {
         self.chunks.rotate_left(n)
     }
-
+    #[inline]
     pub(crate)  fn is_full(&self) -> bool {
         self.limit
             .map(|limit| self.len() > limit)
@@ -182,6 +185,7 @@ impl ChunkVecBuffer {
         self.consume(used);
         Ok(used)
     }
+    #[inline]
     pub(crate) fn write_chunk_to(&mut self, wr: &mut dyn io::Write) -> (io::Result<usize>, bool) {
         if self.is_empty() {
             return (Ok(0), false);

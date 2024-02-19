@@ -81,15 +81,17 @@ impl Stream {
 
     /// Returns true if the stream has enough capacity to be
     /// written to, and is not finished.
+    #[inline]
     pub fn is_writable(&self) -> bool {
         !self.send.is_full()
     }
 
     /// Returns true if the stream has data to send.
+    #[inline]
     pub fn is_flushable(&self) -> bool {
         !self.send.is_empty()
     }
-
+    #[inline]
     pub fn build_header(&mut self, len: u16) -> TcplsHeader {
         let header = TcplsHeader {
             chunk_num: self.next_snd_pkt_num,
@@ -202,11 +204,13 @@ impl StreamMap {
     }
 
     /// Returns the stream with the given ID if it exists.
+    #[inline]
     pub fn get(&self, id: u16) -> Option<&Stream> {
         self.streams.get(&(id as u64))
     }
 
     /// Returns the mutable stream with the given ID if it exists.
+    #[inline]
     pub fn get_mut(&mut self, id: u16) -> Option<&mut Stream> {
         self.streams.get_mut(&(id as u64))
     }
@@ -223,6 +227,7 @@ impl StreamMap {
     /// This also takes care of enforcing both local and the peer's stream
     /// count limits. If one of these limits is violated, the `StreamLimit`
     /// error is returned.
+    #[inline]
     pub fn get_or_create(
         &mut self, stream_id: u16,
     ) -> Result<&mut Stream, Error> {
@@ -259,6 +264,7 @@ impl StreamMap {
     /// to when an existing stream becomes writable.
     ///
     /// If the stream was already in the list, this does nothing.
+    #[inline]
     pub fn insert_writable(&mut self, id: u64) {
         if !self.writable.contains(&id) {
             self.writable.insert(id);
@@ -269,6 +275,7 @@ impl StreamMap {
     ///
     /// This should also be called anytime an existing stream stops being
     /// writable.
+    #[inline]
     pub fn remove_writable(&mut self, stream_id: u64) {
         self.writable.remove(&stream_id);
     }
@@ -276,6 +283,7 @@ impl StreamMap {
     /// Adds the stream ID to the flushable streams set.
     ///
     /// If the stream was already in the list, this does nothing.
+    #[inline]
     pub fn insert_flushable(&mut self, id: u64) {
         if !self.flushable.contains(&id) {
             self.flushable.insert(id);
@@ -283,11 +291,13 @@ impl StreamMap {
     }
 
     /// Removes the stream ID from the flushable streams set.
+    #[inline]
     pub fn remove_flushable(&mut self, stream_id: u64) { self.flushable.remove(&stream_id); }
 
     /// Adds the stream ID to the collected streams set.
     ///
     /// If the stream was already in the list, this does nothing.
+    #[inline]
     pub fn insert_collected(&mut self, id: u64) {
         if !self.collected.contains(&id) {
             self.collected.insert(id);
@@ -295,18 +305,22 @@ impl StreamMap {
     }
 
     /// Removes the stream ID from the collected streams set.
+    #[inline]
     pub fn remove_collected(&mut self, stream_id: u64) { self.collected.remove(&stream_id); }
 
 
 
 
     /// Creates an iterator over streams that can be written to.
+    #[inline]
     pub fn writable(&self) -> StreamIter { StreamIter::from(&self.writable) }
 
     /// Creates an iterator over streams that have data to send.
+    #[inline]
     pub fn flushable(&self) -> StreamIter { StreamIter::from(&self.flushable) }
 
     /// Creates an iterator over streams that have been collected.
+    #[inline]
     pub fn collected(&self) -> StreamIter { StreamIter::from(&self.collected) }
 
 
@@ -340,7 +354,7 @@ impl StreamMap {
     pub fn has_flushable(&self) -> bool {
         !self.flushable.is_empty()
     }
-
+    #[inline]
     pub fn all_empty(&self) -> bool {
         let mut all_empty = true;
         let flushable = self.flushable();
