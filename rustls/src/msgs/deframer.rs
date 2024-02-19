@@ -54,6 +54,7 @@ impl MessageDeframer {
     pub fn new(id: u64) -> MessageDeframer {
         MessageDeframer{
             id,
+            buf: vec![0u8; MAX_HANDSHAKE_SIZE as usize],
             ..Default::default()
         }
     }
@@ -220,12 +221,11 @@ impl MessageDeframer {
                 }
 
                 self.record_info.get_mut(&(start as u64)).unwrap().processed = true;
-                match self.calculate_discard_range() {
-                   true =>
-                       self.discard(self.processed_range.start as usize,
-                                    (self.processed_range.end - self.processed_range.start) as usize),
-                    false => (),
-                };
+              /*  match self.calculate_discard_range() {
+                   true =>*/
+                       self.discard(start, end - start);
+                    /*false => (),*/
+              /*  };*/
                 //
                 return Ok(Some(Deframed {
                     want_close_before_decrypt: false,
@@ -393,12 +393,12 @@ impl MessageDeframer {
         // larger buffer size. Once the large message and any following handshake messages in
         // the same flight have been consumed, `pop()` will call `discard()` to reset `used`.
         // At this point, the buffer resizing logic below should reduce the buffer size.
-        let allow_max = match self.joining_hs {
+      /*  let allow_max = match self.joining_hs {
             Some(_) => MAX_HANDSHAKE_SIZE as usize,
             None => MAX_WIRE_SIZE,
-        };
+        };*/
 
-        if self.used >= allow_max {
+        if self.used >= self.buf.len() {
             return Err("message buffer full");
         }
 
@@ -407,13 +407,13 @@ impl MessageDeframer {
         // make sure to reduce the buffer size again (large messages should be rare).
         // Also, reduce the buffer size if there are neither full nor partial messages in it,
         // which usually means that the other side suspended sending data.
-        let need_capacity = Ord::min(allow_max, self.used + READ_SIZE);
+       /* let need_capacity = Ord::min(allow_max, self.used + READ_SIZE);
         if need_capacity > self.buf.len() {
             self.buf.resize(need_capacity, 0);
         } else if self.used == 0 || self.buf.len() > allow_max {
             self.buf.resize(need_capacity, 0);
             self.buf.shrink_to(need_capacity);
-        }
+        }*/
 
         Ok(())
     }
@@ -489,7 +489,7 @@ impl MessageDeframer {
         } else if taken == self.used {
             self.used = 0;
         }
-        // Build a new record_info BTreeMap excluding the discarded range
+       /* // Build a new record_info BTreeMap excluding the discarded range
         for entry in self.record_info.iter()
             .filter(|&(key, info)| *key < self.processed_range.start || *key >= self.processed_range.end) {
             if *entry.0 == self.processed_range.end {
@@ -520,9 +520,12 @@ impl MessageDeframer {
                 processed: entry.1.processed,
             });
         }
-        self.record_info = new_record_info;
-        self.processed_range.start = 0;
-        self.processed_range.end   = 0;
+        self.record_info = new_record_info;*/
+        if self.record_info.contains_key(&(start as u64)) {
+            self.record_info.remove(&(start as u64));
+        }
+        /*self.processed_range.start = 0;
+        self.processed_range.end   = 0;*/
     }
 }
 
@@ -667,7 +670,7 @@ const MAX_HANDSHAKE_SIZE: u32 = 0xffff;
 
 const READ_SIZE: usize = 4096;
 
-const DISCARD_THRESHOLD: usize =  READ_SIZE ;
+const DISCARD_THRESHOLD: usize =  0 ;
 
 
 #[cfg(test)]
