@@ -56,8 +56,7 @@ impl TlsClient {
                 id_set.insert(1);
                 id_set.insert(2);
 
-                let stream_iter = self.tcpls_session.tls_conn.as_mut().unwrap().streams_to_flush(&mut id_set, true);
-                self.tcpls_session.send_on_connection(token.0 as u64, None, Some(stream_iter)).expect("Sending on connection failed");
+                self.tcpls_session.send_on_connection(Some(token.0 as u64), None, Some(id_set)).expect("Sending on connection failed");
             }
         }
 
@@ -121,7 +120,7 @@ impl TlsClient {
     }
 
     fn do_write(&mut self, token: &Token) {
-        self.tcpls_session.send_on_connection(token.0 as u64, None, None).unwrap();
+        self.tcpls_session.send_on_connection(Some(token.0 as u64), None, None).unwrap();
     }
 
     /// Registers self as a 'listener' in mio::Registry

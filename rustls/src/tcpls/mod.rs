@@ -21,7 +21,7 @@ use crate::PeerMisbehaved::{InvalidTcplsJoinToken, TcplsJoinExtensionNotFound};
 use crate::recvbuf::RecvBufMap;
 use crate::tcpls::network_address::AddressMap;
 use crate::tcpls::outstanding_conn::OutstandingTcpConn;
-use crate::tcpls::stream::{SimpleIdHashMap, StreamIter};
+use crate::tcpls::stream::{SimpleIdHashMap, SimpleIdHashSet, StreamIter};
 use crate::verify::{
     AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
 };
@@ -222,7 +222,7 @@ impl TcplsSession {
     }
     
 
-    pub fn send_on_connection(&mut self, conn_id: u64, wr: Option<&mut dyn io::Write>, flushables: Option<StreamIter>) -> Result<usize, Error> {
+    pub fn send_on_connection(&mut self, conn_id: Option<u64>, wr: Option<&mut dyn io::Write>, flushables: Option<SimpleIdHashSet>) -> Result<usize, Error> {
         let tls_conn = self.tls_conn.as_mut().unwrap();
 
         let (has_pending, pending_at) = match tls_conn.record_layer.streams.has_pending {
@@ -231,7 +231,10 @@ impl TcplsSession {
         };
 
         //Flush streams selected by the app or flush all
-        let stream_iter = flushables.unwrap_or_else(|| tls_conn.record_layer.streams.flushable());
+        let stream_iter = match flushables {
+            Some(set) => StreamIter::from(&set),
+            None => tls_conn.record_layer.streams.flushable(),
+        };
 
 
         let mut done = 0;
@@ -239,7 +242,7 @@ impl TcplsSession {
             Some(socket) => socket,
             None => &mut self
                 .tcp_connections
-                .get_mut(&conn_id)
+                .get_mut(&(conn_id.unwrap_or_else(||panic!("No connection id provided"))))
                 .unwrap()
                 .socket,
         };
@@ -274,10 +277,10 @@ impl TcplsSession {
                     return Ok(done);
                 }
 
-                if !complete_sent {
+                /*if !complete_sent {
                     tls_conn.record_layer.streams.has_pending = Some(id as u16);
                     return Ok(done);
-                }
+                }*/
 
             }
             // The remainder of the partially sent record was sent successfully
