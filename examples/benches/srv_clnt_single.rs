@@ -1,11 +1,8 @@
-#[macro_use]
-extern crate serde_derive;
-
 use std::{fs, io};
 use std::io::Write;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
-use rustls::{Certificate, ClientConfig, ClientConnection, Connection, ConnectionCommon, DEFAULT_CIPHER_SUITES, PrivateKey, ProtocolVersion, RootCertStore, ServerConfig, ServerConnection, SideData, SupportedProtocolVersion, Ticketer};
+use rustls::{ClientConfig, ClientConnection, Connection, ConnectionCommon, DEFAULT_CIPHER_SUITES, RootCertStore, ServerConfig, ServerConnection, SideData, tcpls};
 use rustls::recvbuf::RecvBufMap;
 
 
@@ -155,7 +152,7 @@ pub fn transfer(
     right: &mut (impl DerefMut + Deref<Target = ConnectionCommon<impl SideData>>),
     id: u16,
 ) -> usize {
-    let mut buf = [0u8; 64 * 1024];
+    let mut buf = vec![0u8; 2 * 1024 * 1024];
     let mut total = 0;
 
     while left.wants_write() {
@@ -182,12 +179,12 @@ pub fn transfer(
 }
 
 
-struct OtherSession<'a, C, S>
+struct OtherSession<C, S>
     where
         C: DerefMut + Deref<Target = ConnectionCommon<S>>,
         S: SideData,
 {
-    sess: &'a mut C,
+    sess: C,
     pub reads: usize,
     pub writevs: Vec<Vec<usize>>,
     fail_ok: bool,
@@ -196,12 +193,12 @@ struct OtherSession<'a, C, S>
     pub recv_map: RecvBufMap,
 }
 
-impl<'a, C, S> OtherSession<'a, C, S>
+impl<C, S> OtherSession<C, S>
     where
         C: DerefMut + Deref<Target = ConnectionCommon<S>>,
         S: SideData,
 {
-    fn new(sess: &'a mut C) -> OtherSession<'a, C, S> {
+    fn new(sess: C) -> OtherSession<C, S> {
         OtherSession {
             sess,
             reads: 0,
@@ -213,14 +210,14 @@ impl<'a, C, S> OtherSession<'a, C, S>
         }
     }
 
-    fn new_fails(sess: &'a mut C) -> OtherSession<'a, C, S> {
+    fn new_fails(sess: C) -> OtherSession<C, S> {
         let mut os = OtherSession::new(sess);
         os.fail_ok = true;
         os
     }
 }
 
-impl<'a, C, S> io::Read for OtherSession<'a, C, S>
+impl<C, S> io::Read for OtherSession<C, S>
     where
         C: DerefMut + Deref<Target = ConnectionCommon<S>>,
         S: SideData,
@@ -231,7 +228,7 @@ impl<'a, C, S> io::Read for OtherSession<'a, C, S>
     }
 }
 
-impl<'a, C, S> io::Write for OtherSession<'a, C, S>
+impl<C, S> io::Write for OtherSession<C, S>
     where
         C: DerefMut + Deref<Target = ConnectionCommon<S>>,
         S: SideData,
@@ -270,55 +267,61 @@ impl<'a, C, S> io::Write for OtherSession<'a, C, S>
             }
         }
 
-        let rc = self.sess.process_new_packets(&mut self.recv_map);
-        if !self.fail_ok {
-            rc.unwrap();
-        } else if rc.is_err() {
-            self.last_error = rc.err();
-        }
-
         self.writevs.push(lengths);
         Ok(total)
     }
 }
 
-use criterion::{criterion_group, criterion_main, Criterion, Throughput, BenchmarkId};
+use criterion::{criterion_group, criterion_main, Criterion, Throughput, BenchmarkId, BatchSize};
+use pprof::criterion::{Output, PProfProfiler};
 use rustls::client::Resumption;
 use rustls::server::{NoClientAuth, NoServerSessionStorage};
+use rustls::tcpls::stream::SimpleIdHashSet;
 use rustls::tcpls::TcplsSession;
 
-
 fn criterion_benchmark(c: &mut Criterion) {
-
-    let (mut client, mut server, mut recv_svr, mut recv_clnt) =
-        make_pair(KeyType::Rsa);
-    do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
-    let mut tcpls_client = TcplsSession::new(false);
-    let _ = tcpls_client.tls_conn.insert(Connection::from(client));
-    tcpls_client.tls_conn.as_mut().unwrap().set_buffer_limit(None, 0);
-    let sendbuf = vec![1u8; 32 * 1024];
-    //recv buffer initialization
-    let mut app_bufs = RecvBufMap::new();
-    app_bufs.get_or_create_recv_buffer(1, None);
-    tcpls_client.stream_send(1, sendbuf.as_slice(), false).expect("sending failed");
-    client = match tcpls_client.tls_conn.unwrap() {
-        Connection::Client(conn) => conn,
-        Connection::Server(conn) => panic!("wrong connection type"),
-    };
-    transfer(&mut client, &mut server, 1);
-
+    let sendbuf = vec![1u8; 10 * 1024 * 1024];
     let mut group = c.benchmark_group("Data_recv");
-    group.throughput(Throughput::Bytes(32 * 1024));
-    group.bench_with_input(BenchmarkId::new("Data_recv_single_stream_single_connection", "1 MB"), &sendbuf,
+    group.throughput(Throughput::Bytes(10 * 1024 * 1024));
+    group.bench_with_input(BenchmarkId::new("Data_recv_single_stream_single_connection", "10 MB"), &sendbuf,
                            |b, sendbuf| {
 
-                               b.iter( || {
-                                       server.process_new_packets(&mut app_bufs).unwrap();
+                               b.iter_batched_ref(|| {
+                                   // Finish handshake
+                                   let (mut client, mut server, mut recv_svr, mut recv_clnt) =
+                                       make_pair(KeyType::Rsa);
+                                   do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
+                                   let mut tcpls_client = TcplsSession::new(false);
+                                   let _ = tcpls_client.tls_conn.insert(Connection::from(client));
+                                   tcpls_client.tls_conn.as_mut().unwrap().set_buffer_limit(None, 1);
+                                   //Encrypt data and buffer it in send buffer
+                                   tcpls_client.stream_send(1, sendbuf.as_slice(), false).expect("Buffering in send buffer failed");
+
+                                   let mut stream_to_flush = SimpleIdHashSet::default();
+                                   stream_to_flush.insert(1);
+                                   // Create app receive buffer
+                                   recv_svr.get_or_create_recv_buffer(1, Some(11 * 1024 * 1024));
+                                   let mut pipe = OtherSession::new(server);
+                                   let mut sent = 0;
+                                   while sent < sendbuf.len() {
+                                       sent += tcpls_client.send_on_connection(None, Some(&mut pipe), Some(stream_to_flush.clone())).unwrap();
+                                   }
+                                   (pipe, recv_svr)
                                },
-                               )
+
+                                                  |(ref mut pipe, recv_svr)| pipe.sess.process_new_packets(recv_svr).unwrap(),
+                                                  BatchSize::SmallInput)
                            });
     group.finish();
 }
 
-criterion_group!(benches, criterion_benchmark);
+
+criterion_group!{
+    name = benches;
+    config = Criterion::default()
+        .with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)))
+        .measurement_time(std::time::Duration::from_secs(15))
+        .sample_size(9000);
+    targets = criterion_benchmark
+}
 criterion_main!(benches);
