@@ -54,7 +54,7 @@ impl MessageDeframer {
     pub fn new(id: u64) -> MessageDeframer {
         MessageDeframer{
             id,
-            buf: vec![0u8; MAX_HANDSHAKE_SIZE as usize],
+            buf: vec![0u8; MAX_WIRE_SIZE ],
             ..Default::default()
         }
     }
