@@ -28,12 +28,4 @@ ring = {path = "../ring"}
 
 [dev-dependencies]
 regex = "1.0"
-divan = "0.1.14"
-criterion = { version = "0.5.1", features = ["html_reports"] }
 
-
-
-[[bench]]
-name = "srv_clnt_single"
-path = "benches/srv_clnt_single.rs"
-harness = false

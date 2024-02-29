@@ -37,6 +37,7 @@ secret_extraction = []
 quic = []
 tls12 = []
 read_buf = ["rustversion"]
+dhat-on = []
 
 [dev-dependencies]
 bencher = "0.1.5"
@@ -45,6 +46,13 @@ log = "0.4.4"
 webpki-roots = "0.23.0"
 rustls-pemfile = "1.0.0"
 base64 = "0.21"
+criterion = { version = "0.5.1" }
+pprof = { version = "0.13.0", features = ["flamegraph", "criterion"] }
+
+[[bench]]
+name = "srv_clnt_single"
+path = "benches/srv_clnt_single.rs"
+harness = false
 
 
 [[example]]
