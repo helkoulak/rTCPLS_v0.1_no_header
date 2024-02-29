@@ -989,12 +989,12 @@ mod test {
 
     fn seal_zeroes(key: aead::UnboundKey) -> Vec<u8> {
         let key = aead::LessSafeKey::new(key);
-        let mut seal_output = vec![0; 32];
+        let mut seal_output = vec![0; 48];
         key.seal_in_place_append_tag(
             aead::Nonce::assume_unique_for_key([0; aead::NONCE_LEN]),
             aead::Aad::empty(),
             &mut seal_output,
-        )
+        0, 32)
         .unwrap();
         seal_output
     }
