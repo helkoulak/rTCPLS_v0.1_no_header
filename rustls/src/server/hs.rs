@@ -1,54 +1,44 @@
-use crate::common_state::{CommonState, State};
-use crate::conn::ConnectionRandoms;
+
+use alloc::borrow::ToOwned;
+use alloc::boxed::Box;
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+use pki_types::DnsName;
+use super::server_conn::ServerConnectionData;
 #[cfg(feature = "tls12")]
-use crate::enums::CipherSuite;
-use crate::enums::{AlertDescription, HandshakeType, ProtocolVersion, SignatureScheme};
+use super::tls12;
+
+use crate::common_state::{Protocol, State};
+use crate::conn::ConnectionRandoms;
+use crate::crypto::SupportedKxGroup;
+use crate::enums::{
+    AlertDescription, CipherSuite, HandshakeType, ProtocolVersion, SignatureAlgorithm,
+    SignatureScheme,
+};
 use crate::error::{Error, PeerIncompatible, PeerMisbehaved};
 use crate::hash_hs::{HandshakeHash, HandshakeHashBuffer};
 #[cfg(feature = "logging")]
 use crate::log::{debug, trace};
-use crate::msgs::enums::{Compression, ExtensionType};
+use crate::msgs::enums::{Compression, ExtensionType, NamedGroup};
 #[cfg(feature = "tls12")]
 use crate::msgs::handshake::SessionId;
-use crate::msgs::handshake::{ClientHelloPayload, Random, ServerExtension};
-use crate::msgs::handshake::{ConvertProtocolNameList, ConvertServerNameList, HandshakePayload};
+use crate::msgs::handshake::{
+    ClientHelloPayload, ConvertProtocolNameList, ConvertServerNameList, HandshakePayload,
+    KeyExchangeAlgorithm, Random, ServerExtension,
+};
 use crate::msgs::message::{Message, MessagePayload};
 use crate::msgs::persist;
-use crate::server::{ClientHello, ServerConfig};
-use crate::suites;
-use crate::SupportedCipherSuite;
-
-use super::server_conn::ServerConnectionData;
-#[cfg(feature = "tls12")]
-use super::tls12;
 use crate::server::common::ActiveCertifiedKey;
-use crate::server::tls13;
+use crate::server::{tls13, ClientHello, ServerConfig};
+use crate::{suites, SupportedCipherSuite};
 
-use std::sync::Arc;
-use crate::AlertDescription::IllegalParameter;
-
-pub(super) type NextState = Box<dyn State<ServerConnectionData>>;
-pub(super) type NextStateOrError = Result<NextState, Error>;
+pub(super) type NextState<'a> = Box<dyn State<ServerConnectionData> + 'a>;
+pub(super) type NextStateOrError<'a> = Result<NextState<'a>, Error>;
 pub(super) type ServerContext<'a> = crate::common_state::Context<'a, ServerConnectionData>;
-
-pub(super) fn incompatible(common: &mut CommonState, why: PeerIncompatible) -> Error {
-    common.send_fatal_alert(AlertDescription::HandshakeFailure);
-    Error::PeerIncompatible(why)
-}
-
-fn bad_version(common: &mut CommonState, why: PeerIncompatible) -> Error {
-    common.send_fatal_alert(AlertDescription::ProtocolVersion);
-    Error::PeerIncompatible(why)
-}
-
-pub(super) fn decode_error(common: &mut CommonState, why: PeerMisbehaved) -> Error {
-    common.send_fatal_alert(AlertDescription::DecodeError);
-    Error::PeerMisbehaved(why)
-}
 
 pub(super) fn can_resume(
     suite: SupportedCipherSuite,
-    sni: &Option<webpki::DnsName>,
+    sni: &Option<DnsName>,
     using_ems: bool,
     resumedata: &persist::ServerSessionValue,
 ) -> bool {
@@ -82,14 +72,15 @@ impl ExtensionProcessing {
         config: &ServerConfig,
         cx: &mut ServerContext<'_>,
         ocsp_response: &mut Option<&[u8]>,
-        sct_list: &mut Option<&[u8]>,
+
         hello: &ClientHelloPayload,
         resumedata: Option<&persist::ServerSessionValue>,
         extra_exts: Vec<ServerExtension>,
     ) -> Result<(), Error> {
         // ALPN
         let our_protocols = &config.alpn_protocols;
-        let maybe_their_protocols = hello.get_alpn_extension();
+
+        let maybe_their_protocols = hello.alpn_extension();
         if let Some(their_protocols) = maybe_their_protocols {
             let their_protocols = their_protocols.to_slices();
 
@@ -109,44 +100,45 @@ impl ExtensionProcessing {
                 self.exts
                     .push(ServerExtension::make_alpn(&[selected_protocol]));
             } else if !our_protocols.is_empty() {
-                cx.common
-                    .send_fatal_alert(AlertDescription::NoApplicationProtocol);
-                return Err(Error::NoApplicationProtocol);
+
+                return Err(cx.common.send_fatal_alert(
+                    AlertDescription::NoApplicationProtocol,
+                    Error::NoApplicationProtocol,
+                ));
             }
         }
 
-        #[cfg(feature = "quic")]
-        {
-            if cx.common.is_quic() {
-                // QUIC has strict ALPN, unlike TLS's more backwards-compatible behavior. RFC 9001
-                // says: "The server MUST treat the inability to select a compatible application
-                // protocol as a connection error of type 0x0178". We judge that ALPN was desired
-                // (rather than some out-of-band protocol negotiation mechanism) iff any ALPN
-                // protocols were configured locally or offered by the client. This helps prevent
-                // successful establishment of connections between peers that can't understand
-                // each other.
-                if cx.common.alpn_protocol.is_none()
-                    && (!our_protocols.is_empty() || maybe_their_protocols.is_some())
-                {
-                    cx.common
-                        .send_fatal_alert(AlertDescription::NoApplicationProtocol);
-                    return Err(Error::NoApplicationProtocol);
-                }
+        if cx.common.is_quic() {
+            // QUIC has strict ALPN, unlike TLS's more backwards-compatible behavior. RFC 9001
+            // says: "The server MUST treat the inability to select a compatible application
+            // protocol as a connection error of type 0x0178". We judge that ALPN was desired
+            // (rather than some out-of-band protocol negotiation mechanism) iff any ALPN
+            // protocols were configured locally or offered by the client. This helps prevent
+            // successful establishment of connections between peers that can't understand
+            // each other.
+            if cx.common.alpn_protocol.is_none()
+                && (!our_protocols.is_empty() || maybe_their_protocols.is_some())
+            {
+                return Err(cx.common.send_fatal_alert(
+                    AlertDescription::NoApplicationProtocol,
+                    Error::NoApplicationProtocol,
+                ));
+            }
 
-                match hello.get_quic_params_extension() {
-                    Some(params) => cx.common.quic.params = Some(params),
-                    None => {
-                        return Err(cx
-                            .common
-                            .missing_extension(PeerMisbehaved::MissingQuicTransportParameters));
-                    }
+            match hello.quic_params_extension() {
+                Some(params) => cx.common.quic.params = Some(params),
+                None => {
+                    return Err(cx
+                        .common
+                        .missing_extension(PeerMisbehaved::MissingQuicTransportParameters));
                 }
             }
         }
 
         let for_resume = resumedata.is_some();
         // SNI
-        if !for_resume && hello.get_sni_extension().is_some() {
+
+        if !for_resume && hello.sni_extension().is_some() {
             self.exts
                 .push(ServerExtension::ServerNameAck);
         }
@@ -169,23 +161,6 @@ impl ExtensionProcessing {
             ocsp_response.take();
         }
 
-        if !for_resume
-            && hello
-                .find_extension(ExtensionType::SCT)
-                .is_some()
-        {
-            if !cx.common.is_tls13() {
-                // Take the SCT list, if any, so we don't send it later,
-                // and put it in the legacy extension.
-                if let Some(sct_list) = sct_list.take() {
-                    self.exts
-                        .push(ServerExtension::make_sct(sct_list.to_vec()));
-                }
-            }
-        } else {
-            // Throw away any SCT list so we don't send it later.
-            sct_list.take();
-        }
 
         self.exts.extend(extra_exts);
 
@@ -274,7 +249,8 @@ impl ExpectClientHello {
         client_hello: &ClientHelloPayload,
         m: &Message,
         cx: &mut ServerContext<'_>,
-    ) -> NextStateOrError {
+
+    ) -> NextStateOrError<'static> {
         let tls13_enabled = self
             .config
             .supports_version(ProtocolVersion::TLSv1_3);
@@ -283,33 +259,39 @@ impl ExpectClientHello {
             .supports_version(ProtocolVersion::TLSv1_2);
 
         // Are we doing TLS1.3?
-        let maybe_versions_ext = client_hello.get_versions_extension();
+
+        let maybe_versions_ext = client_hello.versions_extension();
         let version = if let Some(versions) = maybe_versions_ext {
             if versions.contains(&ProtocolVersion::TLSv1_3) && tls13_enabled {
                 ProtocolVersion::TLSv1_3
             } else if !versions.contains(&ProtocolVersion::TLSv1_2) || !tls12_enabled {
-                return Err(bad_version(
-                    cx.common,
+
+                return Err(cx.common.send_fatal_alert(
+                    AlertDescription::ProtocolVersion,
                     PeerIncompatible::Tls12NotOfferedOrEnabled,
                 ));
             } else if cx.common.is_quic() {
-                return Err(bad_version(
-                    cx.common,
+                return Err(cx.common.send_fatal_alert(
+                    AlertDescription::ProtocolVersion,
                     PeerIncompatible::Tls13RequiredForQuic,
                 ));
             } else {
                 ProtocolVersion::TLSv1_2
             }
-        } else if client_hello.client_version.get_u16() < ProtocolVersion::TLSv1_2.get_u16() {
-            return Err(bad_version(cx.common, PeerIncompatible::Tls12NotOffered));
+
+        } else if u16::from(client_hello.client_version) < u16::from(ProtocolVersion::TLSv1_2) {
+            return Err(cx.common.send_fatal_alert(
+                AlertDescription::ProtocolVersion,
+                PeerIncompatible::Tls12NotOffered,
+            ));
         } else if !tls12_enabled && tls13_enabled {
-            return Err(bad_version(
-                cx.common,
+            return Err(cx.common.send_fatal_alert(
+                AlertDescription::ProtocolVersion,
                 PeerIncompatible::SupportedVersionsExtensionRequired,
             ));
         } else if cx.common.is_quic() {
-            return Err(bad_version(
-                cx.common,
+            return Err(cx.common.send_fatal_alert(
+                AlertDescription::ProtocolVersion,
                 PeerIncompatible::Tls13RequiredForQuic,
             ));
         } else {
@@ -325,6 +307,7 @@ impl ExpectClientHello {
         // intersection of ciphersuites.
         let client_suites = self
             .config
+            .provider
             .cipher_suites
             .iter()
             .copied()
@@ -343,7 +326,7 @@ impl ExpectClientHello {
             let client_hello = ClientHello::new(
                 &cx.data.sni,
                 &sig_schemes,
-                client_hello.get_alpn_extension(),
+                client_hello.alpn_extension(),
                 &client_hello.cipher_suites,
             );
 
@@ -353,51 +336,57 @@ impl ExpectClientHello {
                 .resolve(client_hello);
 
             certkey.ok_or_else(|| {
-                cx.common
-                    .send_fatal_alert(AlertDescription::AccessDenied);
-                Error::General("no server certificate chain resolved".to_string())
+
+                cx.common.send_fatal_alert(
+                    AlertDescription::AccessDenied,
+                    Error::General("no server certificate chain resolved".to_owned()),
+                )
             })?
         };
         let certkey = ActiveCertifiedKey::from_certified_key(&certkey);
 
-        // Reduce our supported ciphersuites by the certificate.
-        // (no-op for TLS1.3)
-        let suitable_suites =
-            suites::reduce_given_sigalg(&self.config.cipher_suites, certkey.get_key().algorithm());
 
-        // And version
-        let suitable_suites = suites::reduce_given_version(&suitable_suites, version);
-
-        let suite = if self.config.ignore_client_order {
-            suites::choose_ciphersuite_preferring_server(
+        let (suite, skxg) = self
+            .choose_suite_and_kx_group(
+                version,
+                certkey.get_key().algorithm(),
+                cx.common.protocol,
+                client_hello
+                    .namedgroups_extension()
+                    .unwrap_or(&[]),
                 &client_hello.cipher_suites,
-                &suitable_suites,
             )
-        } else {
-            suites::choose_ciphersuite_preferring_client(
-                &client_hello.cipher_suites,
-                &suitable_suites,
-            )
-        }
-        .ok_or_else(|| incompatible(cx.common, PeerIncompatible::NoCipherSuitesInCommon))?;
+            .map_err(|incompat| {
+                cx.common
+                    .send_fatal_alert(AlertDescription::HandshakeFailure, incompat)
+            })?;
 
         debug!("decided upon suite {:?}", suite);
         cx.common.suite = Some(suite);
 
         // Start handshake hash.
-        let starting_hash = suite.hash_algorithm();
+        let starting_hash = suite.hash_provider();
         let transcript = match self.transcript {
             HandshakeHashOrBuffer::Buffer(inner) => inner.start_hash(starting_hash),
-            HandshakeHashOrBuffer::Hash(inner) if inner.algorithm() == starting_hash => inner,
+            HandshakeHashOrBuffer::Hash(inner)
+                if inner.algorithm() == starting_hash.algorithm() =>
+            {
+                inner
+            }
             _ => {
-                return Err(cx
-                    .common
-                    .illegal_param(PeerMisbehaved::HandshakeHashVariedAfterRetry));
+                return Err(cx.common.send_fatal_alert(
+                    AlertDescription::IllegalParameter,
+                    PeerMisbehaved::HandshakeHashVariedAfterRetry,
+                ));
             }
         };
 
         // Save their Random.
-        let randoms = ConnectionRandoms::new(client_hello.random, Random::new()?);
+
+        let randoms = ConnectionRandoms::new(
+            client_hello.random,
+            Random::new(self.config.provider.secure_random)?,
+        );
         match suite {
             SupportedCipherSuite::Tls13(suite) => tls13::CompleteClientHelloHandling {
                 config: self.config,
@@ -408,7 +397,7 @@ impl ExpectClientHello {
                 send_tickets: self.send_tickets,
                 extra_exts: self.extra_exts,
             }
-            .handle_client_hello(cx, certkey, m, client_hello, sig_schemes),
+            .handle_client_hello(cx, certkey, m, client_hello, skxg, sig_schemes),
             #[cfg(feature = "tls12")]
             SupportedCipherSuite::Tls12(suite) => tls12::CompleteClientHelloHandling {
                 config: self.config,
@@ -425,19 +414,156 @@ impl ExpectClientHello {
                 certkey,
                 m,
                 client_hello,
+                skxg,
                 sig_schemes,
                 tls13_enabled,
             ),
         }
     }
 
+
+    fn choose_suite_and_kx_group(
+        &self,
+        selected_version: ProtocolVersion,
+        sig_key_algorithm: SignatureAlgorithm,
+        protocol: Protocol,
+        client_groups: &[NamedGroup],
+        client_suites: &[CipherSuite],
+    ) -> Result<(SupportedCipherSuite, &'static dyn SupportedKxGroup), PeerIncompatible> {
+        // Determine which `KeyExchangeAlgorithm`s are theoretically possible, based
+        // on the offered and supported groups.
+        let mut ecdhe_possible = false;
+        let mut ffdhe_possible = false;
+        let mut ffdhe_offered = false;
+        let mut supported_groups = Vec::with_capacity(client_groups.len());
+
+        for offered_group in client_groups {
+            let supported = self
+                .config
+                .provider
+                .kx_groups
+                .iter()
+                .find(|skxg| skxg.name() == *offered_group);
+
+            match offered_group.key_exchange_algorithm() {
+                KeyExchangeAlgorithm::DHE => {
+                    ffdhe_possible |= supported.is_some();
+                    ffdhe_offered = true;
+                }
+                KeyExchangeAlgorithm::ECDHE => {
+                    ecdhe_possible |= supported.is_some();
+                }
+            }
+
+            supported_groups.push(supported);
+        }
+
+        let first_supported_dhe_kxg = if selected_version == ProtocolVersion::TLSv1_2 {
+            // https://datatracker.ietf.org/doc/html/rfc7919#section-4 (paragraph 2)
+            let first_supported_dhe_kxg = self
+                .config
+                .provider
+                .kx_groups
+                .iter()
+                .find(|skxg| skxg.name().key_exchange_algorithm() == KeyExchangeAlgorithm::DHE);
+            ffdhe_possible |= !ffdhe_offered && first_supported_dhe_kxg.is_some();
+            first_supported_dhe_kxg
+        } else {
+            // In TLS1.3, the server may only directly negotiate a group.
+            None
+        };
+
+        if !ecdhe_possible && !ffdhe_possible {
+            return Err(PeerIncompatible::NoKxGroupsInCommon);
+        }
+
+        let mut suitable_suites_iter = self
+            .config
+            .provider
+            .cipher_suites
+            .iter()
+            .filter(|suite| {
+                // Reduce our supported ciphersuites by the certified key's algorithm.
+                suite.usable_for_signature_algorithm(sig_key_algorithm)
+                // And version
+                && suite.version().version == selected_version
+                // And protocol
+                && suite.usable_for_protocol(protocol)
+                // And key exchange groups
+                && (!ecdhe_possible || suite.usable_for_kx_algorithm(KeyExchangeAlgorithm::ECDHE))
+                && (!ffdhe_possible || suite.usable_for_kx_algorithm(KeyExchangeAlgorithm::DHE))
+            });
+
+        // RFC 7919 (https://datatracker.ietf.org/doc/html/rfc7919#section-4) requires us to send
+        // the InsufficientSecurity alert in case we don't recognize client's FFDHE groups (i.e.,
+        // `suitable_suites` becomes empty). But that does not make a lot of sense (e.g., client
+        // proposes FFDHE4096 and we only support FFDHE2048), so we ignore that requirement here,
+        // and continue to send HandshakeFailure.
+
+        let suite = if self.config.ignore_client_order {
+            suitable_suites_iter.find(|suite| client_suites.contains(&suite.suite()))
+        } else {
+            let suitable_suites = suitable_suites_iter.collect::<Vec<_>>();
+            client_suites
+                .iter()
+                .find_map(|client_suite| {
+                    suitable_suites
+                        .iter()
+                        .find(|x| *client_suite == x.suite())
+                })
+                .copied()
+        }
+        .ok_or(PeerIncompatible::NoCipherSuitesInCommon)?;
+
+        // Finally, choose a key exchange group that is compatible with the selected cipher
+        // suite.
+        let maybe_skxg = supported_groups
+            .iter()
+            .find_map(|maybe_skxg| match maybe_skxg {
+                Some(skxg) => suite
+                    .usable_for_kx_algorithm(skxg.name().key_exchange_algorithm())
+                    .then(|| *skxg),
+                None => None,
+            });
+
+        if selected_version == ProtocolVersion::TLSv1_3 {
+            // This unwrap is structurally guaranteed by the early return for `!ffdhe_possible && !ecdhe_possible`
+            return Ok((*suite, *maybe_skxg.unwrap()));
+        }
+
+        // For TLS1.2, the server can unilaterally choose a DHE group if it has one and
+        // there was no better option.
+        match maybe_skxg {
+            Some(skxg) => Ok((*suite, *skxg)),
+            None if suite.usable_for_kx_algorithm(KeyExchangeAlgorithm::DHE) => {
+                // If kx for the selected cipher suite is DHE and no DHE groups are specified in the extension,
+                // the server is free to choose DHE params, we choose the first DHE kx group of the provider.
+                if let Some(server_selected_ffdhe_skxg) = first_supported_dhe_kxg {
+                    Ok((*suite, *server_selected_ffdhe_skxg))
+                } else {
+                    Err(PeerIncompatible::NoKxGroupsInCommon)
+                }
+            }
+            None => Err(PeerIncompatible::NoKxGroupsInCommon),
+        }
+    }
 }
 
 impl State<ServerConnectionData> for ExpectClientHello {
-    fn handle(self: Box<Self>, cx: &mut ServerContext<'_>, m: Message) -> NextStateOrError {
-
+    fn handle<'m>(
+        self: Box<Self>,
+        cx: &mut ServerContext<'_>,
+        m: Message<'m>,
+    ) -> NextStateOrError<'m>
+    where
+        Self: 'm,
+    {
         let (client_hello, sig_schemes) = process_client_hello(&m, self.done_retry, cx)?;
         self.with_certified_key(sig_schemes, client_hello, &m, cx)
+    }
+
+    fn into_owned(self: Box<Self>) -> NextState<'static> {
+        self
     }
 }
 
@@ -445,9 +571,12 @@ impl State<ServerConnectionData> for ExpectClientHello {
 ///
 /// This represents the first part of the `ClientHello` handling, where we do all validation that
 /// doesn't depend on a `ServerConfig` being available and extract everything needed to build a
-/// [`ClientHello`] value for a [`ResolvesServerConfig`]/`ResolvesServerCert`].
+
+/// [`ClientHello`] value for a [`ResolvesServerCert`].
 ///
 /// Note that this will modify `data.sni` even if config or certificate resolution fail.
+///
+/// [`ResolvesServerCert`]: crate::server::ResolvesServerCert
 pub(super) fn process_client_hello<'a>(
     m: &'a Message,
     done_retry: bool,
@@ -461,14 +590,16 @@ pub(super) fn process_client_hello<'a>(
         .compression_methods
         .contains(&Compression::Null)
     {
-        cx.common
-            .send_fatal_alert(IllegalParameter);
-        return Err(PeerIncompatible::NullCompressionRequired.into());
+
+        return Err(cx.common.send_fatal_alert(
+            AlertDescription::IllegalParameter,
+            PeerIncompatible::NullCompressionRequired,
+        ));
     }
 
     if client_hello.has_duplicate_extension() {
-        return Err(decode_error(
-            cx.common,
+        return Err(cx.common.send_fatal_alert(
+            AlertDescription::DecodeError,
             PeerMisbehaved::DuplicateClientHelloExtensions,
         ));
     }
@@ -481,21 +612,24 @@ pub(super) fn process_client_hello<'a>(
     // send an Illegal Parameter alert instead of the Internal Error alert
     // (or whatever) that we'd send if this were checked later or in a
     // different way.
-    let sni: Option<webpki::DnsName> = match client_hello.get_sni_extension() {
+
+    let sni: Option<DnsName> = match client_hello.sni_extension() {
         Some(sni) => {
             if sni.has_duplicate_names_for_type() {
-                return Err(decode_error(
-                    cx.common,
+                return Err(cx.common.send_fatal_alert(
+                    AlertDescription::DecodeError,
                     PeerMisbehaved::DuplicateServerNameTypes,
                 ));
             }
 
-            if let Some(hostname) = sni.get_single_hostname() {
-                Some(hostname.into())
+
+            if let Some(hostname) = sni.single_hostname() {
+                Some(hostname.to_lowercase_owned())
             } else {
-                return Err(cx
-                    .common
-                    .illegal_param(PeerMisbehaved::ServerNameMustContainOneHostName));
+                return Err(cx.common.send_fatal_alert(
+                    AlertDescription::IllegalParameter,
+                    PeerMisbehaved::ServerNameMustContainOneHostName,
+                ));
             }
         }
         None => None,
@@ -512,18 +646,17 @@ pub(super) fn process_client_hello<'a>(
     }
 
     let sig_schemes = client_hello
-        .get_sigalgs_extension()
+
+        .sigalgs_extension()
         .ok_or_else(|| {
-            incompatible(
-                cx.common,
+            cx.common.send_fatal_alert(
+                AlertDescription::HandshakeFailure,
                 PeerIncompatible::SignatureAlgorithmsExtensionRequired,
             )
         })?;
 
     Ok((client_hello, sig_schemes.to_owned()))
 }
-
-
 
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum HandshakeHashOrBuffer {

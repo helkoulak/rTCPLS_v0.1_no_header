@@ -1,4 +1,5 @@
 
+
 [package]
 name = "rustls-fuzz"
 version = "0.0.1"
@@ -10,12 +11,10 @@ edition = "2021"
 cargo-fuzz = true
 
 [dependencies]
-webpki = "0.22"
+libfuzzer-sys = { git = "https://github.com/rust-fuzz/libfuzzer-sys.git" }
+pki-types = { package = "rustls-pki-types", version = "1" }
+rustls = { path = "../rustls" }
 
-[dependencies.rustls]
-path = "../rustls"
-[dependencies.libfuzzer-sys]
-git = "https://github.com/rust-fuzz/libfuzzer-sys.git"
 
 # Prevent this from interfering with workspaces
 [workspace]
@@ -44,3 +43,8 @@ path = "fuzzers/client.rs"
 [[bin]]
 name = "server"
 path = "fuzzers/server.rs"
+
+[[bin]]
+name = "server_name"
+path = "fuzzers/server_name.rs"
+

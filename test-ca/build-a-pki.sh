@@ -1,9 +1,10 @@
-#!/usr/bin/env sh
+
+#!/usr/bin/env bash
 
 set -xe
 
-rm -rf rsa/ ecdsa/ eddsa/
-mkdir -p rsa/ ecdsa/ eddsa/
+rm -rf rsa/ ecdsa-p256/ ecdsa-p384/ ecdsa-p521/ eddsa/
+mkdir -p rsa/ ecdsa-p256/ ecdsa-p384/ ecdsa-p521/ eddsa/
 
 openssl req -nodes \
           -x509 \
@@ -48,45 +49,56 @@ openssl rsa \
           -out rsa/client.rsa
 
 # ecdsa
-openssl ecparam -name prime256v1 -out ecdsa/nistp256.pem
-openssl ecparam -name secp384r1 -out ecdsa/nistp384.pem
+for curve in p256 p384 p521 ; do
+    case $curve in
+      p256)
+        openssl ecparam -name prime256v1 -out ecdsa-$curve/curve.pem
+        ;;
+      p384)
+        openssl ecparam -name secp384r1 -out ecdsa-$curve/curve.pem
+        ;;
+      p521)
+        openssl ecparam -name secp521r1 -out ecdsa-$curve/curve.pem
+        ;;
+    esac
 
-openssl req -nodes \
-          -x509 \
-          -newkey ec:ecdsa/nistp384.pem \
-          -keyout ecdsa/ca.key \
-          -out ecdsa/ca.cert \
-          -sha256 \
-          -batch \
-          -days 3650 \
-          -subj "/CN=ponytown ECDSA CA"
+    openssl req -nodes \
+              -x509 \
+              -newkey ec:ecdsa-$curve/curve.pem \
+              -keyout ecdsa-$curve/ca.key \
+              -out ecdsa-$curve/ca.cert \
+              -sha256 \
+              -batch \
+              -days 3650 \
+              -subj "/CN=ponytown ECDSA $curve CA"
 
-openssl req -nodes \
-          -newkey ec:ecdsa/nistp256.pem \
-          -keyout ecdsa/inter.key \
-          -out ecdsa/inter.req \
-          -sha256 \
-          -batch \
-          -days 3000 \
-          -subj "/CN=ponytown ECDSA level 2 intermediate"
+    openssl req -nodes \
+              -newkey ec:ecdsa-$curve/curve.pem \
+              -keyout ecdsa-$curve/inter.key \
+              -out ecdsa-$curve/inter.req \
+              -sha256 \
+              -batch \
+              -days 3000 \
+              -subj "/CN=ponytown ECDSA $curve level 2 intermediate"
 
-openssl req -nodes \
-          -newkey ec:ecdsa/nistp256.pem \
-          -keyout ecdsa/end.key \
-          -out ecdsa/end.req \
-          -sha256 \
-          -batch \
-          -days 2000 \
-          -subj "/CN=testserver.com"
+    openssl req -nodes \
+              -newkey ec:ecdsa-$curve/curve.pem \
+              -keyout ecdsa-$curve/end.key \
+              -out ecdsa-$curve/end.req \
+              -sha256 \
+              -batch \
+              -days 2000 \
+              -subj "/CN=testserver.com"
 
-openssl req -nodes \
-          -newkey ec:ecdsa/nistp384.pem \
-          -keyout ecdsa/client.key \
-          -out ecdsa/client.req \
-          -sha256 \
-          -batch \
-          -days 2000 \
-          -subj "/CN=ponytown client"
+    openssl req -nodes \
+              -newkey ec:ecdsa-$curve/curve.pem \
+              -keyout ecdsa-$curve/client.key \
+              -out ecdsa-$curve/client.req \
+              -sha256 \
+              -batch \
+              -days 2000 \
+              -subj "/CN=ponytown client"
+done
 
 # eddsa
 
@@ -135,13 +147,75 @@ openssl req -nodes \
           -batch \
           -subj "/CN=ponytown client"
 
-for kt in rsa ecdsa eddsa ; do
+
+# Generate a CRL revoking a specific certificate, signed by the specified issuer.
+# Arguments:
+#  1. the key type (e.g. "rsa")
+#  2. signature hash algorithm (e.g. "sha256")
+#  3. the name of the issuer (e.g. "inter")
+#  4. the name of the certificate to revoke (e.g. "end")
+function gen_crl {
+  local kt=$1
+  local hash=$2
+  local issuer_name=$3
+  local revoked_cert_name=$4
+
+  # Overwrite the CA state for each revocation - this avoids an
+  # "already revoked" error since we're re-using serial numbers across
+  # key types.
+  echo -n '' > index.txt
+  echo '1000' > crlnumber
+
+  # Revoke the certificate in the openssl CA index. This produces a CRL but
+  # doesn't include the revoked certificate in the CRL...
+  openssl ca \
+            -config ./crl-openssl.cnf \
+            -keyfile "$kt/$issuer_name.key" \
+            -cert "$kt/$issuer_name.cert" \
+            -gencrl \
+            -md $hash \
+            -crldays 7 \
+            -revoke "$kt/$revoked_cert_name.cert" \
+            -crl_reason keyCompromise \
+            -out "$kt/$revoked_cert_name.revoked.crl.pem"
+
+  # Run -gencrl again to actually include the revoked certificate in the CRL.
+  openssl ca \
+            -config ./crl-openssl.cnf \
+            -keyfile "$kt/$issuer_name.key" \
+            -cert "$kt/$issuer_name.cert" \
+            -md $hash \
+            -gencrl \
+            -crldays 7 \
+            -out "$kt/$revoked_cert_name.revoked.crl.pem"
+}
+
+for kt in rsa ecdsa-p256 ecdsa-p384 ecdsa-p521 eddsa ; do
+  case $kt in 
+    rsa)
+      hash=sha256
+      ;;
+    ecdsa-p256)
+      hash=sha256
+      ;;
+    ecdsa-p384)
+      hash=sha384
+      ;;
+    ecdsa-p521)
+      hash=sha512
+      ;;
+    eddsa)
+      hash=sha512
+      ;;
+  esac
+
   openssl x509 -req \
             -in $kt/inter.req \
             -out $kt/inter.cert \
             -CA $kt/ca.cert \
             -CAkey $kt/ca.key \
-            -sha256 \
+
+            -$hash \
             -days 3650 \
             -set_serial 123 \
             -extensions v3_inter -extfile openssl.cnf
@@ -151,7 +225,8 @@ for kt in rsa ecdsa eddsa ; do
             -out $kt/end.cert \
             -CA $kt/inter.cert \
             -CAkey $kt/inter.key \
-            -sha256 \
+
+            -$hash \
             -days 2000 \
             -set_serial 456 \
             -extensions v3_end -extfile openssl.cnf
@@ -161,11 +236,18 @@ for kt in rsa ecdsa eddsa ; do
             -out $kt/client.cert \
             -CA $kt/inter.cert \
             -CAkey $kt/inter.key \
-            -sha256 \
+            -$hash \
             -days 2000 \
             -set_serial 789 \
             -extensions v3_client -extfile openssl.cnf
 
+
+  # Generate a CRL revoking the client certificate
+  gen_crl $kt $hash inter client
+  # Generate a CRL revoking the server certificate
+  gen_crl $kt $hash inter end
+  # Generate a CRL revoking the intermediate certificate
+  gen_crl $kt $hash ca inter
   cat $kt/inter.cert $kt/ca.cert > $kt/end.chain
   cat $kt/end.cert $kt/inter.cert $kt/ca.cert > $kt/end.fullchain
 
@@ -174,3 +256,8 @@ for kt in rsa ecdsa eddsa ; do
 
   openssl asn1parse -in $kt/ca.cert -out $kt/ca.der > /dev/null
 done
+
+
+# Tidy up openssl CA state.
+rm index.txt* || true
+rm crlnumber* || true

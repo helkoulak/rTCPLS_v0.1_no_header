@@ -9,6 +9,10 @@ use rustls::{ServerConfig, ServerConnection};
 use std::io;
 use std::sync::Arc;
 
+<<<<<<< HEAD
+=======
+#[derive(Debug)]
+>>>>>>> 5bd3300 (Add files of rustls v0.23.1)
 struct Fail;
 
 impl ResolvesServerCert for Fail {
@@ -23,7 +27,10 @@ impl ResolvesServerCert for Fail {
 fuzz_target!(|data: &[u8]| {
     let config = Arc::new(
         ServerConfig::builder()
+<<<<<<< HEAD
             .with_safe_defaults()
+=======
+>>>>>>> 5bd3300 (Add files of rustls v0.23.1)
             .with_no_client_auth()
             .with_cert_resolver(Arc::new(Fail)),
     );

@@ -1,8 +1,8 @@
 [package]
 name = "rustls"
-version = "0.21.0"
+version = "0.23.1"
 edition = "2021"
-rust-version = "1.57"
+rust-version = "1.61"
 license = "Apache-2.0 OR ISC OR MIT"
 readme = "../README.md"
 description = "Rustls is a modern TLS library written in Rust."
@@ -16,49 +16,40 @@ build = "build.rs"
 rustversion = { version = "1.0.6", optional = true }
 
 [dependencies]
-log = { version = "0.4.4", optional = true }
-ring = {path = "../ring"}
-siphasher = "1.0.0"
-sct = "0.7.0"
-mio = { version = "0.8", features = ["net", "os-poll"] }
-webpki = { package = "rustls-webpki", version = "0.100.0", features = ["alloc", "std"] }
-rustls-pemfile = "1.0.0"
-octets = { version = "0.2", path = "../octets" }
-if-addrs = "0.10.1"
-smallvec = { version = "1.10", features = ["serde", "union"] }
-either = { version = "1.8", default-features = false }
 
+aws-lc-rs = { version = "1.6", optional = true, default-features = false, features = ["aws-lc-sys"] }
+log = { version = "0.4.4", optional = true }
+# remove once our MSRV is >= 1.70
+once_cell = { version = "1.16", default-features = false, features = ["alloc", "race"] }
+ring = { version = "0.17", optional = true }
+subtle = { version = "2.5.0", default-features = false }
+webpki = { package = "rustls-webpki", version = "0.102.2", features = ["alloc"], default-features = false }
+pki-types = { package = "rustls-pki-types", version = "1.2", features = ["alloc"] }
+zeroize = "1.7"
 
 [features]
-default = ["logging", "tls12"]
+default = ["aws_lc_rs", "logging", "std", "tls12"]
+std = ["webpki/std", "pki-types/std", "once_cell/std"]
 logging = ["log"]
-dangerous_configuration = []
-secret_extraction = []
-quic = []
+aws_lc_rs = ["dep:aws-lc-rs", "webpki/aws_lc_rs"]
+ring = ["dep:ring", "webpki/ring"]
 tls12 = []
-read_buf = ["rustversion"]
-dhat-on = []
+read_buf = ["rustversion", "std"]
+fips = ["aws_lc_rs", "aws-lc-rs?/fips"]
 
 [dev-dependencies]
-bencher = "0.1.5"
-env_logger = "0.9.0" # 0.10 requires an MSRV bump to 1.60
-log = "0.4.4"
-webpki-roots = "0.23.0"
-rustls-pemfile = "1.0.0"
 base64 = "0.21"
-criterion = { version = "0.5.1" }
-pprof = { version = "0.13.0", features = ["flamegraph", "criterion"] }
-
-[[bench]]
-name = "srv_clnt_single"
-path = "benches/srv_clnt_single.rs"
-harness = false
-
+bencher = "0.1.5"
+env_logger = "0.10" # 0.11 requires 1.71 MSRV even as a dev-dep (due to manifest features)
+log = "0.4.4"
+num-bigint = "0.4.4"
+rustls-pemfile = "2"
+webpki-roots = "0.26"
 
 [[example]]
 name = "bogo_shim"
 path = "examples/internal/bogo_shim.rs"
-required-features = ["dangerous_configuration", "quic"]
+required-features = ["tls12"]
 
 [[example]]
 name = "bench"
@@ -68,7 +59,15 @@ path = "examples/internal/bench.rs"
 name = "benchmarks"
 path = "benches/benchmarks.rs"
 harness = false
+required-features = ["ring"]
 
 [package.metadata.docs.rs]
-all-features = true
+# all non-default features except fips (cannot build on docs.rs environment)
+features = ["read_buf", "ring"]
 rustdoc-args = ["--cfg", "docsrs"]
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "rustls_pki_types",
+    "rustls_pki_types::*",
+]

@@ -1,22 +1,26 @@
 [workspace]
 members = [
 
-#  # the rust implementation of the protocol TCPLS
-#    "rTcpls",
+  # CI benchmarks
+  "ci-bench",
+  # Tests that require OpenSSL
+  "openssl-tests",
+  # Network-based tests
+  "connect-tests",
   # tests and example code
-    "examples",
+  "examples",
   # the main library and tests
-    "rustls",
-    "octets",
+  "rustls",
+  # example of custom provider
+  "provider-example",
 ]
-exclude = ["admin/rustfmt"]
-resolver = "2"
+default-members = [
+  "examples",
+  "rustls",
+]
 
 [profile.release]
 debug = true
 
-[profile.performance]
-inherits = "release"
-lto = "fat"
-codegen-units = 1
-incremental = false
+exclude = ["admin/rustfmt"]
+resolver = "2"

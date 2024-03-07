@@ -1,33 +1,28 @@
-use std::collections::hash_map;
+
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+
+use pki_types::CertificateDer;
+
 use crate::enums::{AlertDescription, ContentType, HandshakeType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerMisbehaved};
-use crate::key;
 #[cfg(feature = "logging")]
-use crate::log::{debug, error, warn};
+use crate::log::{debug, warn};
 use crate::msgs::alert::AlertMessagePayload;
 use crate::msgs::base::Payload;
-use crate::msgs::deframer::MessageDeframerMap;
 use crate::msgs::enums::{AlertLevel, KeyUpdateRequest};
 use crate::msgs::fragmenter::MessageFragmenter;
-use crate::msgs::handshake::TcplsToken;
-use crate::msgs::message::{BorrowedPlainMessage, Message, PlainMessage};
-#[cfg(feature = "quic")]
-use crate::msgs::message::MessagePayload;
-#[cfg(feature = "quic")]
-use crate::quic;
-use crate::record_layer;
-use crate::recvbuf::RecvBufMap;
-#[cfg(feature = "secret_extraction")]
-use crate::suites::PartiallyExtractedSecrets;
-use crate::suites::SupportedCipherSuite;
-use crate::tcpls::frame::Frame;
-use crate::tcpls::outstanding_conn::OutstandingConnMap;
-
-use crate::tcpls::stream::{DEFAULT_STREAM_ID, SimpleIdHashMap, SimpleIdHashSet, StreamIter};
-
+use crate::msgs::handshake::CertificateChain;
+use crate::msgs::message::{
+    Message, MessagePayload, OutboundChunks, OutboundOpaqueMessage, OutboundPlainMessage,
+    PlainMessage,
+};
+use crate::suites::{PartiallyExtractedSecrets, SupportedCipherSuite};
 #[cfg(feature = "tls12")]
 use crate::tls12::ConnectionSecrets;
+use crate::unbuffered::{EncryptError, InsufficientSizeError};
 use crate::vecbuf::ChunkVecBuffer;
+use crate::{quic, record_layer};
 
 /// Connection state common to both client and server connections.
 pub struct CommonState {
@@ -43,29 +38,19 @@ pub struct CommonState {
     sent_fatal_alert: bool,
     /// If the peer has signaled end of stream.
     pub(crate) has_received_close_notify: bool,
+
+    #[cfg(feature = "std")]
     pub(crate) has_seen_eof: bool,
     pub(crate) received_middlebox_ccs: u8,
-    pub(crate) peer_certificates: Option<Vec<key::Certificate>>,
+    pub(crate) peer_certificates: Option<CertificateChain<'static>>,
     message_fragmenter: MessageFragmenter,
-    pub(crate) deframers_map: MessageDeframerMap,
-
-
     pub(crate) received_plaintext: ChunkVecBuffer,
-    /// id of currently used tcp connection
-    pub(crate) conn_in_use: u32,
-
-    pub(crate) tcpls_tokens: Vec<TcplsToken>,
-    pub(crate) join_msg_received: bool,
-    sendable_plaintext: PlainBufsMap,
-    pub outstanding_tcp_conns: OutstandingConnMap,
+    pub(crate) sendable_tls: ChunkVecBuffer,
     queued_key_update_message: Option<Vec<u8>>,
 
-    #[allow(dead_code)] // only read for QUIC
     /// Protocol whose key schedule should be used. Unused for TLS < 1.3.
     pub(crate) protocol: Protocol,
-    #[cfg(feature = "quic")]
     pub(crate) quic: quic::Quic,
-    #[cfg(feature = "secret_extraction")]
     pub(crate) enable_secret_extraction: bool,
 }
 
@@ -83,50 +68,29 @@ impl CommonState {
             early_traffic: false,
             sent_fatal_alert: false,
             has_received_close_notify: false,
+
+            #[cfg(feature = "std")]
             has_seen_eof: false,
             received_middlebox_ccs: 0,
             peer_certificates: None,
             message_fragmenter: MessageFragmenter::default(),
-            outstanding_tcp_conns: OutstandingConnMap::default(),
+
             received_plaintext: ChunkVecBuffer::new(Some(DEFAULT_RECEIVED_PLAINTEXT_LIMIT)),
-            conn_in_use: 0,
-            tcpls_tokens: Vec::new(),
-            join_msg_received: false,
-            sendable_plaintext: PlainBufsMap::default(),
-            deframers_map: MessageDeframerMap::new(),
-
-
+            sendable_tls: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
             queued_key_update_message: None,
-
             protocol: Protocol::Tcp,
-            #[cfg(feature = "quic")]
             quic: quic::Quic::default(),
-            #[cfg(feature = "secret_extraction")]
             enable_secret_extraction: false,
         }
-    }
-
-    /// sets the id of the currently active tcp connection
-    pub fn set_connection_in_use(&mut self, conn_id: u32) {
-        self.conn_in_use = conn_id;
-    }
-
-    pub fn streams_to_flush(&self, flushables: &mut SimpleIdHashSet, include_pending: bool) -> StreamIter {
-        self.record_layer.streams.streams_to_flush(flushables, include_pending)
     }
 
     /// Returns true if the caller should call [`Connection::write_tls`] as soon as possible.
     ///
     /// [`Connection::write_tls`]: crate::Connection::write_tls
     pub fn wants_write(&self) -> bool {
-       !self.record_layer.streams.all_empty()
+
+        !self.sendable_tls.is_empty()
     }
-
-
-   /* /// sets the id of the currently active stream
-    pub(crate) fn set_stream_in_use(&mut self, stream_id: u32) {
-        self.record_layer.set_conn_in_use(stream_id as u64);
-    }*/
 
     /// Returns true if the connection is currently performing the TLS handshake.
     ///
@@ -134,7 +98,8 @@ impl CommonState {
     /// [`Connection::process_new_packets()`] has been called, this might start to return `false`
     /// while the final handshake packets still need to be extracted from the connection's buffers.
     ///
-    /// [`Connection::process_new_packets()`]: crate::Connection::process_received
+
+    /// [`Connection::process_new_packets()`]: crate::Connection::process_new_packets
     pub fn is_handshaking(&self) -> bool {
         !(self.may_send_application_data && self.may_receive_application_data)
     }
@@ -154,7 +119,8 @@ impl CommonState {
     /// if client authentication was completed.
     ///
     /// The return value is None until this value is available.
-    pub fn peer_certificates(&self) -> Option<&[key::Certificate]> {
+
+    pub fn peer_certificates(&self) -> Option<&[CertificateDer<'static>]> {
         self.peer_certificates.as_deref()
     }
 
@@ -167,13 +133,6 @@ impl CommonState {
         self.get_alpn_protocol()
     }
 
-    pub fn tcpls_tokens(&self) -> Option<&Vec<TcplsToken>> {
-        self.get_tcpls_tokens()
-    }
-
-    pub fn next_tcpls_token(&mut self) -> Option<TcplsToken> {
-        self.get_next_tcpls_token()
-    }
 
     /// Retrieves the ciphersuite agreed with the peer.
     ///
@@ -198,6 +157,8 @@ impl CommonState {
         msg: Message,
         mut state: Box<dyn State<Data>>,
         data: &mut Data,
+
+        sendable_plaintext: Option<&mut ChunkVecBuffer>,
     ) -> Result<Box<dyn State<Data>>, Error> {
         // For TLS1.2, outside of the handshake, send rejection alerts for
         // renegotiation requests.  These can occur any time.
@@ -212,41 +173,72 @@ impl CommonState {
             }
         }
 
-        let mut cx = Context { common: self, data };
+
+        let mut cx = Context {
+            common: self,
+            data,
+            sendable_plaintext,
+        };
         match state.handle(&mut cx, msg) {
             Ok(next) => {
-                state = next;
+                state = next.into_owned();
                 Ok(state)
             }
             Err(e @ Error::InappropriateMessage { .. })
             | Err(e @ Error::InappropriateHandshakeMessage { .. }) => {
-                self.send_fatal_alert(AlertDescription::UnexpectedMessage);
-                Err(e)
+
+                Err(self.send_fatal_alert(AlertDescription::UnexpectedMessage, e))
             }
             Err(e) => Err(e),
         }
     }
 
-    /// Send plaintext application data, fragmenting and
-    /// encrypting it as it goes out.
-    ///
-    /// If internal buffers are too small, this function will not accept
-    /// all the data.
-    pub(crate) fn send_some_plaintext(&mut self, data: &[u8], id: u16, fin: bool) -> usize {
-        self.perhaps_write_key_update();
-        self.send_plain(data, Limit::Yes, id, fin)
-    }
 
-    pub(crate) fn send_early_plaintext(&mut self, data: &[u8], id: u16) -> usize {
-        debug_assert!(self.early_traffic);
-        debug_assert!(self.record_layer.is_encrypting());
-
-        if data.is_empty() {
-            // Don't send empty fragments.
-            return 0;
+    pub(crate) fn write_plaintext(
+        &mut self,
+        payload: OutboundChunks<'_>,
+        outgoing_tls: &mut [u8],
+    ) -> Result<usize, EncryptError> {
+        if payload.is_empty() {
+            return Ok(0);
         }
 
-        self.send_appdata_encrypt(data, Limit::Yes, id, false)
+        let fragments = self
+            .message_fragmenter
+            .fragment_payload(
+                ContentType::ApplicationData,
+                ProtocolVersion::TLSv1_2,
+                payload.clone(),
+            );
+
+        let remaining_encryptions = self
+            .record_layer
+            .remaining_write_seq()
+            .ok_or(EncryptError::EncryptExhausted)?;
+
+        if fragments.len() as u64 > remaining_encryptions.get() {
+            return Err(EncryptError::EncryptExhausted);
+        }
+
+        self.check_required_size(
+            outgoing_tls,
+            self.queued_key_update_message
+                .as_deref(),
+            fragments,
+        )?;
+
+        let fragments = self
+            .message_fragmenter
+            .fragment_payload(
+                ContentType::ApplicationData,
+                ProtocolVersion::TLSv1_2,
+                payload,
+            );
+
+        let opt_msg = self.queued_key_update_message.take();
+        let written = self.write_fragments(outgoing_tls, opt_msg, fragments);
+
+        Ok(written)
     }
 
     // Changing the keys must not span any fragmented handshake
@@ -255,246 +247,138 @@ impl CommonState {
     // which is illegal.  Not mentioned in RFC.
     pub(crate) fn check_aligned_handshake(&mut self) -> Result<(), Error> {
         if !self.aligned_handshake {
-            self.send_fatal_alert(AlertDescription::UnexpectedMessage);
-            Err(PeerMisbehaved::KeyEpochWithPendingFragment.into())
+
+            Err(self.send_fatal_alert(
+                AlertDescription::UnexpectedMessage,
+                PeerMisbehaved::KeyEpochWithPendingFragment,
+            ))
         } else {
             Ok(())
         }
     }
 
-    pub(crate) fn illegal_param(&mut self, why: PeerMisbehaved) -> Error {
-        self.send_fatal_alert(AlertDescription::IllegalParameter);
-        Error::PeerMisbehaved(why)
-    }
 
     /// Fragment `m`, encrypt the fragments, and then queue
     /// the encrypted fragments for sending.
-    pub(crate) fn send_msg_encrypt(&mut self, m: PlainMessage, id: u16) {
+    pub(crate) fn send_msg_encrypt(&mut self, m: PlainMessage) {
         let iter = self
             .message_fragmenter
             .fragment_message(&m);
         for m in iter {
-            self.send_single_fragment(m, id, false);
+
+            self.send_single_fragment(m);
         }
     }
 
     /// Like send_msg_encrypt, but operate on an appdata directly.
-    fn send_appdata_encrypt(&mut self, payload: &[u8], limit: Limit, id: u16, mut fin: bool) -> usize {
+
+    fn send_appdata_encrypt(&mut self, payload: OutboundChunks<'_>, limit: Limit) -> usize {
         // Here, the limit on sendable_tls applies to encrypted data,
         // but we're respecting it for plaintext data -- so we'll
         // be out by whatever the cipher+record overhead is.  That's a
         // constant and predictable amount, so it's not a terrible issue.
 
         let len = match limit {
+            #[cfg(feature = "std")]
             Limit::Yes => self
-                .record_layer
-                .streams
-                .get_or_create(id)
-                .unwrap()
-                .send
+                .sendable_tls
                 .apply_limit(payload.len()),
             Limit::No => payload.len(),
         };
 
-        if len == 0 {
-            self.record_layer.streams.remove_writable(id as u64);
-            // Send buffer is full.
-            return 0;
-        }
 
-        if len < payload.len() {
-            fin = false;
-        }
-
-        let (iter, mut count) = self.message_fragmenter.fragment_slice(
-            ContentType::ApplicationData,
-            ProtocolVersion::TLSv1_2,
-            &payload[..len],
-        );
+        let iter = self
+            .message_fragmenter
+            .fragment_payload(
+                ContentType::ApplicationData,
+                ProtocolVersion::TLSv1_2,
+                payload.split_at(len).0,
+            );
         for m in iter {
-            count -= 1;
-            //consider flag fin when reaching last chunk
-            let finish = if count == 0 {
-                fin
-            } else {
-                false
-            };
-            self.send_single_fragment(m, id, finish);
+            self.send_single_fragment(m);
         }
 
         len
     }
 
-    fn send_single_fragment(&mut self, m: BorrowedPlainMessage, id: u16, fin: bool) {
 
-        self.record_layer.streams.get_or_create(id).unwrap();
-        // set id of stream to decide on crypto context and record seq space
-        self.record_layer.encrypt_for_stream(id);
+    fn send_single_fragment(&mut self, m: OutboundPlainMessage) {
         // Close connection once we start to run out of
         // sequence space.
-        if self.record_layer
+        if self
+            .record_layer
             .wants_close_before_encrypt()
         {
             self.send_close_notify();
         }
+
         // Refuse to wrap counter at all costs.  This
         // is basically untestable unfortunately.
         if self.record_layer.encrypt_exhausted() {
             return;
         }
 
-        let tcpls_header = self.record_layer
-            .streams
-            .get_mut(id)
-            .unwrap()
-            .build_header(m.payload.len() as u16);
 
-        let stream_frame_header = match m.typ {
-            ContentType::ApplicationData => {
-                Some(Frame::Stream {
-                    length: m.payload.len() as u16,
-                    fin: fin.into(),
-                })
-            },
-            _ => None,
-        };
-        let em = self.record_layer
-            .encrypt_outgoing_zc(m, &tcpls_header, stream_frame_header);
-        self.queue_message(em, id);
+        let em = self.record_layer.encrypt_outgoing(m);
+        self.queue_tls_message(em);
     }
 
-    /// Encrypt and send some plaintext `data`.  `limit` controls
-    /// whether the per-connection buffer limits apply.
-    ///
-    /// Returns the number of bytes written from `data`: this might
-    /// be less than `data.len()` if buffer limits were exceeded.
-    fn send_plain(&mut self, data: &[u8], limit: Limit, id: u16, fin: bool) -> usize {
-        if !self.may_send_application_data {
-            // If we haven't completed handshaking, buffer
-            // plaintext to send once we do.
-            let len = match limit {
-                Limit::Yes => self
-                    .sendable_plaintext
-                    .get_or_create_plain_buf(id)
-                    .unwrap()
-                    .send_plain_buf
-                    .append_limited_copy(data),
-                Limit::No => self
-                    .sendable_plaintext
-                    .get_or_create_plain_buf(id)
-                    .unwrap()
-                    .send_plain_buf
-                    .append(data.to_vec()),
-            };
-            return len;
-        }
-
+    fn send_plain_non_buffering(&mut self, payload: OutboundChunks<'_>, limit: Limit) -> usize {
+        debug_assert!(self.may_send_application_data);
         debug_assert!(self.record_layer.is_encrypting());
 
-        if data.is_empty() {
+        if payload.is_empty() {
             // Don't send empty fragments.
             return 0;
         }
 
-        self.send_appdata_encrypt(data, limit, id, fin)
+
+        self.send_appdata_encrypt(payload, limit)
     }
 
-    pub(crate) fn start_outgoing_traffic(&mut self) {
+    /// Mark the connection as ready to send application data.
+    ///
+    /// Also flush `sendable_plaintext` if it is `Some`.  
+    pub(crate) fn start_outgoing_traffic(
+        &mut self,
+        sendable_plaintext: &mut Option<&mut ChunkVecBuffer>,
+    ) {
         self.may_send_application_data = true;
-        self.flush_plaintext();
+        if let Some(sendable_plaintext) = sendable_plaintext {
+            self.flush_plaintext(sendable_plaintext);
+        }
     }
 
-    pub(crate) fn start_traffic(&mut self) {
+    /// Mark the connection as ready to send and receive application data.
+    ///
+    /// Also flush `sendable_plaintext` if it is `Some`.  
+    pub(crate) fn start_traffic(&mut self, sendable_plaintext: &mut Option<&mut ChunkVecBuffer>) {
         self.may_receive_application_data = true;
-        self.start_outgoing_traffic();
-        self.record_layer.set_not_handshaking();
-    }
-
-    /// Sets a limit on the internal buffers used to buffer
-    /// unsent plaintext (prior to completing the TLS handshake)
-    /// and unsent TLS records.  This limit acts only on application
-    /// data written through [`Connection::writer`].
-    ///
-    /// By default the limit is 64KB.  The limit can be set
-    /// at any time, even if the current buffer use is higher.
-    ///
-    /// [`None`] means no limit applies, and will mean that written
-    /// data is buffered without bound -- it is up to the application
-    /// to appropriately schedule its plaintext and TLS writes to bound
-    /// memory usage.
-    ///
-    /// For illustration: `Some(1)` means a limit of one byte applies:
-    /// [`Connection::writer`] will accept only one byte, encrypt it and
-    /// add a TLS header.  Once this is sent via [`Connection::write_tls`],
-    /// another byte may be sent.
-    ///
-    /// # Internal write-direction buffering
-    /// rustls has two buffers whose size are bounded by this setting:
-    ///
-    /// ## Buffering of unsent plaintext data prior to handshake completion
-    ///
-    /// Calls to [`Connection::writer`] before or during the handshake
-    /// are buffered (up to the limit specified here).  Once the
-    /// handshake completes this data is encrypted and the resulting
-    /// TLS records are added to the outgoing buffer.
-    ///
-    /// ## Buffering of outgoing TLS records
-    ///
-    /// This buffer is used to store TLS records that rustls needs to
-    /// send to the peer.  It is used in these two circumstances:
-    ///
-    /// - by [`Connection::process_new_packets`] when a handshake or alert
-    ///   TLS record needs to be sent.
-    /// - by [`Connection::writer`] post-handshake: the plaintext is
-    ///   encrypted and the resulting TLS record is buffered.
-    ///
-    /// This buffer is emptied by [`Connection::write_tls`].
-    ///
-    /// [`Connection::writer`]: crate::Connection::writer
-    /// [`Connection::write_tls`]: crate::Connection::write_tls
-    /// [`Connection::process_new_packets`]: crate::Connection::process_received
-    pub fn set_buffer_limit(&mut self, limit: Option<usize>, id: u16) {
-        self.sendable_plaintext.get_or_create_plain_buf(id).unwrap().send_plain_buf.set_limit(limit);
-        self.record_layer.streams.get_or_create(id).unwrap().send.set_limit(limit);
+        self.start_outgoing_traffic(sendable_plaintext);
     }
 
     /// Send any buffered plaintext.  Plaintext is buffered if
     /// written during handshake.
-    fn flush_plaintext(&mut self) {
+
+    fn flush_plaintext(&mut self, sendable_plaintext: &mut ChunkVecBuffer) {
         if !self.may_send_application_data {
             return;
         }
 
-        if self.sendable_plaintext.plain_map.is_empty() {
-            return;
-        }
 
-        let keys: Vec<_> = self.sendable_plaintext.plain_map.keys().cloned().collect();
-
-        for key in keys   {
-            let mut stream = self.sendable_plaintext.plain_map.remove(&key).unwrap();
-            while let Some(buf) = stream.send_plain_buf.pop() {
-                self.send_plain(&buf, Limit::No, stream.id, false);
-            }
-        }
-    }
-
-    pub fn read_send_buffer(&mut self, out: &mut Vec<u8>, id: u16) {
-        let mut send_vec = self.record_layer.streams.get_mut(id).unwrap().send.copy_records();
-        while let Some(buf) = send_vec.pop_front() {
-            out.extend_from_slice(&buf);
+        while let Some(buf) = sendable_plaintext.pop() {
+            self.send_plain_non_buffering(buf.as_slice().into(), Limit::No);
         }
     }
 
     // Put m into sendable_tls for writing.
-    pub(crate) fn queue_message(&mut self, msg: Vec<u8>, id: u16) {
-        self.record_layer.streams.get_or_create(id).unwrap().send.append(msg);
-        self.record_layer.streams.insert_flushable(id as u64);
+
+    fn queue_tls_message(&mut self, m: OutboundOpaqueMessage) {
+        self.sendable_tls.append(m.encode());
     }
 
     /// Send a raw TLS message, fragmenting it if needed.
-    pub(crate) fn send_msg(&mut self, m: Message, must_encrypt: bool, id: u16) {
-        #[cfg(feature = "quic")]
+    pub(crate) fn send_msg(&mut self, m: Message, must_encrypt: bool) {
         {
             if let Protocol::Quic = self.protocol {
                 if let MessagePayload::Alert(alert) = m.payload {
@@ -519,29 +403,18 @@ impl CommonState {
                 .message_fragmenter
                 .fragment_message(msg);
             for m in iter {
-                self.queue_message(m.to_unencrypted_opaque().encode(), id);
+
+                self.queue_tls_message(m.to_unencrypted_opaque());
             }
         } else {
-            self.send_msg_encrypt(m.into(), id);
-        }
-    }
-
-    pub fn send_msg_plain(&mut self, m: Message, id: u16) {
-        let msg = &m.into();
-        let iter = self
-            .message_fragmenter
-            .fragment_message(msg);
-        for m in iter {
-            self.queue_message(m.to_unencrypted_opaque().encode(), id);
+            self.send_msg_encrypt(m.into());
         }
     }
 
     pub(crate) fn take_received_plaintext(&mut self, bytes: Payload) {
-        self.received_plaintext.append(bytes.0);
-    }
 
-    pub fn shuffle_records(&mut self, id: u16, n: usize) {
-        self.record_layer.streams.get_mut(id).unwrap().send.shuffle_records(n);
+        self.received_plaintext
+            .append(bytes.into_vec());
     }
 
     #[cfg(feature = "tls12")]
@@ -553,10 +426,9 @@ impl CommonState {
             .prepare_message_decrypter(dec);
     }
 
-    #[cfg(feature = "quic")]
+
     pub(crate) fn missing_extension(&mut self, why: PeerMisbehaved) -> Error {
-        self.send_fatal_alert(AlertDescription::MissingExtension);
-        Error::PeerMisbehaved(why)
+        self.send_fatal_alert(AlertDescription::MissingExtension, why)
     }
 
     fn send_warning_alert(&mut self, desc: AlertDescription) {
@@ -567,8 +439,11 @@ impl CommonState {
     pub(crate) fn process_alert(&mut self, alert: &AlertMessagePayload) -> Result<(), Error> {
         // Reject unknown AlertLevels.
         if let AlertLevel::Unknown(_) = alert.level {
-            self.send_fatal_alert(AlertDescription::IllegalParameter);
-            return Err(Error::AlertReceived(alert.description));
+
+            return Err(self.send_fatal_alert(
+                AlertDescription::IllegalParameter,
+                Error::AlertReceived(alert.description),
+            ));
         }
 
         // If we get a CloseNotify, make a note to declare EOF to our
@@ -580,34 +455,42 @@ impl CommonState {
 
         // Warnings are nonfatal for TLS1.2, but outlawed in TLS1.3
         // (except, for no good reason, user_cancelled).
+
+        let err = Error::AlertReceived(alert.description);
         if alert.level == AlertLevel::Warning {
             if self.is_tls13() && alert.description != AlertDescription::UserCanceled {
-                self.send_fatal_alert(AlertDescription::DecodeError);
+                return Err(self.send_fatal_alert(AlertDescription::DecodeError, err));
             } else {
-                warn!("TLS alert warning received: {:#?}", alert);
+                warn!("TLS alert warning received: {:?}", alert);
                 return Ok(());
             }
         }
 
-        error!("TLS alert received: {:#?}", alert);
-        Err(Error::AlertReceived(alert.description))
+
+        Err(err)
     }
 
     pub(crate) fn send_cert_verify_error_alert(&mut self, err: Error) -> Error {
-        self.send_fatal_alert(match &err {
-            Error::InvalidCertificate(e) => e.clone().into(),
-            Error::PeerMisbehaved(_) => AlertDescription::IllegalParameter,
-            _ => AlertDescription::HandshakeFailure,
-        });
-        err
+        self.send_fatal_alert(
+            match &err {
+                Error::InvalidCertificate(e) => e.clone().into(),
+                Error::PeerMisbehaved(_) => AlertDescription::IllegalParameter,
+                _ => AlertDescription::HandshakeFailure,
+            },
+            err,
+        )
     }
 
-    pub(crate) fn send_fatal_alert(&mut self, desc: AlertDescription) {
-        warn!("Sending fatal alert {:?}", desc);
+    pub(crate) fn send_fatal_alert(
+        &mut self,
+        desc: AlertDescription,
+        err: impl Into<Error>,
+    ) -> Error {
         debug_assert!(!self.sent_fatal_alert);
         let m = Message::build_alert(AlertLevel::Fatal, desc);
-        self.send_msg(m, self.record_layer.is_encrypting(), DEFAULT_STREAM_ID);
+        self.send_msg(m, self.record_layer.is_encrypting());
         self.sent_fatal_alert = true;
+        err.into()
     }
 
     /// Queues a close_notify warning alert to be sent in the next
@@ -620,9 +503,87 @@ impl CommonState {
         self.send_warning_alert_no_log(AlertDescription::CloseNotify);
     }
 
+
+    pub(crate) fn eager_send_close_notify(
+        &mut self,
+        outgoing_tls: &mut [u8],
+    ) -> Result<usize, EncryptError> {
+        debug_assert!(self.record_layer.is_encrypting());
+
+        let m = Message::build_alert(AlertLevel::Warning, AlertDescription::CloseNotify).into();
+
+        let iter = self
+            .message_fragmenter
+            .fragment_message(&m);
+
+        self.check_required_size(outgoing_tls, None, iter)?;
+
+        debug!("Sending warning alert {:?}", AlertDescription::CloseNotify);
+
+        let iter = self
+            .message_fragmenter
+            .fragment_message(&m);
+
+        let written = self.write_fragments(outgoing_tls, None, iter);
+
+        Ok(written)
+    }
+
     fn send_warning_alert_no_log(&mut self, desc: AlertDescription) {
         let m = Message::build_alert(AlertLevel::Warning, desc);
-        self.send_msg(m, self.record_layer.is_encrypting(), DEFAULT_STREAM_ID);
+        self.send_msg(m, self.record_layer.is_encrypting());
+    }
+
+    fn check_required_size<'a>(
+        &self,
+        outgoing_tls: &mut [u8],
+        opt_msg: Option<&[u8]>,
+        fragments: impl Iterator<Item = OutboundPlainMessage<'a>>,
+    ) -> Result<(), EncryptError> {
+        let mut required_size = 0;
+        if let Some(message) = opt_msg {
+            required_size += message.len();
+        }
+
+        for m in fragments {
+            required_size += m.encoded_len(&self.record_layer);
+        }
+
+        if required_size > outgoing_tls.len() {
+            return Err(EncryptError::InsufficientSize(InsufficientSizeError {
+                required_size,
+            }));
+        }
+
+        Ok(())
+    }
+
+    fn write_fragments<'a>(
+        &mut self,
+        outgoing_tls: &mut [u8],
+        opt_msg: Option<Vec<u8>>,
+        fragments: impl Iterator<Item = OutboundPlainMessage<'a>>,
+    ) -> usize {
+        let mut written = 0;
+
+        if let Some(message) = opt_msg {
+            let len = message.len();
+            outgoing_tls[written..written + len].copy_from_slice(&message);
+            written += len;
+        }
+
+        for m in fragments {
+            let em = self
+                .record_layer
+                .encrypt_outgoing(m)
+                .encode();
+
+            let len = em.len();
+            outgoing_tls[written..written + len].copy_from_slice(&em);
+            written += len;
+        }
+
+        written
     }
 
     pub(crate) fn set_max_fragment_size(&mut self, new: Option<usize>) -> Result<(), Error> {
@@ -636,15 +597,6 @@ impl CommonState {
             .map(AsRef::as_ref)
     }
 
-    pub(crate) fn get_tcpls_tokens(&self) -> Option<&Vec<TcplsToken>> {
-        if !self.tcpls_tokens.is_empty() {
-            Some(&self.tcpls_tokens)
-        }else { None }
-    }
-
-    pub(crate) fn get_next_tcpls_token(&mut self) -> Option<TcplsToken> {
-        self.tcpls_tokens.pop()
-    }
 
     /// Returns true if the caller should call [`Connection::read_tls`] as soon
     /// as possible.
@@ -655,33 +607,31 @@ impl CommonState {
     ///
     /// [`Connection::reader`]: crate::Connection::reader
     /// [`Connection::read_tls`]: crate::Connection::read_tls
-    pub fn wants_read(&self, app_buf: &RecvBufMap) -> bool {
+
+    pub fn wants_read(&self) -> bool {
         // We want to read more data all the time, except when we have unprocessed plaintext.
         // This provides back-pressure to the TCP buffers. We also don't want to read more after
         // the peer has sent us a close notification.
         //
         // In the handshake case we don't have readable plaintext before the handshake has
         // completed, but also don't want to read if we still have sendable tls.
-        app_buf.all_empty()
+
+        self.received_plaintext.is_empty()
             && !self.has_received_close_notify
-            && (self.may_send_application_data || self.record_layer.streams.all_empty())
+            && (self.may_send_application_data || self.sendable_tls.is_empty())
     }
 
-    pub(crate) fn current_io_state(&self, app_buf: Option<&RecvBufMap>) -> IoState {
+    pub(crate) fn current_io_state(&self) -> IoState {
         IoState {
-            tls_bytes_to_write: self.record_layer.streams.total_to_write(),
-            plaintext_bytes_to_read: app_buf.unwrap().bytes_to_read(),
+            tls_bytes_to_write: self.sendable_tls.len(),
+            plaintext_bytes_to_read: self.received_plaintext.len(),
             peer_has_closed: self.has_received_close_notify,
         }
     }
 
     pub(crate) fn is_quic(&self) -> bool {
-        #[cfg(feature = "quic")]
-        {
-            self.protocol == Protocol::Quic
-        }
-        #[cfg(not(feature = "quic"))]
-        false
+
+        self.protocol == Protocol::Quic
     }
 
     pub(crate) fn should_update_key(
@@ -691,80 +641,89 @@ impl CommonState {
         match key_update_request {
             KeyUpdateRequest::UpdateNotRequested => Ok(false),
             KeyUpdateRequest::UpdateRequested => Ok(self.queued_key_update_message.is_none()),
-            _ => {
-                self.send_fatal_alert(AlertDescription::IllegalParameter);
-                Err(InvalidMessage::InvalidKeyUpdate.into())
-            }
+
+            _ => Err(self.send_fatal_alert(
+                AlertDescription::IllegalParameter,
+                InvalidMessage::InvalidKeyUpdate,
+            )),
         }
     }
 
     pub(crate) fn enqueue_key_update_notification(&mut self) {
         let message = PlainMessage::from(Message::build_key_update_notify());
-        self
-            .record_layer
-            .streams
-            .get_or_create(DEFAULT_STREAM_ID)
-            .unwrap();
-        self.record_layer.encrypt_for_stream(DEFAULT_STREAM_ID);
-        let header = &self
-            .record_layer
-            .streams
-            .get_mut(DEFAULT_STREAM_ID)
-            .unwrap()
-            .build_header(message.payload.0.len() as u16);
-        self.queued_key_update_message =
-            Some( self
-                .record_layer
-                .encrypt_outgoing_zc(message.borrow(), header,None)
-            );
+
+        self.queued_key_update_message = Some(
+            self.record_layer
+                .encrypt_outgoing(message.borrow_outbound())
+                .encode(),
+        );
+    }
+}
+
+#[cfg(feature = "std")]
+impl CommonState {
+    /// Send plaintext application data, fragmenting and
+    /// encrypting it as it goes out.
+    ///
+    /// If internal buffers are too small, this function will not accept
+    /// all the data.
+    pub(crate) fn buffer_plaintext(
+        &mut self,
+        payload: OutboundChunks<'_>,
+        sendable_plaintext: &mut ChunkVecBuffer,
+    ) -> usize {
+        self.perhaps_write_key_update();
+        self.send_plain(payload, Limit::Yes, sendable_plaintext)
+    }
+
+    pub(crate) fn send_early_plaintext(&mut self, data: &[u8]) -> usize {
+        debug_assert!(self.early_traffic);
+        debug_assert!(self.record_layer.is_encrypting());
+
+        if data.is_empty() {
+            // Don't send empty fragments.
+            return 0;
+        }
+
+        self.send_appdata_encrypt(data.into(), Limit::Yes)
+    }
+
+    /// Encrypt and send some plaintext `data`.  `limit` controls
+    /// whether the per-connection buffer limits apply.
+    ///
+    /// Returns the number of bytes written from `data`: this might
+    /// be less than `data.len()` if buffer limits were exceeded.
+    fn send_plain(
+        &mut self,
+        payload: OutboundChunks<'_>,
+        limit: Limit,
+        sendable_plaintext: &mut ChunkVecBuffer,
+    ) -> usize {
+        if !self.may_send_application_data {
+            // If we haven't completed handshaking, buffer
+            // plaintext to send once we do.
+            let len = match limit {
+                Limit::Yes => sendable_plaintext.append_limited_copy(payload),
+                Limit::No => sendable_plaintext.append(payload.to_vec()),
+            };
+            return len;
+        }
+
+        self.send_plain_non_buffering(payload, limit)
     }
 
     pub(crate) fn perhaps_write_key_update(&mut self) {
         if let Some(message) = self.queued_key_update_message.take() {
-            self.queue_message(message, DEFAULT_STREAM_ID);
+
+            self.sendable_tls.append(message);
         }
     }
-
-
-
 }
-
-pub(crate) struct SendPlainTextBuf {
-    pub(crate) send_plain_buf: ChunkVecBuffer,
-    pub(crate) id: u16,
-}
-#[derive(Default)]
-pub(crate) struct PlainBufsMap {
-    pub(crate) plain_map: SimpleIdHashMap<SendPlainTextBuf>
-}
-
-impl PlainBufsMap {
-    pub(crate) fn get_or_create_plain_buf(
-        &mut self, stream_id: u16,
-    ) -> Result<&mut SendPlainTextBuf, Error> {
-        let stream = match self.plain_map.entry(stream_id as u64) {
-            hash_map::Entry::Vacant(v) => {
-
-                let s = SendPlainTextBuf {
-                    send_plain_buf: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
-                    id: stream_id,
-                };
-
-                v.insert(s)
-            },
-
-            hash_map::Entry::Occupied(v) => v.into_mut(),
-        };
-
-        Ok(stream)
-    }
-}
-
 
 /// Values of this structure are returned from [`Connection::process_new_packets`]
 /// and tell the caller the current I/O state of the TLS connection.
 ///
-/// [`Connection::process_new_packets`]: crate::Connection::process_received
+/// [`Connection::process_new_packets`]: crate::Connection::process_new_packets
 #[derive(Debug, Eq, PartialEq)]
 pub struct IoState {
     tls_bytes_to_write: usize,
@@ -801,11 +760,14 @@ impl IoState {
 }
 
 pub(crate) trait State<Data>: Send + Sync {
-    fn handle(
+
+    fn handle<'m>(
         self: Box<Self>,
         cx: &mut Context<'_, Data>,
-        message: Message,
-    ) -> Result<Box<dyn State<Data>>, Error>;
+        message: Message<'m>,
+    ) -> Result<Box<dyn State<Data> + 'm>, Error>
+    where
+        Self: 'm;
 
     fn export_keying_material(
         &self,
@@ -816,15 +778,23 @@ pub(crate) trait State<Data>: Send + Sync {
         Err(Error::HandshakeNotComplete)
     }
 
-    #[cfg(feature = "secret_extraction")]
+
     fn extract_secrets(&self) -> Result<PartiallyExtractedSecrets, Error> {
         Err(Error::HandshakeNotComplete)
     }
+
+    fn handle_decrypt_error(&self) {}
+
+    fn into_owned(self: Box<Self>) -> Box<dyn State<Data> + 'static>;
 }
 
 pub(crate) struct Context<'a, Data> {
     pub(crate) common: &'a mut CommonState,
     pub(crate) data: &'a mut Data,
+
+    /// Buffered plaintext. This is `Some` if any plaintext was written during handshake and `None`
+    /// otherwise.
+    pub(crate) sendable_plaintext: Option<&'a mut ChunkVecBuffer>,
 }
 
 /// Side of the connection.
@@ -847,16 +817,17 @@ impl Side {
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub(crate) enum Protocol {
-    Tcpls,
     Tcp,
-    #[cfg(feature = "quic")]
     Quic,
 }
 
 enum Limit {
+
+    #[cfg(feature = "std")]
     Yes,
     No,
 }
 
 const DEFAULT_RECEIVED_PLAINTEXT_LIMIT: usize = 16 * 1024;
-const DEFAULT_BUFFER_LIMIT: usize = 64 * 1024;
+
+pub(crate) const DEFAULT_BUFFER_LIMIT: usize = 64 * 1024;

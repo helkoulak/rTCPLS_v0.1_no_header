@@ -4,10 +4,23 @@
 # TLS test tool ('BoGo') against rustls.
 
 set -xe
+case ${BOGO_SHIM_PROVIDER:-ring} in
+  ring)
+      cargo build -p rustls --example bogo_shim --no-default-features --features ring,tls12,logging,std
+      cpp -P -DRING config.json.in -oconfig.json
+      ;;
+  aws-lc-rs)
+      cargo build -p rustls --example bogo_shim --no-default-features --features aws_lc_rs,tls12,logging,std
+      cpp -P -DAWS_LC_RS config.json.in -oconfig.json
+      ;;
+  existing)
+      ;;
+  *)
+      echo "unsupported BOGO_SHIM_PROVIDER: supported are (ring|aws-lc-rs|existing)"
+      exit 1
+      ;;
+esac
 
-if [ "x$USE_EXISTING_BOGO_SHIM" = "x" ] ; then
-  cargo build --example bogo_shim --features dangerous_configuration,quic
-fi
 
 if [ ! -e bogo/ssl/test/runner/runner.test ] ; then
   ./fetch-and-build

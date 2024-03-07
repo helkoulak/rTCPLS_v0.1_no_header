@@ -1,10 +1,12 @@
+
+use alloc::vec::Vec;
 use crate::error::InvalidMessage;
 use crate::msgs::codec::{Codec, Reader};
 
 #[derive(Debug)]
 pub struct ChangeCipherSpecPayload;
 
-impl Codec for ChangeCipherSpecPayload {
+impl Codec<'_> for ChangeCipherSpecPayload {
     fn encode(&self, bytes: &mut Vec<u8>) {
         1u8.encode(bytes);
     }

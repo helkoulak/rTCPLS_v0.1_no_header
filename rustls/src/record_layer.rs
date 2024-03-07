@@ -1,4 +1,5 @@
 
+
 use crate::cipher::{MessageDecrypter, MessageEncrypter};
 use crate::error::Error;
 use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, PlainMessage};
@@ -11,6 +12,7 @@ use crate::tcpls::stream::{DEFAULT_STREAM_ID, StreamMap};
 
 static SEQ_SOFT_LIMIT: u64 = 0x16909E7; //(((2 as f64).powf(24.5) as i64) - 0xFFFF) as u64; //0xffff_ffff_ffff_0000u64;
 static SEQ_HARD_LIMIT: u64 = 0x16A09E6; //((2 as f64).powf(24.5) as i64) as u64; //0xffff_ffff_ffff_fffeu64;
+
 
 #[derive(PartialEq)]
 enum DirectionState {
@@ -28,17 +30,21 @@ enum DirectionState {
 pub struct RecordLayer {
     message_encrypter: Box<dyn MessageEncrypter>,
     message_decrypter: Box<dyn MessageDecrypter>,
+
     encrypt_state: DirectionState,
     decrypt_state: DirectionState,
     // id of currently used stream
     stream_in_use: u16,
     is_handshaking: bool,
+    write_seq: u64,
+    read_seq: u64,
+    has_decrypted: bool,
+
     // Message encrypted with other keys may be encountered, so failures
     // should be swallowed by the caller.  This struct tracks the amount
     // of message size this is allowed for.
     trial_decryption_len: Option<usize>,
 
-    pub streams: StreamMap,
 }
 
 impl RecordLayer {
@@ -47,58 +53,89 @@ impl RecordLayer {
         Self {
             message_encrypter: <dyn MessageEncrypter>::invalid(),
             message_decrypter: <dyn MessageDecrypter>::invalid(),
+
+            write_seq: 0,
+            read_seq: 0,
+            has_decrypted: false,
             encrypt_state: DirectionState::Invalid,
             decrypt_state: DirectionState::Invalid,
             stream_in_use: 0,
-            is_handshaking: true,
             trial_decryption_len: None,
-            streams: StreamMap::new(),
+            is_handshaking: false,
         }
     }
 
-    pub(crate) fn is_encrypting(&self) -> bool {
-        self.encrypt_state == DirectionState::Active
-    }
+    /// Decrypt a TLS message.
+    ///
+    /// `encr` is a decoded message allegedly received from the peer.
+    /// If it can be decrypted, its decryption is returned.  Otherwise,
+    /// an error is returned.
+    pub(crate) fn decrypt_incoming<'a>(
+        &mut self,
+        encr: InboundOpaqueMessage<'a>,
+    ) -> Result<Option<Decrypted<'a>>, Error> {
+        if self.decrypt_state != DirectionState::Active {
+            return Ok(Some(Decrypted {
+                want_close_before_decrypt: false,
+                plaintext: encr.into_plain_message(),
+            }));
+        }
 
-    pub(crate) fn is_handshaking(&self) -> bool {
-        self.is_handshaking
-    }
+        // Set to `true` if the peer appears to getting close to encrypting
+        // too many messages with this key.
+        //
+        // Perhaps if we send an alert well before their counter wraps, a
+        // buggy peer won't make a terrible mistake here?
+        //
+        // Note that there's no reason to refuse to decrypt: the security
+        // failure has already happened.
+        let want_close_before_decrypt = self.read_seq == SEQ_SOFT_LIMIT;
 
-    pub(crate) fn set_not_handshaking(&mut self) {
-        self.is_handshaking = false;
-    }
-
-    #[cfg(feature = "secret_extraction")]
-    pub(crate) fn write_seq(&self) -> u64 {
-        self.seq_map.as_ref(DEFAULT_STREAM_ID).write_seq
-    }
-
-    #[cfg(feature = "secret_extraction")]
-    pub(crate) fn read_seq(&self) -> u64 {
-        self.seq_map.as_ref(DEFAULT_STREAM_ID).read_seq
-    }
-
-    pub(crate) fn encrypt_for_stream(&mut self, stream_id: u16) {
-        self.stream_in_use = stream_id;
-    }
-
-    fn doing_trial_decryption(&mut self, requested: usize) -> bool {
+        let encrypted_len = encr.payload.len();
         match self
-            .trial_decryption_len
-            .and_then(|value| value.checked_sub(requested))
+            .message_decrypter
+            .decrypt(encr, self.read_seq)
         {
-            Some(remaining) => {
-                self.trial_decryption_len = Some(remaining);
-                true
+            Ok(plaintext) => {
+                self.read_seq += 1;
+                if !self.has_decrypted {
+                    self.has_decrypted = true;
+                }
+                Ok(Some(Decrypted {
+                    want_close_before_decrypt,
+                    plaintext,
+                }))
             }
-            _ => false,
+            Err(Error::DecryptError) if self.doing_trial_decryption(encrypted_len) => {
+                trace!("Dropping undecryptable message after aborted early_data");
+                Ok(None)
+            }
+            Err(err) => Err(err),
         }
+    }
+
+    /// Encrypt a TLS message.
+    ///
+    /// `plain` is a TLS message we'd like to send.  This function
+    /// panics if the requisite keying material hasn't been established yet.
+    pub(crate) fn encrypt_outgoing(
+        &mut self,
+        plain: OutboundPlainMessage,
+    ) -> OutboundOpaqueMessage {
+        debug_assert!(self.encrypt_state == DirectionState::Active);
+        assert!(!self.encrypt_exhausted());
+        let seq = self.write_seq;
+        self.write_seq += 1;
+        self.message_encrypter
+            .encrypt(plain, seq)
+            .unwrap()
     }
 
     /// Prepare to use the given `MessageEncrypter` for future message encryption.
     /// It is not used until you call `start_encrypting`.
     pub(crate) fn prepare_message_encrypter(&mut self, cipher: Box<dyn MessageEncrypter>) {
         self.message_encrypter = cipher;
+        self.write_seq = 0;
         self.encrypt_state = DirectionState::Prepared;
     }
 
@@ -106,6 +143,7 @@ impl RecordLayer {
     /// It is not used until you call `start_decrypting`.
     pub(crate) fn prepare_message_decrypter(&mut self, cipher: Box<dyn MessageDecrypter>) {
         self.message_decrypter = cipher;
+        self.read_seq = 0;
         self.decrypt_state = DirectionState::Prepared;
     }
 
@@ -158,171 +196,130 @@ impl RecordLayer {
     /// Return true if we are getting close to encrypting too many
     /// messages with our encryption key.
     pub(crate) fn wants_close_before_encrypt(&self) -> bool {
-        self.streams.get(self.stream_in_use).unwrap().write_seq == SEQ_SOFT_LIMIT
+        self.write_seq == SEQ_SOFT_LIMIT
     }
 
     /// Return true if we outright refuse to do anything with the
     /// encryption key.
     pub(crate) fn encrypt_exhausted(&self) -> bool {
-        self.streams.get(self.stream_in_use).unwrap().write_seq >= SEQ_HARD_LIMIT
+        self.write_seq >= SEQ_HARD_LIMIT
     }
 
-    /*pub fn create_new_seq_space(&mut self, stream_id: u16) {
-        self.seq_map.create_new_seq_space(stream_id);
-    }*/
-
-    pub fn get_stream_in_use(& self) -> u16 {
-        self.stream_in_use
+    pub(crate) fn is_encrypting(&self) -> bool {
+        self.encrypt_state == DirectionState::Active
     }
 
-    pub fn decrypt_header(&mut self, input: &[u8], header: & [u8]) -> Result<[u8; 8], Error> {
-        self.message_decrypter.decrypt_header(input, header)
+    /// Return true if we have ever decrypted a message. This is used in place
+    /// of checking the read_seq since that will be reset on key updates.
+    pub(crate) fn has_decrypted(&self) -> bool {
+        self.has_decrypted
     }
 
-    pub fn get_tag_length(&self) -> usize {
-        self.message_encrypter.get_tag_length()
+    pub(crate) fn write_seq(&self) -> u64 {
+        self.write_seq
     }
 
-
-
-    /// Decrypt a TLS message.
-    ///
-    /// `encr` is a decoded message allegedly received from the peer.
-    /// If it can be decrypted, its decryption is returned.  Otherwise,
-    /// an error is returned.
-    pub(crate) fn decrypt_incoming_zc(
-        &mut self,
-        encr: BorrowedOpaqueMessage,
-        recv_buf: &mut RecvBuf,
-        tcpls_header: &TcplsHeader,
-    ) -> Result<Option<Decrypted>, Error> {
-        if self.decrypt_state != DirectionState::Active {
-            return Ok(Some(Decrypted {
-                want_close_before_decrypt: false,
-                plaintext: encr.into_plain_message(),
-            }));
-        }
-
-        // Set to `true` if the peer appears to getting close to encrypting
-        // too many messages with this key.
-        //
-        // Perhaps if we send an alert well before their counter wraps, a
-        // buggy peer won't make a terrible mistake here?
-        //
-        // Note that there's no reason to refuse to decrypt: the security
-        // failure has already happened.
-        self.stream_in_use = tcpls_header.stream_id;
-        let want_close_before_decrypt = recv_buf.read_seq == SEQ_SOFT_LIMIT;
-
-        let encrypted_len = encr.payload.len();
-
-        match self
-            .message_decrypter
-            .decrypt_zc(encr, recv_buf.read_seq, self.stream_in_use as u32, recv_buf, &tcpls_header)
-        {
-            Ok(plaintext) => {
-                recv_buf.read_seq += 1;
-                recv_buf.next_recv_pkt_num += 1;
-                Ok(Some(Decrypted {
-                    want_close_before_decrypt,
-                    plaintext,
-                }))
-            }
-            Err(Error::DecryptError) if self.doing_trial_decryption(encrypted_len) => {
-                trace!("Dropping undecryptable message after aborted early_data");
-                Ok(None)
-            }
-            Err(err) => Err(err),
-        }
+    /// Returns the number of remaining write sequences
+    pub(crate) fn remaining_write_seq(&self) -> Option<NonZeroU64> {
+        SEQ_SOFT_LIMIT
+            .checked_sub(self.write_seq)
+            .and_then(NonZeroU64::new)
     }
 
-    pub(crate) fn encrypt_outgoing_zc(&mut self, plain: BorrowedPlainMessage, tcpls_header: &TcplsHeader, frame_header: Option<Frame>) -> Vec<u8> {
-        debug_assert!(self.encrypt_state == DirectionState::Active);
-        assert!(!self.encrypt_exhausted());
-        let stream_id = self.stream_in_use;
-        let seq = self.streams.get(stream_id).unwrap().write_seq;
-        self.streams.get_mut(stream_id).unwrap().write_seq += 1;
+    pub(crate) fn read_seq(&self) -> u64 {
+        self.read_seq
+    }
 
+    pub(crate) fn encrypted_len(&self, payload_len: usize) -> usize {
         self.message_encrypter
-            .encrypt_zc(plain, seq, stream_id as u32, tcpls_header, frame_header)
-            .unwrap()
+            .encrypted_payload_len(payload_len)
     }
 
+    fn doing_trial_decryption(&mut self, requested: usize) -> bool {
+        match self
+            .trial_decryption_len
+            .and_then(|value| value.checked_sub(requested))
+        {
+            Some(remaining) => {
+                self.trial_decryption_len = Some(remaining);
+                true
+            }
+            _ => false,
+        }
+    }
 }
-
-    /*/// The sequence number space for an open tcp connection
-    #[derive(Default)]
-    pub(crate) struct RecSeqNumSpace {
-        stream_id: u16,
-        write_seq: u64,
-        read_seq: u64,
-    }*/
-
-    /*impl RecSeqNumSpace {
-        pub(crate)  fn new(stream_id: u16) -> Self {
-            Self{
-                stream_id,
-                ..Default::default()
-            }
-
-        }
-
-    }
-
-
-    /// The sequence number space for all open tcp connections
-    #[derive(Default)]
-    pub(crate) struct RecSeqNumMap{
-        seq_num_map: SimpleIdHashMap<RecSeqNumSpace>,
-    }
-    impl RecSeqNumMap {
-        /// Calling new creates the first seq num space along with the establishment of TLS session
-        pub(crate) fn new() -> Self {
-            let mut map = SimpleIdHashMap::default();
-            let seq = RecSeqNumSpace::new(DEFAULT_STREAM_ID);
-            map.insert(DEFAULT_STREAM_ID as u64, seq);
-            Self {
-                seq_num_map: map,
-            }
-        }
-
-        pub(crate) fn get_or_create(&mut self, stream_id: u16) -> &mut RecSeqNumSpace {
-            match self.seq_num_map.entry(stream_id as u64) {
-                hash_map::Entry::Vacant(v) => {
-                    v.insert(RecSeqNumSpace::new(stream_id))
-                },
-                hash_map::Entry::Occupied(v) => v.into_mut(),
-            }
-        }
-
-        /// Creates a new sequence space or do nothing if already exists
-        pub(crate) fn create_new_seq_space(&mut self, stream_id: u16) {
-           if !self.seq_num_map.contains_key(&(stream_id as u64)){
-               self.seq_num_map.insert(stream_id as u64, RecSeqNumSpace::new(stream_id));
-           }
-        }
-
-        pub(crate) fn as_ref(&self, stream_id: u16) -> & RecSeqNumSpace {
-            match self.seq_num_map.get(&(stream_id as u64)) {
-                Some(seq_space) => seq_space,
-                None => panic!("sequence space not found"),
-            }
-        }
-
-        pub(crate) fn as_mut_ref(&mut self, stream_id: u16) -> &mut RecSeqNumSpace {
-            match self.seq_num_map.get_mut(&(stream_id as u64)) {
-                Some(seq_space) => seq_space,
-                None => panic!("sequence space not found"),
-            }
-        }
-
-    }*/
 
 /// Result of decryption.
 #[derive(Debug)]
-pub struct Decrypted {
+pub(crate) struct Decrypted<'a> {
     /// Whether the peer appears to be getting close to encrypting too many messages with this key.
-    pub want_close_before_decrypt: bool,
+    pub(crate) want_close_before_decrypt: bool,
     /// The decrypted message.
-    pub plaintext: PlainMessage,
+    pub(crate) plaintext: InboundPlainMessage<'a>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_has_decrypted() {
+        use crate::{ContentType, ProtocolVersion};
+
+        struct PassThroughDecrypter;
+        impl MessageDecrypter for PassThroughDecrypter {
+            fn decrypt<'a>(
+                &mut self,
+                m: InboundOpaqueMessage<'a>,
+                _: u64,
+            ) -> Result<InboundPlainMessage<'a>, Error> {
+                Ok(m.into_plain_message())
+            }
+        }
+
+        // A record layer starts out invalid, having never decrypted.
+        let mut record_layer = RecordLayer::new();
+        assert!(matches!(
+            record_layer.decrypt_state,
+            DirectionState::Invalid
+        ));
+        assert_eq!(record_layer.read_seq, 0);
+        assert!(!record_layer.has_decrypted());
+
+        // Preparing the record layer should update the decrypt state, but shouldn't affect whether it
+        // has decrypted.
+        record_layer.prepare_message_decrypter(Box::new(PassThroughDecrypter));
+        assert!(matches!(
+            record_layer.decrypt_state,
+            DirectionState::Prepared
+        ));
+        assert_eq!(record_layer.read_seq, 0);
+        assert!(!record_layer.has_decrypted());
+
+        // Starting decryption should update the decrypt state, but not affect whether it has decrypted.
+        record_layer.start_decrypting();
+        assert!(matches!(record_layer.decrypt_state, DirectionState::Active));
+        assert_eq!(record_layer.read_seq, 0);
+        assert!(!record_layer.has_decrypted());
+
+        // Decrypting a message should update the read_seq and track that we have now performed
+        // a decryption.
+        record_layer
+            .decrypt_incoming(InboundOpaqueMessage::new(
+                ContentType::Handshake,
+                ProtocolVersion::TLSv1_2,
+                &mut [0xC0, 0xFF, 0xEE],
+            ))
+            .unwrap();
+        assert!(matches!(record_layer.decrypt_state, DirectionState::Active));
+        assert_eq!(record_layer.read_seq, 1);
+        assert!(record_layer.has_decrypted());
+
+        // Resetting the record layer message decrypter (as if a key update occurred) should reset
+        // the read_seq number, but not our knowledge of whether we have decrypted previously.
+        record_layer.set_message_decrypter(Box::new(PassThroughDecrypter));
+        assert!(matches!(record_layer.decrypt_state, DirectionState::Active));
+        assert_eq!(record_layer.read_seq, 0);
+        assert!(record_layer.has_decrypted());
+    }
 }

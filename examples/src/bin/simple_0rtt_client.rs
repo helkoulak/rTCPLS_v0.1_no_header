@@ -1,15 +1,24 @@
+
+//! This is an example client that uses rustls for TLS, and sends early 0-RTT data.
+//!
+//! You may set the `SSLKEYLOGFILE` env var when using this example to write a
+//! log file with key material (insecure) for debugging purposes. See [`rustls::KeyLog`]
+//! for more information.
+//!
+//! Note that `unwrap()` is used to deal with networking errors; this is not something
+//! that is sensible outside of example code.
+
+use std::io::{BufRead, BufReader, Write};
+use std::net::TcpStream;
 use std::sync::Arc;
 
-use std::io::{stdout, Read, Write};
-use std::net::TcpStream;
-
-use rustls::{OwnedTrustAnchor, RootCertStore};
-use rustls::recvbuf::RecvBufMap;
+use rustls::pki_types::ServerName;
+use rustls::RootCertStore;
 
 fn start_connection(config: &Arc<rustls::ClientConfig>, domain_name: &str) {
-    let server_name = domain_name
-        .try_into()
-        .expect("invalid DNS name");
+    let server_name = ServerName::try_from(domain_name)
+        .expect("invalid DNS name")
+        .to_owned();
     let mut conn = rustls::ClientConnection::new(Arc::clone(config), server_name).unwrap();
     let mut sock = TcpStream::connect(format!("{}:443", domain_name)).unwrap();
     sock.set_nodelay(true).unwrap();
@@ -29,11 +38,11 @@ fn start_connection(config: &Arc<rustls::ClientConfig>, domain_name: &str) {
         early_data
             .write_all(request.as_bytes())
             .unwrap();
-    }
-    let mut recv_svr = RecvBufMap::new();
-    let mut recv_clnt = RecvBufMap::new();
 
-    let mut stream = rustls::Stream::new(&mut conn, &mut sock,&mut recv_clnt);
+        println!("  * 0-RTT request sent");
+    }
+
+    let mut stream = rustls::Stream::new(&mut conn, &mut sock);
 
     // Complete handshake.
     stream.flush().unwrap();
@@ -44,36 +53,34 @@ fn start_connection(config: &Arc<rustls::ClientConfig>, domain_name: &str) {
         stream
             .write_all(request.as_bytes())
             .unwrap();
+
+        println!("  * Normal request sent");
+    } else {
+        println!("  * 0-RTT data accepted");
     }
 
-    let mut plaintext = Vec::new();
-    stream
-        .read_to_end(&mut plaintext)
+    let mut first_response_line = String::new();
+    BufReader::new(stream)
+        .read_line(&mut first_response_line)
         .unwrap();
-    stdout().write_all(&plaintext).unwrap();
+    println!("  * Server response: {:?}", first_response_line);
 }
 
 fn main() {
     env_logger::init();
 
-    let mut root_store = RootCertStore::empty();
-    root_store.add_server_trust_anchors(
+    let root_store = RootCertStore::from_iter(
         webpki_roots::TLS_SERVER_ROOTS
-            .0
             .iter()
-            .map(|ta| {
-                OwnedTrustAnchor::from_subject_spki_name_constraints(
-                    ta.subject,
-                    ta.spki,
-                    ta.name_constraints,
-                )
-            }),
+            .cloned(),
     );
 
     let mut config = rustls::ClientConfig::builder()
-        .with_safe_defaults()
         .with_root_certificates(root_store)
         .with_no_client_auth();
+
+    // Allow using SSLKEYLOGFILE.
+    config.key_log = Arc::new(rustls::KeyLogFile::new());
 
     // Enable early data.
     config.enable_early_data = true;
@@ -81,6 +88,9 @@ fn main() {
 
     // Do two connections. The first will be a normal request, the
     // second will use early data if the server supports it.
-    start_connection(&config, "mesalink.io");
-    start_connection(&config, "mesalink.io");
+
+    println!("* Sending first request:");
+    start_connection(&config, "jbp.io");
+    println!("* Sending second request:");
+    start_connection(&config, "jbp.io");
 }
