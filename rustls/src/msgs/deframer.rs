@@ -2,6 +2,7 @@
 use alloc::vec::Vec;
 use core::ops::Range;
 use core::slice::SliceIndex;
+use std::collections::hash_map;
 #[cfg(feature = "std")]
 use std::io;
 
@@ -13,7 +14,8 @@ use crate::msgs::codec;
 use crate::msgs::message::MAX_WIRE_SIZE;
 use crate::msgs::message::{InboundOpaqueMessage, InboundPlainMessage, MessageError};
 use crate::record_layer::{Decrypted, RecordLayer};
->>>>>>> 5bd3300 (Add files of rustls v0.23.1)
+
+use crate::tcpls::stream::SimpleIdHashMap;
 
 /// This deframer works to reconstruct TLS messages from a stream of arbitrary-sized reads.
 ///
@@ -425,6 +427,8 @@ impl<'a> AppendPayload<'a> for InternalPayload {
 
 #[derive(Default, Debug)]
 pub struct DeframerVecBuffer {
+    /// Id of related TCP connection
+    id: u64,
     /// Buffer of data read from the socket, in the process of being parsed into messages.
     ///
     /// For buffer size management, checkout out the [`DeframerVecBuffer::prepare_read()`] method.
@@ -435,6 +439,12 @@ pub struct DeframerVecBuffer {
 }
 
 impl DeframerVecBuffer {
+    pub fn new(id: u64) -> DeframerVecBuffer {
+        DeframerVecBuffer{
+            id,
+            ..Default::default()
+        }
+    }
     /// Borrows the initialized contents of this buffer and tracks pending discard operations via
     /// the `discard` reference
     pub fn borrow(&mut self) -> DeframerSliceBuffer {
@@ -749,6 +759,32 @@ const MAX_HANDSHAKE_SIZE: u32 = 0xffff;
 
 #[cfg(feature = "std")]
 const READ_SIZE: usize = 4096;
+
+
+#[derive(Default)]
+pub struct MessageDeframerMap {
+    deframers: SimpleIdHashMap<DeframerVecBuffer>,
+}
+
+impl MessageDeframerMap {
+    pub fn new() -> MessageDeframerMap {
+        MessageDeframerMap {
+            ..Default::default()
+        }
+    }
+
+    pub(crate) fn get_or_create_def_vec_buff(&mut self, conn_id: u64) -> &mut DeframerVecBuffer {
+        match self.deframers.entry(conn_id) {
+            hash_map::Entry::Vacant(v) => {
+                v.insert(DeframerVecBuffer::new(conn_id))
+            },
+            hash_map::Entry::Occupied(v) => v.into_mut(),
+        }
+    }
+
+
+}
+
 
 #[cfg(feature = "std")]
 #[cfg(test)]

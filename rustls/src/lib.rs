@@ -652,3 +652,9 @@ pub mod ticketer;
 pub mod manual;
 
 pub mod time_provider;
+
+
+/// APIs for implementing TCPLS TLS
+pub mod tcpls;
+/// Implementation of TCPLS receive buffer.
+pub mod recvbuf;

@@ -36,6 +36,8 @@ use crate::tls13::{
 use crate::{rand, verify};
 
 mod client_hello {
+    use std::prelude::rust_2024::ToString;
+    use crate::AlertDescription::IllegalParameter;
     use super::*;
     use crate::crypto::SupportedKxGroup;
     use crate::enums::SignatureScheme;
@@ -49,6 +51,7 @@ mod client_hello {
     };
     use crate::server::common::ActiveCertifiedKey;
     use crate::sign;
+    use crate::tcpls::stream::DEFAULT_STREAM_ID;
     use crate::tls13::key_schedule::{
         KeyScheduleEarly, KeyScheduleHandshake, KeySchedulePreHandshake,
     };
@@ -658,11 +661,11 @@ mod client_hello {
         if hello.tcpls_tokens_extension_offered() {
             if let Some(tokens) = hello.get_tcpls_tokens_extension() {
                 if !tokens.is_empty() {
-                    cx.common.send_fatal_alert(IllegalParameter);
+                    cx.common.send_fatal_alert(IllegalParameter, ());
                     return Err(Error::General("Client sent non-empty TcplsTokens extension".to_string()))
                 }
             }
-            cx.common.tcpls_tokens = ServerExtension::make_tcpls_tokens(config.max_tcpls_tokens_cap);
+            cx.common.tcpls_tokens = ServerExtension::make_tcpls_tokens(config.max_tcpls_tokens_cap, config.provider.secure_random);
             ep.exts.push(ServerExtension::TcplsTokens(cx.common.tcpls_tokens.clone()));
         }
 

@@ -1,6 +1,7 @@
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
+use std::collections::hash_map;
 
 use pki_types::CertificateDer;
 
@@ -12,7 +13,7 @@ use crate::msgs::alert::AlertMessagePayload;
 use crate::msgs::base::Payload;
 use crate::msgs::enums::{AlertLevel, KeyUpdateRequest};
 use crate::msgs::fragmenter::MessageFragmenter;
-use crate::msgs::handshake::CertificateChain;
+use crate::msgs::handshake::{CertificateChain, TcplsToken};
 use crate::msgs::message::{
     Message, MessagePayload, OutboundChunks, OutboundOpaqueMessage, OutboundPlainMessage,
     PlainMessage,
@@ -23,6 +24,10 @@ use crate::tls12::ConnectionSecrets;
 use crate::unbuffered::{EncryptError, InsufficientSizeError};
 use crate::vecbuf::ChunkVecBuffer;
 use crate::{quic, record_layer};
+use crate::msgs::deframer::MessageDeframerMap;
+use crate::recvbuf::RecvBufMap;
+use crate::tcpls::outstanding_conn::OutstandingConnMap;
+use crate::tcpls::stream::SimpleIdHashMap;
 
 /// Connection state common to both client and server connections.
 pub struct CommonState {
@@ -44,7 +49,14 @@ pub struct CommonState {
     pub(crate) received_middlebox_ccs: u8,
     pub(crate) peer_certificates: Option<CertificateChain<'static>>,
     message_fragmenter: MessageFragmenter,
+
+    pub outstanding_tcp_conns: OutstandingConnMap,
+
+    pub(crate) tcpls_tokens: Vec<TcplsToken>,
     pub(crate) received_plaintext: ChunkVecBuffer,
+    /// id of currently used tcp connection
+    pub(crate) conn_in_use: u32,
+
     pub(crate) sendable_tls: ChunkVecBuffer,
     queued_key_update_message: Option<Vec<u8>>,
 
@@ -75,7 +87,11 @@ impl CommonState {
             peer_certificates: None,
             message_fragmenter: MessageFragmenter::default(),
 
+            outstanding_tcp_conns: OutstandingConnMap::default(),
+
+            tcpls_tokens: Vec::new(),
             received_plaintext: ChunkVecBuffer::new(Some(DEFAULT_RECEIVED_PLAINTEXT_LIMIT)),
+            conn_in_use: 0,
             sendable_tls: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
             queued_key_update_message: None,
             protocol: Protocol::Tcp,
@@ -83,13 +99,16 @@ impl CommonState {
             enable_secret_extraction: false,
         }
     }
+    /// sets the id of the currently active tcp connection
+    pub fn set_connection_in_use(&mut self, conn_id: u32) {
+        self.conn_in_use = conn_id;
+    }
 
     /// Returns true if the caller should call [`Connection::write_tls`] as soon as possible.
     ///
     /// [`Connection::write_tls`]: crate::Connection::write_tls
     pub fn wants_write(&self) -> bool {
-
-        !self.sendable_tls.is_empty()
+        !self.record_layer.streams.all_empty()
     }
 
     /// Returns true if the connection is currently performing the TLS handshake.
@@ -133,7 +152,13 @@ impl CommonState {
         self.get_alpn_protocol()
     }
 
+    pub fn tcpls_tokens(&self) -> Option<&Vec<TcplsToken>> {
+        self.get_tcpls_tokens()
+    }
 
+    pub fn next_tcpls_token(&mut self) -> Option<TcplsToken> {
+        self.get_next_tcpls_token()
+    }
     /// Retrieves the ciphersuite agreed with the peer.
     ///
     /// This returns None until the ciphersuite is agreed.
@@ -621,10 +646,10 @@ impl CommonState {
             && (self.may_send_application_data || self.sendable_tls.is_empty())
     }
 
-    pub(crate) fn current_io_state(&self) -> IoState {
+    pub(crate) fn current_io_state(&self, app_buf: Option<&RecvBufMap>) -> IoState {
         IoState {
-            tls_bytes_to_write: self.sendable_tls.len(),
-            plaintext_bytes_to_read: self.received_plaintext.len(),
+            tls_bytes_to_write: self.record_layer.streams.total_to_write(),
+            plaintext_bytes_to_read: app_buf.unwrap().bytes_to_read(),
             peer_has_closed: self.has_received_close_notify,
         }
     }
@@ -670,10 +695,12 @@ impl CommonState {
     pub(crate) fn buffer_plaintext(
         &mut self,
         payload: OutboundChunks<'_>,
-        sendable_plaintext: &mut ChunkVecBuffer,
+        sendable_plaintext: &mut PlainBufsMap,
+        id: u16,
+        fin: bool,
     ) -> usize {
         self.perhaps_write_key_update();
-        self.send_plain(payload, Limit::Yes, sendable_plaintext)
+        self.send_plain(payload, Limit::Yes, sendable_plaintext, id, fin)
     }
 
     pub(crate) fn send_early_plaintext(&mut self, data: &[u8]) -> usize {
@@ -697,14 +724,24 @@ impl CommonState {
         &mut self,
         payload: OutboundChunks<'_>,
         limit: Limit,
-        sendable_plaintext: &mut ChunkVecBuffer,
+        sendable_plaintext: &mut PlainBufsMap,
+        id: u16,
+        fin: bool,
     ) -> usize {
         if !self.may_send_application_data {
             // If we haven't completed handshaking, buffer
             // plaintext to send once we do.
             let len = match limit {
-                Limit::Yes => sendable_plaintext.append_limited_copy(payload),
-                Limit::No => sendable_plaintext.append(payload.to_vec()),
+                Limit::Yes => sendable_plaintext
+                    .get_or_create_plain_buf(id)
+                    .unwrap()
+                    .send_plain_buf
+                    .append_limited_copy(payload),
+                Limit::No => sendable_plaintext
+                    .get_or_create_plain_buf(id)
+                    .unwrap()
+                    .send_plain_buf
+                    .append(payload.to_vec()),
             };
             return len;
         }
@@ -717,6 +754,37 @@ impl CommonState {
 
             self.sendable_tls.append(message);
         }
+    }
+}
+
+pub(crate) struct SendPlainTextBuf {
+    pub(crate) send_plain_buf: ChunkVecBuffer,
+    pub(crate) id: u16,
+}
+#[derive(Default)]
+pub(crate) struct PlainBufsMap {
+    pub(crate) plain_map: SimpleIdHashMap<SendPlainTextBuf>
+}
+
+impl PlainBufsMap {
+    pub(crate) fn get_or_create_plain_buf(
+        &mut self, stream_id: u16,
+    ) -> Result<&mut SendPlainTextBuf, Error> {
+        let stream = match self.plain_map.entry(stream_id as u64) {
+            hash_map::Entry::Vacant(v) => {
+
+                let s = SendPlainTextBuf {
+                    send_plain_buf: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
+                    id: stream_id,
+                };
+
+                v.insert(s)
+            },
+
+            hash_map::Entry::Occupied(v) => v.into_mut(),
+        };
+
+        Ok(stream)
     }
 }
 

@@ -523,9 +523,9 @@ impl Codec for TcplsToken {
 }
 
 impl TcplsToken {
-    pub fn random() -> Result<Self, rand::GetRandomFailed> {
+    pub fn random(secure_random: &dyn SecureRandom) -> Result<Self, rand::GetRandomFailed> {
         let mut data = [0u8; 32];
-        rand::fill_random(&mut data)?;
+        secure_random.fill(&mut data)?;
         Ok(Self { data, len: 32 })
     }
 
@@ -926,11 +926,11 @@ impl Codec<'_> for ServerExtension {
 impl ServerExtension {
 
 
-    pub fn make_tcpls_tokens(tokens_count: usize) -> Vec<TcplsToken> {
+    pub fn make_tcpls_tokens(tokens_count: usize, secure_random: &dyn SecureRandom) -> Vec<TcplsToken> {
         let mut tokens: Vec<TcplsToken> = Vec::with_capacity(tokens_count);
         //Generate five tokens
         for i in 1..=tokens_count {
-            tokens.push(TcplsToken::random().unwrap());
+            tokens.push(TcplsToken::random(secure_random).unwrap());
         }
        tokens
     }

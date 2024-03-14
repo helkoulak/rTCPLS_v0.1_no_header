@@ -6,13 +6,13 @@ use core::ops::{Deref, DerefMut};
 #[cfg(feature = "std")]
 use std::io;
 
-use crate::common_state::{CommonState, Context, IoState, State, DEFAULT_BUFFER_LIMIT};
+use crate::common_state::{CommonState, Context, IoState, State, DEFAULT_BUFFER_LIMIT, PlainBufsMap};
 use crate::enums::{AlertDescription, ContentType};
 use crate::error::{Error, PeerMisbehaved};
 #[cfg(feature = "logging")]
 use crate::log::trace;
 
-use crate::msgs::deframer::{Deframed, DeframerSliceBuffer, DeframerVecBuffer, MessageDeframer};
+use crate::msgs::deframer::{Deframed, DeframerSliceBuffer, DeframerVecBuffer, MessageDeframer, MessageDeframerMap};
 use crate::msgs::handshake::Random;
 use crate::msgs::message::{InboundPlainMessage, Message, MessagePayload};
 use crate::suites::{ExtractedSecrets, PartiallyExtractedSecrets};
@@ -33,6 +33,7 @@ mod connection {
     use crate::suites::ExtractedSecrets;
     use crate::vecbuf::ChunkVecBuffer;
     use crate::ConnectionCommon;
+    use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
     /// A client or server connection.
     #[derive(Debug)]
@@ -316,7 +317,7 @@ https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
             Ok(self
                 .core
                 .common_state
-                .buffer_plaintext(buf.into(), &mut self.sendable_plaintext))
+                .buffer_plaintext(buf.into(), &mut self.sendable_plaintext.get_or_create_plain_buf(DEFAULT_STREAM_ID).unwrap().send_plain_buf, 0, false))
         }
 
         fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
@@ -372,8 +373,8 @@ impl ConnectionRandoms {
 /// Interface shared by client and server connections.
 pub struct ConnectionCommon<Data> {
     pub(crate) core: ConnectionCore<Data>,
-    deframer_buffer: DeframerVecBuffer,
-    sendable_plaintext: ChunkVecBuffer,
+    deframers_map: MessageDeframerMap,
+    sendable_plaintext: PlainBufsMap,
 }
 
 impl<Data> ConnectionCommon<Data> {
@@ -398,7 +399,7 @@ impl<Data> ConnectionCommon<Data> {
     #[inline]
     pub fn process_new_packets(&mut self) -> Result<IoState, Error> {
         self.core
-            .process_new_packets(&mut self.deframer_buffer, &mut self.sendable_plaintext)
+            .process_new_packets(self.deframers_map.get_or_create_def_vec_buff(self.conn_in_use as u64), self.sendable_plaintext)
     }
 
     /// Derives key material from the agreed connection secrets.
@@ -727,8 +728,8 @@ impl<Data> From<ConnectionCore<Data>> for ConnectionCommon<Data> {
 
         Self {
             core,
-            deframer_buffer: DeframerVecBuffer::default(),
             sendable_plaintext: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
+            deframers_map: MessageDeframerMap::new(),
         }
     }
 }

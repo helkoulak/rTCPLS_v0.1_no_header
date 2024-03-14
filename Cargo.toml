@@ -13,6 +13,7 @@ members = [
   "rustls",
   # example of custom provider
   "provider-example",
+  "octets",
 ]
 default-members = [
   "examples",
