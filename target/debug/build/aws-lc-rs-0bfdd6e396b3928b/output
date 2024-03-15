@@ -1,3 +1,0 @@
-cargo:include=/home/helkoulak/Documents/r-tcpls-v-0-1/target/debug/build/aws-lc-sys-6e92db9853cc940e/out/include
-cargo:libcrypto=aws_lc_0_13_2_crypto
-cargo:root=/home/helkoulak/Documents/r-tcpls-v-0-1/target/debug/build/aws-lc-sys-6e92db9853cc940e/out
