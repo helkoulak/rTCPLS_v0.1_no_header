@@ -16,7 +16,7 @@ name = "ring"
 version = "0.17.8"
 authors = ["Brian Smith <brian@briansmith.org>"]
 build = "build.rs"
-links = "ring_core_0_17_8"
+links = "ring_core_0_17_8_local"
 include = [
     "LICENSE",
     "Cargo.toml",

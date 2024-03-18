@@ -12,4 +12,4 @@ rustls = { path = "../rustls", features = [ "logging" ]}
 [dev-dependencies]
 hickory-resolver = { version = "0.24", features = ["dns-over-https-rustls", "webpki-roots"] }
 regex = "1.0"
-ring = "0.17"
+ring = {path = "../ring-0.17.8"}

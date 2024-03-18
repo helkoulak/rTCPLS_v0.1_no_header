@@ -10,7 +10,7 @@ publish = false
 
 [dependencies]
 sct = "0.7"
-ring = {path = "../ring"}
+ring = {path = "../ring-0.17.8"}
 async-std = { version = "1.12.0", features = ["attributes"], optional = true }
 docopt = "~1.1"
 env_logger = "0.10" # 0.11 requires 1.71 MSRV even as a dev-dep (due to manifest features)
