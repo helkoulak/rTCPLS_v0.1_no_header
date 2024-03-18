@@ -153,6 +153,16 @@ pub struct Algorithm {
         cpu_features: cpu::Features,
     ) -> Result<Tag, error::Unspecified>,
 
+    open_output: fn(
+        key: &KeyInner,
+        nonce: Nonce,
+        aad: Aad<&[u8]>,
+        in_out: & [u8],
+        out:&mut [u8],
+        src: RangeFrom<usize>,
+        cpu_features: cpu::Features,
+    ) -> Result<Tag, error::Unspecified>,
+
     key_len: usize,
     id: AlgorithmID,
 }

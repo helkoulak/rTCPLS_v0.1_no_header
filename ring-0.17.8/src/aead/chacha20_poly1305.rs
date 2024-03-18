@@ -33,6 +33,7 @@ pub static CHACHA20_POLY1305: aead::Algorithm = aead::Algorithm {
     seal: chacha20_poly1305_seal,
     open: chacha20_poly1305_open,
     id: aead::AlgorithmID::CHACHA20_POLY1305,
+    open_output: chacha20_poly1305_open_output,
 };
 
 const MAX_IN_OUT_LEN: usize = super::max_input_len(64, 1);
@@ -221,6 +222,95 @@ fn chacha20_poly1305_open(
     poly1305_update_padded_16(&mut auth, aad.as_ref());
     poly1305_update_padded_16(&mut auth, &in_out[src.clone()]);
     chacha20_key.encrypt_within(counter, in_out, src.clone());
+    Ok(finish(auth, aad.as_ref().len(), unprefixed_len))
+}
+
+fn chacha20_poly1305_open_output(
+    key: &aead::KeyInner,
+    nonce: Nonce,
+    aad: Aad<&[u8]>,
+    in_out: & [u8],
+    out:&mut [u8],
+    src: RangeFrom<usize>,
+    cpu_features: cpu::Features,
+) -> Result<Tag, error::Unspecified> {
+    let chacha20_key = match key {
+        aead::KeyInner::ChaCha20Poly1305(key) => key,
+        _ => unreachable!(),
+    };
+
+    let unprefixed_len = in_out
+        .len()
+        .checked_sub(src.start)
+        .ok_or(error::Unspecified)?;
+    if unprefixed_len > MAX_IN_OUT_LEN {
+        return Err(error::Unspecified);
+    }
+    // RFC 8439 Section 2.8 says the maximum AAD length is 2**64 - 1, which is
+    // never larger than usize::MAX, so we don't need an explicit length
+    // check.
+    const _USIZE_BOUNDED_BY_U64: u64 = u64_from_usize(usize::MAX);
+
+    #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+    if has_integrated(cpu_features) {
+        // XXX: BoringSSL uses `alignas(16)` on `key` instead of on the
+        // structure, but Rust can't do that yet; see
+        // https://github.com/rust-lang/rust/issues/73557.
+        //
+        // Keep in sync with the anonymous struct of BoringSSL's
+        // `chacha20_poly1305_open_data`.
+        #[derive(Copy, Clone)]
+        #[repr(align(16), C)]
+        struct open_data_in {
+            key: [u32; chacha::KEY_LEN / 4],
+            counter: u32,
+            nonce: [u8; super::NONCE_LEN],
+        }
+
+        let mut data = InOut {
+            input: open_data_in {
+                key: *chacha20_key.words_less_safe(),
+                counter: 0,
+                nonce: *nonce.as_ref(),
+            },
+        };
+
+        // Decrypts `plaintext_len` bytes from `ciphertext` and writes them to `out_plaintext`.
+        prefixed_extern! {
+            fn chacha20_poly1305_open(
+                out_plaintext: *mut u8,
+                ciphertext: *const u8,
+                plaintext_len: usize,
+                ad: *const u8,
+                ad_len: usize,
+                data: &mut InOut<open_data_in>,
+            );
+        }
+
+        let out = unsafe {
+            chacha20_poly1305_open(
+                out.as_mut_ptr(),
+                in_out.as_ptr().add(src.start),
+                unprefixed_len,
+                aad.as_ref().as_ptr(),
+                aad.as_ref().len(),
+                &mut data,
+            );
+            &data.out
+        };
+
+        return Ok(Tag(out.tag));
+    }
+
+    let mut counter = Counter::zero(nonce);
+    let mut auth = {
+        let key = derive_poly1305_key(chacha20_key, counter.increment());
+        poly1305::Context::from_key(key, cpu_features)
+    };
+
+    poly1305_update_padded_16(&mut auth, aad.as_ref());
+    poly1305_update_padded_16(&mut auth, &in_out[src.clone()]);
+    chacha20_key.encrypt_within(counter, out, src.clone());
     Ok(finish(auth, aad.as_ref().len(), unprefixed_len))
 }
 

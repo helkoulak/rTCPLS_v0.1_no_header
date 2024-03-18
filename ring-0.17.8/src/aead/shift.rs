@@ -47,3 +47,20 @@ where
     };
     in_out[..in_out_len].copy_from_slice(&block.as_ref()[..in_out_len]);
 }
+
+
+pub fn shift_partial_output<F>((in_prefix_len, in_out, output): (usize, & [u8], &mut [u8]), transform: F)
+    where
+        F: FnOnce(&[u8]) -> Block,
+{
+    let (block, in_out_len) = {
+        let input = &in_out[in_prefix_len..];
+        let in_out_len = input.len();
+        if in_out_len == 0 {
+            return;
+        }
+        debug_assert!(in_out_len < BLOCK_LEN);
+        (transform(input), in_out_len)
+    };
+    output[..in_out_len].copy_from_slice(&block.as_ref()[..in_out_len]);
+}
