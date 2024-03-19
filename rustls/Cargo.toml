@@ -16,7 +16,6 @@ build = "build.rs"
 rustversion = { version = "1.0.6", optional = true }
 
 [dependencies]
-
 aws-lc-rs = { version = "1.6", optional = true, default-features = false, features = ["aws-lc-sys"] }
 log = { version = "0.4.4", optional = true }
 # remove once our MSRV is >= 1.70
@@ -26,6 +25,8 @@ subtle = { version = "2.5.0", default-features = false }
 webpki = { package = "rustls-webpki", version = "0.102.2", features = ["alloc"], default-features = false }
 pki-types = { package = "rustls-pki-types", version = "1.2", features = ["alloc"] }
 zeroize = "1.7"
+rand = "0.9.0-alpha.1"
+smallvec = { version = "1.13.1", features = ["serde", "union"] }
 
 [features]
 default = ["ring", "logging", "std", "tls12"]

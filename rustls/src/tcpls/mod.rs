@@ -2,21 +2,25 @@
 #![allow(unused_qualifications)]
 
 /// This module contains optional APIs for implementing TCPLS.
-use std::{io, u32, vec};
+use std::{format, io, u32, vec};
 use std::fs;
 use std::io::{BufReader, Read, Write};
-use std::net::{Shutdown, SocketAddr, ToSocketAddrs};
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
+use std::prelude::rust_2024::{String, ToString, Vec};
 use std::sync::Arc;
 use log::trace;
 
 use mio::net::{TcpListener, TcpStream};
+use rand::{random, Rng};
 use crate::{ALL_CIPHER_SUITES, ALL_VERSIONS, Certificate, CipherSuite, ClientConfig, ClientConnection, Connection, ContentType, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, Error, HandshakeType, InvalidMessage, IoState, KeyLogFile, NamedGroup, PeerMisbehaved, PrivateKey, ProtocolVersion, RootCertStore, server, ServerConfig, ServerConnection, ServerName, Side, SignatureScheme, SupportedCipherSuite, SupportedProtocolVersion, Ticketer, version};
 use crate::AlertDescription::IllegalParameter;
+use crate::crypto::ring::{ALL_CIPHER_SUITES, DEFAULT_CIPHER_SUITES};
 use crate::InvalidMessage::{InvalidContentType, InvalidEmptyPayload};
+use crate::key::{Certificate, PrivateKey};
 use crate::msgs::codec;
 use crate::msgs::enums::{Compression, ECPointFormat, ExtensionType};
 use crate::msgs::handshake::{ClientExtension, ClientHelloPayload, HandshakeMessagePayload, HandshakePayload, HasServerExtensions, KeyShareEntry, Random, ServerExtension, ServerHelloPayload, ServerName, SessionId};
-use crate::msgs::message::{Message, MessageError, MessagePayload, OpaqueMessage, PlainMessage};
+use crate::msgs::message::{InboundOpaqueMessage, Message, MessageError, MessagePayload, OpaqueMessage, PlainMessage};
 use crate::PeerMisbehaved::{InvalidTcplsJoinToken, TcplsJoinExtensionNotFound};
 use crate::recvbuf::RecvBufMap;
 use crate::tcpls::network_address::AddressMap;
@@ -220,22 +224,16 @@ impl TcplsSession {
             .send_some_plaintext(input, str_id,fin);
         Ok(buffered)
     }
-    
 
+    /// Flush bytes of a certain stream of a set of streams on specified byte-oriented sink.
     pub fn send_on_connection(&mut self, conn_id: Option<u64>, wr: Option<&mut dyn io::Write>, flushables: Option<SimpleIdHashSet>) -> Result<usize, Error> {
         let tls_conn = self.tls_conn.as_mut().unwrap();
-
-        let (has_pending, pending_at) = match tls_conn.record_layer.streams.has_pending {
-            Some(id) => (true, id),
-            None => (false, 0),
-        };
 
         //Flush streams selected by the app or flush all
         let stream_iter = match flushables {
             Some(set) => StreamIter::from(&set),
             None => tls_conn.record_layer.streams.flushable(),
         };
-
 
         let mut done = 0;
         let socket = match wr {
@@ -258,12 +256,12 @@ impl TcplsSession {
 
             let mut len = stream.send.len();
             let mut sent = 0;
-            let mut complete_sent = false;
+           /* let mut complete_sent = false;*/
 
             while len > 0 {
 
-                (sent, complete_sent) = match stream.send.write_chunk_to(socket) {
-                    (Ok(sent), complete) => (sent, complete),
+                sent = match stream.send.write_to(socket) {
+                    Ok(sent) => sent,
                     (_Error) => return Err(Error::General("Data sending on socket failed".to_string())),
 
                 };
@@ -277,16 +275,8 @@ impl TcplsSession {
                     return Ok(done);
                 }
 
-                /*if !complete_sent {
-                    tls_conn.record_layer.streams.has_pending = Some(id as u16);
-                    return Ok(done);
-                }*/
+            }
 
-            }
-            // The remainder of the partially sent record was sent successfully
-            if has_pending && id == pending_at as u64 {
-                tls_conn.record_layer.streams.has_pending = None;
-            }
             if len == 0 {
                 tls_conn.record_layer.streams.remove_flushable(id);
                 tls_conn.record_layer.streams.insert_writable(id);
@@ -336,13 +326,13 @@ impl TcplsSession {
             .get_mut(&id)
             .unwrap().used;
 
-        let mut rd = codec::Reader::init(&self.tls_conn.as_mut()
+        let mut rd = codec::ReaderMut::init(&self.tls_conn.as_mut()
             .unwrap()
             .outstanding_tcp_conns
             .as_mut_ref()
             .get_mut(&id).unwrap().rcv_buf[..bytes_to_process]);
 
-        let m = match OpaqueMessage::read(&mut rd) {
+        let m = match InboundOpaqueMessage::read(&mut rd) {
             Ok(m) => m,
             Err(msg_err) => {
                 let err_kind = match msg_err {
@@ -365,7 +355,7 @@ impl TcplsSession {
             return Err(Error::InvalidMessage(InvalidContentType))
         }
 
-        let msg = Message::try_from(m.into_plain_message()).unwrap();
+        let msg = Message::try_from(m).unwrap();
 
         //Validate token received and send fake sh
         match self.tls_conn.as_ref().unwrap().side {
@@ -423,6 +413,8 @@ impl TcplsSession {
     }
 
     fn emit_fake_server_hello(&mut self, client_hello: &ClientHelloPayload, id: u64) {
+        let mut rng = rand::thread_rng();
+        let random: [u8; 32] = rng.gen();
         let mut extensions = Vec::new();
 
         let kse = client_hello.get_keyshare_extension().unwrap();
@@ -437,7 +429,7 @@ impl TcplsSession {
                 typ: HandshakeType::ServerHello,
                 payload: HandshakePayload::ServerHello(ServerHelloPayload {
                     legacy_version: ProtocolVersion::TLSv1_2,
-                    random: Random::new().unwrap(),
+                    random: Random::from(random),
                     session_id: SessionId::empty(),
                     cipher_suite: self.tls_conn.as_ref().unwrap().suite.unwrap().suite().clone(),
                     compression_method: Compression::Null,
@@ -563,12 +555,12 @@ pub enum TcplsConnectionState {
     JOINED,
 }
 
-pub fn lookup_address(host: &str, port: u16) -> SocketAddr {
+/*pub fn lookup_address(host: &str, port: u16) -> SocketAddr {
     let mut addrs = (host, port).to_socket_addrs().unwrap(); // resolves hostname and return an itr
     addrs.next().expect("Cannot lookup address")
-}
+}*/
 
-pub fn build_cert_store(
+/*pub fn build_cert_store(
     cert_file_path: Option<&String>,
     cert_store: Option<RootCertStore>,
 ) -> RootCertStore {
@@ -587,9 +579,9 @@ pub fn build_cert_store(
     }
 
     root_store
-}
+}*/
 
-fn load_ocsp(filename: &Option<String>) -> Vec<u8> {
+/*fn load_ocsp(filename: &Option<String>) -> Vec<u8> {
     let mut ret = Vec::new();
     if let Some(name) = filename {
         fs::File::open(name)
@@ -598,10 +590,10 @@ fn load_ocsp(filename: &Option<String>) -> Vec<u8> {
             .unwrap();
     }
     ret
-}
+}*/
 
 /// Find a ciphersuite with the given name
-pub fn find_suite(name: &str) -> Option<SupportedCipherSuite> {
+/*pub fn find_suite(name: &str) -> Option<SupportedCipherSuite> {
     for suite in ALL_CIPHER_SUITES {
         let sname = format!("{:?}", suite.suite()).to_lowercase();
 
@@ -611,10 +603,10 @@ pub fn find_suite(name: &str) -> Option<SupportedCipherSuite> {
     }
 
     None
-}
+}*/
 
 /// Make a vector of ciphersuites named in `suites`
-pub fn lookup_suites(suites: &[String]) -> Vec<SupportedCipherSuite> {
+/*pub fn lookup_suites(suites: &[String]) -> Vec<SupportedCipherSuite> {
     let mut out = Vec::new();
 
     for csname in suites {
@@ -626,10 +618,10 @@ pub fn lookup_suites(suites: &[String]) -> Vec<SupportedCipherSuite> {
     }
 
     out
-}
+}*/
 
 /// Make a vector of protocol versions named in `versions`
-pub fn lookup_versions(versions: &[String]) -> Vec<&'static SupportedProtocolVersion> {
+/*pub fn lookup_versions(versions: &[String]) -> Vec<&'static SupportedProtocolVersion> {
     let mut out = Vec::new();
 
     for vname in versions {
@@ -662,9 +654,9 @@ pub fn load_private_key(filename: &str) -> PrivateKey {
 
     loop {
         match rustls_pemfile::read_one(&mut reader).expect("cannot parse private key .pem file") {
-            Some(rustls_pemfile::Item::RSAKey(key)) => return PrivateKey(key),
-            Some(rustls_pemfile::Item::PKCS8Key(key)) => return PrivateKey(key),
-            Some(rustls_pemfile::Item::ECKey(key)) => return PrivateKey(key),
+            Some(rustls_pemfile::Item::Pkcs1Key(key)) => return PrivateKey(key),
+            Some(rustls_pemfile::Item::Pkcs8Key(key)) => return PrivateKey(key),
+            Some(rustls_pemfile::Item::Sec1Key(key)) => return PrivateKey(key),
             None => break,
             _ => {}
         }
@@ -674,14 +666,14 @@ pub fn load_private_key(filename: &str) -> PrivateKey {
         "no keys found in {:?} (encrypted keys not supported)",
         filename
     );
-}
+}*/
 
-pub fn client_new_tls_connection(config: Arc<ClientConfig>, name: ServerName) -> ClientConnection {
+/*pub fn client_new_tls_connection(config: Arc<ClientConfig>, name: pki_types::ServerName<'static>) -> ClientConnection {
     ClientConnection::new(config, name).expect("Establishing a TLS session has failed")
-}
+}*/
 
 /// Build a `rustls::ClientConfig`
-pub fn build_tls_client_config(
+/*pub fn build_tls_client_config(
     cert_path: Option<&String>,
     cert_store: Option<RootCertStore>,
     cipher_suites: Vec<String>,
@@ -752,9 +744,9 @@ pub fn build_tls_client_config(
     config.enable_tcpls = true;
 
     Arc::new(config)
-}
+}*/
 
-pub fn build_tls_server_config(
+/*pub fn build_tls_server_config(
     client_verify: Option<String>,
     require_auth: bool,
     suite: Vec<String>,
@@ -824,7 +816,7 @@ pub fn build_tls_server_config(
 
     config.max_tcpls_tokens_cap = token_cap;
     Arc::new(config)
-}
+}*/
 
 pub fn server_create_listener(local_address: &str, port: Option<u16>) -> TcpListener {
     let mut addr: SocketAddr = local_address.parse().unwrap();
@@ -838,19 +830,21 @@ pub fn server_create_listener(local_address: &str, port: Option<u16>) -> TcpList
     TcpListener::bind(addr).expect("cannot listen on port")
 }
 
-pub fn server_new_tls_connection(config: Arc<ServerConfig>) -> ServerConnection {
+/*pub fn server_new_tls_connection(config: Arc<ServerConfig>) -> ServerConnection {
     ServerConnection::new(config).expect("Establishing a TLS session has failed")
-}
+}*/
 
 fn get_sample_ch_payload() -> ClientHelloPayload {
+    let mut rng = rand::thread_rng();
+    let random: [u8; 32] = rng.gen();
     ClientHelloPayload {
         client_version: ProtocolVersion::TLSv1_2,
-        random: Random::from([0; 32]),
+        random: Random::from(random),
         session_id: SessionId::empty(),
         cipher_suites: vec![CipherSuite::TLS_DH_anon_WITH_AES_256_CBC_SHA256],
         compression_methods: vec![Compression::Null],
         extensions: vec![
-            ClientExtension::ECPointFormats(ECPointFormat::SUPPORTED.to_vec()),
+            ClientExtension::EcPointFormats(ECPointFormat::SUPPORTED.to_vec()),
             ClientExtension::NamedGroups(vec![NamedGroup::X25519]),
             ClientExtension::SignatureAlgorithms(vec![SignatureScheme::ECDSA_NISTP256_SHA256]),
             ClientExtension::SupportedVersions(vec![ProtocolVersion::TLSv1_3]),

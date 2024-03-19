@@ -420,7 +420,7 @@ mod check;
 mod bs_debug;
 mod builder;
 mod enums;
-
+mod key;
 mod key_log;
 #[cfg(feature = "std")]
 mod key_log_file;

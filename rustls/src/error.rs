@@ -103,6 +103,9 @@ pub enum Error {
     ///
     /// Enums holding this variant will never compare equal to each other.
     Other(OtherError),
+
+    BufNotFound,
+    Done,
 }
 
 /// A corrupt TLS message payload that resulted in an error.
