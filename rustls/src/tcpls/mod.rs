@@ -67,7 +67,7 @@ impl TcplsSession {
         &mut self,
         dest_address: SocketAddr,
         config: Option<Arc<ClientConfig>>,
-        server_name: Option<ServerName>,
+        server_name: Option<pki_types::ServerName<'static>>,
         is_server: bool,
     ) {
         assert_ne!(is_server, true);
@@ -476,7 +476,7 @@ impl TcplsSession {
             /*cx.common.join_msg_received = true;*/
         } else {
             self.tls_conn.as_mut().unwrap()
-                .send_fatal_alert(IllegalParameter);
+                .send_fatal_alert(IllegalParameter, Error::PeerMisbehaved(InvalidTcplsJoinToken));
             return Err(Error::PeerMisbehaved(InvalidTcplsJoinToken));
         };
 
