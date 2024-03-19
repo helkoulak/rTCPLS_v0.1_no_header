@@ -48,12 +48,16 @@ impl MessageFragmenter {
         typ: ContentType,
         version: ProtocolVersion,
         payload: OutboundChunks<'a>,
-    ) -> impl ExactSizeIterator<Item = OutboundPlainMessage<'a>> {
-        Chunker::new(payload, self.max_frag).map(move |payload| OutboundPlainMessage {
+    ) -> (impl ExactSizeIterator<Item = OutboundPlainMessage<'a>>, usize) {
+        let n = payload.len() / self.max_frag;
+        let rem = payload.len() % self.max_frag;
+        let count = if rem > 0 { n + 1 } else { n };
+
+        (Chunker::new(payload, self.max_frag).map(move |payload| OutboundPlainMessage {
             typ,
             version,
             payload,
-        })
+        }), count)
     }
 
     /// Set the maximum fragment size that will be produced.

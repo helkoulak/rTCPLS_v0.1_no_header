@@ -611,6 +611,7 @@ mod connection {
     use crate::error::Error;
     use crate::suites::ExtractedSecrets;
     use crate::ClientConfig;
+    use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
     /// Stub that implements io::Write and dispatches to `write_early_data`.
     pub struct WriteEarlyData<'a> {
@@ -732,7 +733,7 @@ mod connection {
                 .check_write(data.len())
                 .map(|sz| {
                     self.inner
-                        .send_early_plaintext(&data[..sz])
+                        .send_early_plaintext(&data[..sz], DEFAULT_STREAM_ID)
                 })
         }
     }

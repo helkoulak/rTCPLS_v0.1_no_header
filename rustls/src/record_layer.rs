@@ -247,6 +247,10 @@ impl RecordLayer {
     pub(crate) fn set_not_handshaking(&mut self) {
         self.is_handshaking = false;
     }
+
+    pub(crate) fn encrypt_for_stream(&mut self, stream_id: u16) {
+        self.stream_in_use = stream_id;
+    }
 }
 
 /// Result of decryption.
