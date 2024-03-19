@@ -2,33 +2,32 @@
 #![allow(unused_qualifications)]
 
 /// This module contains optional APIs for implementing TCPLS.
-use std::{format, io, u32, vec};
-use std::fs;
-use std::io::{BufReader, Read, Write};
-use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
-use std::prelude::rust_2024::{String, ToString, Vec};
+use std::{io, u32, vec};
+use std::io::{Read, Write};
+use std::net::{Shutdown, SocketAddr, ToSocketAddrs};
+use std::prelude::rust_2021::{ToString, Vec};
 use std::sync::Arc;
 use log::trace;
 
 use mio::net::{TcpListener, TcpStream};
-use rand::{random, Rng};
-use crate::{ALL_CIPHER_SUITES, ALL_VERSIONS, Certificate, CipherSuite, ClientConfig, ClientConnection, Connection, ContentType, DEFAULT_CIPHER_SUITES, DEFAULT_VERSIONS, Error, HandshakeType, InvalidMessage, IoState, KeyLogFile, NamedGroup, PeerMisbehaved, PrivateKey, ProtocolVersion, RootCertStore, server, ServerConfig, ServerConnection, ServerName, Side, SignatureScheme, SupportedCipherSuite, SupportedProtocolVersion, Ticketer, version};
+use rand::Rng;
+use crate::{CipherSuite, ClientConfig, ClientConnection,
+            Connection, ContentType, Error, HandshakeType, InvalidMessage, IoState,
+            NamedGroup, PeerMisbehaved, ProtocolVersion, ServerConfig, ServerConnection, Side, SignatureScheme};
 use crate::AlertDescription::IllegalParameter;
-use crate::crypto::ring::{ALL_CIPHER_SUITES, DEFAULT_CIPHER_SUITES};
 use crate::InvalidMessage::{InvalidContentType, InvalidEmptyPayload};
-use crate::key::{Certificate, PrivateKey};
 use crate::msgs::codec;
 use crate::msgs::enums::{Compression, ECPointFormat, ExtensionType};
-use crate::msgs::handshake::{ClientExtension, ClientHelloPayload, HandshakeMessagePayload, HandshakePayload, HasServerExtensions, KeyShareEntry, Random, ServerExtension, ServerHelloPayload, ServerName, SessionId};
-use crate::msgs::message::{InboundOpaqueMessage, Message, MessageError, MessagePayload, OpaqueMessage, PlainMessage};
+use crate::msgs::handshake::{ClientExtension, ClientHelloPayload,
+                             HandshakeMessagePayload, HandshakePayload,
+                             HasServerExtensions, KeyShareEntry, Random,
+                             ServerExtension, ServerHelloPayload, SessionId};
+use crate::msgs::message::{InboundOpaqueMessage, Message, MessageError, MessagePayload, PlainMessage};
 use crate::PeerMisbehaved::{InvalidTcplsJoinToken, TcplsJoinExtensionNotFound};
 use crate::recvbuf::RecvBufMap;
 use crate::tcpls::network_address::AddressMap;
 use crate::tcpls::outstanding_conn::OutstandingTcpConn;
 use crate::tcpls::stream::{SimpleIdHashMap, SimpleIdHashSet, StreamIter};
-use crate::verify::{
-    AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
-};
 
 pub mod frame;
 pub mod network_address;
@@ -555,268 +554,11 @@ pub enum TcplsConnectionState {
     JOINED,
 }
 
-/*pub fn lookup_address(host: &str, port: u16) -> SocketAddr {
-    let mut addrs = (host, port).to_socket_addrs().unwrap(); // resolves hostname and return an itr
-    addrs.next().expect("Cannot lookup address")
-}*/
 
-/*pub fn build_cert_store(
-    cert_file_path: Option<&String>,
-    cert_store: Option<RootCertStore>,
-) -> RootCertStore {
-    let mut root_store = RootCertStore::empty();
 
-    if cert_file_path.is_some() {
-        let ca_path = cert_file_path.unwrap();
 
-        let cert_file = fs::File::open(ca_path).expect("Cannot open CA file");
-        let mut reader = BufReader::new(cert_file);
-        root_store.add_parsable_certificates(&rustls_pemfile::certs(&mut reader).unwrap());
-    } else if cert_store.is_none() {
-        panic!("either a file path for a cert store or an RootCertStore should be provided")
-    } else {
-        root_store = cert_store.unwrap();
-    }
 
-    root_store
-}*/
 
-/*fn load_ocsp(filename: &Option<String>) -> Vec<u8> {
-    let mut ret = Vec::new();
-    if let Some(name) = filename {
-        fs::File::open(name)
-            .expect("cannot open ocsp file")
-            .read_to_end(&mut ret)
-            .unwrap();
-    }
-    ret
-}*/
-
-/// Find a ciphersuite with the given name
-/*pub fn find_suite(name: &str) -> Option<SupportedCipherSuite> {
-    for suite in ALL_CIPHER_SUITES {
-        let sname = format!("{:?}", suite.suite()).to_lowercase();
-
-        if sname == name.to_string().to_lowercase() {
-            return Some(*suite);
-        }
-    }
-
-    None
-}*/
-
-/// Make a vector of ciphersuites named in `suites`
-/*pub fn lookup_suites(suites: &[String]) -> Vec<SupportedCipherSuite> {
-    let mut out = Vec::new();
-
-    for csname in suites {
-        let scs = find_suite(csname);
-        match scs {
-            Some(s) => out.push(s),
-            None => panic!("cannot look up ciphersuite '{}'", csname),
-        }
-    }
-
-    out
-}*/
-
-/// Make a vector of protocol versions named in `versions`
-/*pub fn lookup_versions(versions: &[String]) -> Vec<&'static SupportedProtocolVersion> {
-    let mut out = Vec::new();
-
-    for vname in versions {
-        let version = match vname.as_ref() {
-            "1.3" => &version::TLS13,
-            _ => panic!(
-                "cannot look up version '{}', TCPLS supports only TLS '1.3'",
-                vname
-            ),
-        };
-        out.push(version);
-    }
-
-    out
-}
-
-pub fn load_certs(filename: &str) -> Vec<Certificate> {
-    let certfile = fs::File::open(filename).expect("cannot open certificate file");
-    let mut reader = BufReader::new(certfile);
-    rustls_pemfile::certs(&mut reader)
-        .unwrap()
-        .iter()
-        .map(|v| Certificate(v.clone()))
-        .collect()
-}
-
-pub fn load_private_key(filename: &str) -> PrivateKey {
-    let keyfile = fs::File::open(filename).expect("cannot open private key file");
-    let mut reader = BufReader::new(keyfile);
-
-    loop {
-        match rustls_pemfile::read_one(&mut reader).expect("cannot parse private key .pem file") {
-            Some(rustls_pemfile::Item::Pkcs1Key(key)) => return PrivateKey(key),
-            Some(rustls_pemfile::Item::Pkcs8Key(key)) => return PrivateKey(key),
-            Some(rustls_pemfile::Item::Sec1Key(key)) => return PrivateKey(key),
-            None => break,
-            _ => {}
-        }
-    }
-
-    panic!(
-        "no keys found in {:?} (encrypted keys not supported)",
-        filename
-    );
-}*/
-
-/*pub fn client_new_tls_connection(config: Arc<ClientConfig>, name: pki_types::ServerName<'static>) -> ClientConnection {
-    ClientConnection::new(config, name).expect("Establishing a TLS session has failed")
-}*/
-
-/// Build a `rustls::ClientConfig`
-/*pub fn build_tls_client_config(
-    cert_path: Option<&String>,
-    cert_store: Option<RootCertStore>,
-    cipher_suites: Vec<String>,
-    protocol_ver: Vec<String>,
-    auth_key: Option<String>,
-    auth_certs: Option<String>,
-    no_tickets: bool,
-    no_sni: bool,
-    proto: Vec<String>,
-    max_frag_size: Option<usize>,
-) -> Arc<ClientConfig> {
-    let root_store = build_cert_store(cert_path, cert_store);
-
-    let suites = if !cipher_suites.is_empty() {
-        lookup_suites(&cipher_suites)
-    } else {
-        DEFAULT_CIPHER_SUITES.to_vec()
-    };
-
-    let versions = if !protocol_ver.is_empty() {
-        lookup_versions(&protocol_ver)
-    } else {
-        DEFAULT_VERSIONS.to_vec()
-    };
-
-    let config = ClientConfig::builder()
-        .with_cipher_suites(&suites)
-        .with_safe_default_kx_groups()
-        .with_protocol_versions(&versions)
-        .expect("inconsistent cipher-suite/versions selected")
-        .with_root_certificates(root_store);
-
-    let mut config = match (&auth_key, &auth_certs) {
-        (Some(key_file), Some(certs_file)) => {
-            let certs = load_certs(certs_file);
-            let key = load_private_key(key_file);
-            config
-                .with_single_cert(certs, key)
-                .expect("invalid client auth certs/key")
-        }
-        (None, None) => config.with_no_client_auth(),
-        (_, _) => {
-            panic!("must provide --auth-certs and --auth-key together");
-        }
-    };
-
-    config.key_log = Arc::new(KeyLogFile::new());
-
-    if no_tickets {
-        config.resumption = config
-            .resumption
-            .tls12_resumption(crate::client::Tls12Resumption::SessionIdOnly);
-    }
-
-    if no_sni {
-        config.enable_sni = false;
-    }
-
-    config.alpn_protocols = proto
-        .iter()
-        .map(|proto| proto.as_bytes().to_vec())
-        .collect();
-
-    if max_frag_size.is_some() {
-        config.max_fragment_size = max_frag_size;
-    }
-
-    config.enable_tcpls = true;
-
-    Arc::new(config)
-}*/
-
-/*pub fn build_tls_server_config(
-    client_verify: Option<String>,
-    require_auth: bool,
-    suite: Vec<String>,
-    protover: Vec<String>,
-    certs: Option<String>,
-    key: Option<String>,
-    ocsp: Option<String>,
-    resumption: bool,
-    tickets: bool,
-    proto: Vec<String>,
-    token_cap: usize,
-) -> Arc<ServerConfig> {
-    let client_auth = if client_verify.is_some() {
-        let roots = load_certs(client_verify.as_ref().unwrap());
-        let mut client_auth_roots = RootCertStore::empty();
-        for root in roots {
-            client_auth_roots.add(&root).unwrap();
-        }
-        if require_auth {
-            AllowAnyAuthenticatedClient::new(client_auth_roots).boxed()
-        } else {
-            AllowAnyAnonymousOrAuthenticatedClient::new(client_auth_roots).boxed()
-        }
-    } else {
-        NoClientAuth::boxed()
-    };
-
-    let suites = if !suite.is_empty() {
-        lookup_suites(&suite)
-    } else {
-        ALL_CIPHER_SUITES.to_vec()
-    };
-
-    let versions = if !protover.is_empty() {
-        lookup_versions(&protover)
-    } else {
-        ALL_VERSIONS.to_vec()
-    };
-
-    let certs = load_certs(certs.as_ref().expect("--certs option missing"));
-    let privkey = load_private_key(key.as_ref().expect("--key option missing"));
-    let ocsp = load_ocsp(&ocsp);
-
-    let mut config = ServerConfig::builder()
-        .with_cipher_suites(&suites)
-        .with_safe_default_kx_groups()
-        .with_protocol_versions(&versions)
-        .expect("inconsistent cipher-suites/versions specified")
-        .with_client_cert_verifier(client_auth)
-        .with_single_cert_with_ocsp_and_sct(certs, privkey, ocsp, vec![])
-        .expect("bad certificates/private key");
-
-    config.key_log = Arc::new(KeyLogFile::new());
-
-    if resumption {
-        config.session_storage = server::ServerSessionMemoryCache::new(256);
-    }
-
-    if tickets {
-        config.ticketer = Ticketer::new().unwrap();
-    }
-
-    config.alpn_protocols = proto
-        .iter()
-        .map(|proto| proto.as_bytes().to_vec())
-        .collect::<Vec<_>>();
-
-    config.max_tcpls_tokens_cap = token_cap;
-    Arc::new(config)
-}*/
 
 pub fn server_create_listener(local_address: &str, port: Option<u16>) -> TcpListener {
     let mut addr: SocketAddr = local_address.parse().unwrap();
@@ -830,9 +572,7 @@ pub fn server_create_listener(local_address: &str, port: Option<u16>) -> TcpList
     TcpListener::bind(addr).expect("cannot listen on port")
 }
 
-/*pub fn server_new_tls_connection(config: Arc<ServerConfig>) -> ServerConnection {
-    ServerConnection::new(config).expect("Establishing a TLS session has failed")
-}*/
+
 
 fn get_sample_ch_payload() -> ClientHelloPayload {
     let mut rng = rand::thread_rng();
