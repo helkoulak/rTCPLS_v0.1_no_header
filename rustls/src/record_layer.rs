@@ -1,13 +1,11 @@
+use alloc::boxed::Box;
+use core::num::NonZeroU64;
 
-
-use crate::cipher::{MessageDecrypter, MessageEncrypter};
+use crate::crypto::cipher::{InboundOpaqueMessage, MessageDecrypter, MessageEncrypter};
 use crate::error::Error;
-use crate::msgs::message::{BorrowedOpaqueMessage, BorrowedPlainMessage, PlainMessage};
-
 #[cfg(feature = "logging")]
 use crate::log::trace;
-use crate::recvbuf::RecvBuf;
-use crate::tcpls::frame::{Frame, TcplsHeader};
+use crate::msgs::message::{InboundPlainMessage, OutboundOpaqueMessage, OutboundPlainMessage};
 use crate::tcpls::stream::{DEFAULT_STREAM_ID, StreamMap};
 
 static SEQ_SOFT_LIMIT: u64 = 0x16909E7; //(((2 as f64).powf(24.5) as i64) - 0xFFFF) as u64; //0xffff_ffff_ffff_0000u64;
@@ -35,9 +33,8 @@ pub struct RecordLayer {
     decrypt_state: DirectionState,
     // id of currently used stream
     stream_in_use: u16,
+    pub streams: StreamMap,
     is_handshaking: bool,
-    write_seq: u64,
-    read_seq: u64,
     has_decrypted: bool,
 
     // Message encrypted with other keys may be encountered, so failures
@@ -53,15 +50,13 @@ impl RecordLayer {
         Self {
             message_encrypter: <dyn MessageEncrypter>::invalid(),
             message_decrypter: <dyn MessageDecrypter>::invalid(),
-
-            write_seq: 0,
-            read_seq: 0,
+            streams: StreamMap::new(),
+            is_handshaking: true,
             has_decrypted: false,
             encrypt_state: DirectionState::Invalid,
             decrypt_state: DirectionState::Invalid,
             stream_in_use: 0,
             trial_decryption_len: None,
-            is_handshaking: false,
         }
     }
 
@@ -135,7 +130,6 @@ impl RecordLayer {
     /// It is not used until you call `start_encrypting`.
     pub(crate) fn prepare_message_encrypter(&mut self, cipher: Box<dyn MessageEncrypter>) {
         self.message_encrypter = cipher;
-        self.write_seq = 0;
         self.encrypt_state = DirectionState::Prepared;
     }
 
@@ -143,7 +137,6 @@ impl RecordLayer {
     /// It is not used until you call `start_decrypting`.
     pub(crate) fn prepare_message_decrypter(&mut self, cipher: Box<dyn MessageDecrypter>) {
         self.message_decrypter = cipher;
-        self.read_seq = 0;
         self.decrypt_state = DirectionState::Prepared;
     }
 
@@ -196,13 +189,13 @@ impl RecordLayer {
     /// Return true if we are getting close to encrypting too many
     /// messages with our encryption key.
     pub(crate) fn wants_close_before_encrypt(&self) -> bool {
-        self.write_seq == SEQ_SOFT_LIMIT
+        self.streams.get(self.stream_in_use).unwrap().write_seq == SEQ_SOFT_LIMIT
     }
 
     /// Return true if we outright refuse to do anything with the
     /// encryption key.
     pub(crate) fn encrypt_exhausted(&self) -> bool {
-        self.write_seq >= SEQ_HARD_LIMIT
+        self.streams.get(self.stream_in_use).unwrap().write_seq >= SEQ_HARD_LIMIT
     }
 
     pub(crate) fn is_encrypting(&self) -> bool {
@@ -216,9 +209,12 @@ impl RecordLayer {
     }
 
     pub(crate) fn write_seq(&self) -> u64 {
-        self.write_seq
+        self.streams.get(DEFAULT_STREAM_ID).unwrap().write_seq
     }
 
+    pub fn get_stream_in_use(& self) -> u16 {
+        self.stream_in_use
+    }
     /// Returns the number of remaining write sequences
     pub(crate) fn remaining_write_seq(&self) -> Option<NonZeroU64> {
         SEQ_SOFT_LIMIT
@@ -227,7 +223,7 @@ impl RecordLayer {
     }
 
     pub(crate) fn read_seq(&self) -> u64 {
-        self.read_seq
+        self.streams.get(DEFAULT_STREAM_ID).unwrap().write_seq
     }
 
     pub(crate) fn encrypted_len(&self, payload_len: usize) -> usize {
@@ -246,6 +242,10 @@ impl RecordLayer {
             }
             _ => false,
         }
+    }
+
+    pub(crate) fn set_not_handshaking(&mut self) {
+        self.is_handshaking = false;
     }
 }
 

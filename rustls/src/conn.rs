@@ -6,7 +6,7 @@ use core::ops::{Deref, DerefMut};
 #[cfg(feature = "std")]
 use std::io;
 
-use crate::common_state::{CommonState, Context, IoState, State, DEFAULT_BUFFER_LIMIT, PlainBufsMap};
+use crate::common_state::{CommonState, Context, IoState, State};
 use crate::enums::{AlertDescription, ContentType};
 use crate::error::{Error, PeerMisbehaved};
 #[cfg(feature = "logging")]
@@ -317,7 +317,7 @@ https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
             Ok(self
                 .core
                 .common_state
-                .buffer_plaintext(buf.into(), &mut self.sendable_plaintext.get_or_create_plain_buf(DEFAULT_STREAM_ID).unwrap().send_plain_buf, 0, false))
+                .buffer_plaintext(buf.into(), &mut self.sendable_plaintext, DEFAULT_STREAM_ID, false))
         }
 
         fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
@@ -348,6 +348,7 @@ https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
 
 #[cfg(feature = "std")]
 pub use connection::{Connection, Reader, Writer};
+use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
 #[derive(Debug)]
 pub(crate) struct ConnectionRandoms {
@@ -374,7 +375,6 @@ impl ConnectionRandoms {
 pub struct ConnectionCommon<Data> {
     pub(crate) core: ConnectionCore<Data>,
     deframers_map: MessageDeframerMap,
-    sendable_plaintext: PlainBufsMap,
 }
 
 impl<Data> ConnectionCommon<Data> {
@@ -627,7 +627,7 @@ impl<Data> ConnectionCommon<Data> {
     /// `process_handshake_messages()` path, specialized for the first handshake message.
 
     pub(crate) fn first_handshake_message(&mut self) -> Result<Option<Message<'static>>, Error> {
-        let mut deframer_buffer = self.deframer_buffer.borrow();
+        let mut deframer_buffer = self.deframers_map.get_or_create_def_vec_buff(DEFAULT_STREAM_ID as u64).borrow();
         let res = self
             .core
             .deframe(None, &mut deframer_buffer)
@@ -728,7 +728,6 @@ impl<Data> From<ConnectionCore<Data>> for ConnectionCommon<Data> {
 
         Self {
             core,
-            sendable_plaintext: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
             deframers_map: MessageDeframerMap::new(),
         }
     }

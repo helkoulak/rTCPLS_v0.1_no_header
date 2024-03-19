@@ -5,6 +5,7 @@
 use std::{io, u32, vec};
 use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, ToSocketAddrs};
+use std::ops::DerefMut;
 use std::prelude::rust_2021::{ToString, Vec};
 use std::sync::Arc;
 use log::trace;
@@ -218,9 +219,9 @@ impl TcplsSession {
     }
 
     pub fn stream_send(&mut self, str_id: u16, input: &[u8], fin: bool) -> Result<usize, Error> {
-       let mut tls_connection = self.tls_conn.as_mut().unwrap();
-        let buffered = tls_connection
-            .send_some_plaintext(input, str_id,fin);
+       let mut tls_conn = self.tls_conn.as_mut().unwrap();
+        let buffered = tls_conn
+            .buffer_plaintext(input.into(), &mut tls_conn.sendable_plaintext, str_id, fin);
         Ok(buffered)
     }
 

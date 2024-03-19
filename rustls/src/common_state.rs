@@ -24,7 +24,6 @@ use crate::tls12::ConnectionSecrets;
 use crate::unbuffered::{EncryptError, InsufficientSizeError};
 use crate::vecbuf::ChunkVecBuffer;
 use crate::{quic, record_layer};
-use crate::msgs::deframer::MessageDeframerMap;
 use crate::recvbuf::RecvBufMap;
 use crate::tcpls::outstanding_conn::OutstandingConnMap;
 use crate::tcpls::stream::SimpleIdHashMap;
@@ -57,9 +56,10 @@ pub struct CommonState {
     /// id of currently used tcp connection
     pub(crate) conn_in_use: u32,
 
-    pub(crate) sendable_tls: ChunkVecBuffer,
+
     queued_key_update_message: Option<Vec<u8>>,
 
+    pub(crate) sendable_plaintext: PlainBufsMap,
     /// Protocol whose key schedule should be used. Unused for TLS < 1.3.
     pub(crate) protocol: Protocol,
     pub(crate) quic: quic::Quic,
@@ -92,8 +92,8 @@ impl CommonState {
             tcpls_tokens: Vec::new(),
             received_plaintext: ChunkVecBuffer::new(Some(DEFAULT_RECEIVED_PLAINTEXT_LIMIT)),
             conn_in_use: 0,
-            sendable_tls: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
             queued_key_update_message: None,
+            sendable_plaintext: PlainBufsMap::default(),
             protocol: Protocol::Tcp,
             quic: quic::Quic::default(),
             enable_secret_extraction: false,
