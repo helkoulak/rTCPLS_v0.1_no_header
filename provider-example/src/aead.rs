@@ -8,7 +8,8 @@ use rustls::crypto::cipher::{
     OutboundOpaqueMessage, OutboundPlainMessage, PrefixedPayload, Tls12AeadAlgorithm,
     Tls13AeadAlgorithm, UnsupportedOperationError, NONCE_LEN,
 };
-use rustls::{ConnectionTrafficSecrets, ContentType, ProtocolVersion};
+use rustls::{ConnectionTrafficSecrets, ContentType, Error, ProtocolVersion};
+use rustls::tcpls::frame::{Frame, TcplsHeader};
 
 pub struct Chacha20Poly1305;
 
@@ -91,7 +92,7 @@ impl MessageEncrypter for Tls13Cipher {
 
         payload.extend_from_chunks(&m.payload);
         payload.extend_from_slice(&m.typ.to_array());
-        let nonce = chacha20poly1305::Nonce::from(Nonce::new(&self.1, seq).0);
+        let nonce = chacha20poly1305::Nonce::from(Nonce::new(&self.1, seq, ).0);
         let aad = make_tls13_aad(total_len);
 
         self.0
@@ -109,6 +110,14 @@ impl MessageEncrypter for Tls13Cipher {
     fn encrypted_payload_len(&self, payload_len: usize) -> usize {
         payload_len + 1 + CHACHAPOLY1305_OVERHEAD
     }
+
+    fn encrypt_tcpls(&mut self, msg: OutboundPlainMessage, seq: u64, stream_id: u32, tcpls_header: &TcplsHeader, frame_header: Option<Frame>) -> Result<OutboundOpaqueMessage, Error> {
+        todo!()
+    }
+
+    fn encrypted_payload_len_tcpls(&self, payload_len: usize, frame_header: Option<Frame>) -> usize {
+        todo!()
+    }
 }
 
 impl MessageDecrypter for Tls13Cipher {
@@ -118,7 +127,7 @@ impl MessageDecrypter for Tls13Cipher {
         seq: u64,
     ) -> Result<InboundPlainMessage<'a>, rustls::Error> {
         let payload = &mut m.payload;
-        let nonce = chacha20poly1305::Nonce::from(Nonce::new(&self.1, seq).0);
+        let nonce = chacha20poly1305::Nonce::from(Nonce::new(&self.1, seq, ).0);
         let aad = make_tls13_aad(payload.len());
 
         self.0
@@ -141,7 +150,7 @@ impl MessageEncrypter for Tls12Cipher {
         let mut payload = PrefixedPayload::with_capacity(total_len);
 
         payload.extend_from_chunks(&m.payload);
-        let nonce = chacha20poly1305::Nonce::from(Nonce::new(&self.1, seq).0);
+        let nonce = chacha20poly1305::Nonce::from(Nonce::new(&self.1, seq, 0).0);
         let aad = make_tls12_aad(seq, m.typ, m.version, m.payload.len());
 
         self.0
@@ -153,6 +162,14 @@ impl MessageEncrypter for Tls12Cipher {
     fn encrypted_payload_len(&self, payload_len: usize) -> usize {
         payload_len + CHACHAPOLY1305_OVERHEAD
     }
+
+    fn encrypt_tcpls(&mut self, msg: OutboundPlainMessage, seq: u64, stream_id: u32, tcpls_header: &TcplsHeader, frame_header: Option<Frame>) -> Result<OutboundOpaqueMessage, Error> {
+        todo!()
+    }
+
+    fn encrypted_payload_len_tcpls(&self, payload_len: usize, frame_header: Option<Frame>) -> usize {
+        todo!()
+    }
 }
 
 impl MessageDecrypter for Tls12Cipher {
@@ -162,7 +179,7 @@ impl MessageDecrypter for Tls12Cipher {
         seq: u64,
     ) -> Result<InboundPlainMessage<'a>, rustls::Error> {
         let payload = &m.payload;
-        let nonce = chacha20poly1305::Nonce::from(Nonce::new(&self.1, seq).0);
+        let nonce = chacha20poly1305::Nonce::from(Nonce::new(&self.1, seq, 0).0);
         let aad = make_tls12_aad(
             seq,
             m.typ,

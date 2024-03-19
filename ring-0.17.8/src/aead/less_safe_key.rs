@@ -184,6 +184,22 @@ impl LessSafeKey {
             .map(|tag| in_out.extend(tag.as_ref()))
     }
 
+    #[inline]
+    pub fn seal_in_place_append_tag_tcpls<A, InOut>(
+        &self,
+        nonce: Nonce,
+        aad: Aad<A>,
+        in_out: &mut InOut,
+        offset: usize,
+    ) -> Result<(), error::Unspecified>
+        where
+            A: AsRef<[u8]>,
+            InOut: AsMut<[u8]> + for<'in_out> Extend<&'in_out u8>,
+    {
+        self.seal_in_place_separate_tag(nonce, aad, &mut in_out.as_mut()[offset..])
+            .map(|tag| in_out.extend(tag.as_ref()))
+    }
+
     /// Like `super::SealingKey::seal_in_place_separate_tag()`, except it
     /// accepts an arbitrary nonce.
     ///

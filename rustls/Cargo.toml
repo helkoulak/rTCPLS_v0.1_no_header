@@ -28,6 +28,7 @@ zeroize = "1.7"
 rand = "0.9.0-alpha.1"
 smallvec = { version = "1.13.1", features = ["serde", "union"] }
 mio = "0.8.11"
+octets = { version = "0.2", path = "../octets" }
 
 [features]
 default = ["ring", "logging", "std", "tls12"]

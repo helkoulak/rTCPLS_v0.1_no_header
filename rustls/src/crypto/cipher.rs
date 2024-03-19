@@ -3,6 +3,7 @@ use alloc::string::ToString;
 use core::fmt;
 
 use zeroize::Zeroize;
+use ring::aead;
 
 use crate::enums::{ContentType, ProtocolVersion};
 use crate::error::Error;
@@ -12,6 +13,7 @@ pub use crate::msgs::message::{
     OutboundOpaqueMessage, OutboundPlainMessage, PlainMessage, PrefixedPayload,
 };
 use crate::suites::ConnectionTrafficSecrets;
+use crate::tcpls::frame::{Frame, STREAM_FRAME_HEADER_SIZE, TcplsHeader};
 
 /// Factory trait for building `MessageEncrypter` and `MessageDecrypter` for a TLS1.3 cipher suite.
 pub trait Tls13AeadAlgorithm: Send + Sync {
@@ -157,6 +159,15 @@ pub trait MessageEncrypter: Send + Sync {
     /// Return the length of the ciphertext that results from encrypting plaintext of
     /// length `payload_len`
     fn encrypted_payload_len(&self, payload_len: usize) -> usize;
+    fn encrypt_tcpls(
+        &mut self,
+        msg: OutboundPlainMessage,
+        seq: u64,
+        stream_id: u32,
+        tcpls_header: &TcplsHeader,
+        frame_header: Option<Frame>
+    ) -> Result<OutboundOpaqueMessage, Error>;
+    fn encrypted_payload_len_tcpls(&self, payload_len: usize, frame_header: Option<Frame>) -> usize;
 }
 
 impl dyn MessageEncrypter {
@@ -212,10 +223,10 @@ impl Nonce {
     ///
     /// This is `iv ^ seq` where `seq` is encoded as a 96-bit big-endian integer.
     #[inline]
-    pub fn new(iv: &Iv, seq: u64) -> Self {
+    pub fn new(iv: &Iv, seq: u64, stream_id: u32) -> Self {
         let mut nonce = Self([0u8; NONCE_LEN]);
         codec::put_u64(seq, &mut nonce.0[4..]);
-
+        codec::put_u32(stream_id,&mut nonce[..4]);
         nonce
             .0
             .iter_mut()
@@ -245,6 +256,27 @@ pub fn make_tls13_aad(payload_len: usize) -> [u8; 5] {
         version[1],
         (payload_len >> 8) as u8,
         (payload_len & 0xff) as u8,
+    ]
+}
+
+#[inline]
+pub fn make_tls13_aad_tcpls(payload_len: usize, header: &TcplsHeader) -> [u8; 13] {
+    let version = ProtocolVersion::TLSv1_2.to_array();
+    [
+        ContentType::ApplicationData.into(),
+        // Note: this is `legacy_record_version`, i.e. TLS1.2 even for TLS1.3.
+        version[0],
+        version[1],
+        (payload_len >> 8) as u8,
+        (payload_len & 0xff) as u8,
+        (header.chunk_num >> 24) as u8,
+        (header.chunk_num >> 16) as u8,
+        (header.chunk_num >> 8) as u8,
+        (header.chunk_num & 0xff) as u8,
+        (header.offset_step >> 8) as u8,
+        (header.offset_step & 0xff) as u8,
+        (header.stream_id >> 8) as u8,
+        (header.stream_id & 0xff) as u8
     ]
 }
 

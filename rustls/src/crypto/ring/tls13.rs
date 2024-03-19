@@ -3,17 +3,16 @@ use alloc::boxed::Box;
 use super::ring_like::hkdf::KeyType;
 use super::ring_like::{aead, hkdf, hmac};
 use crate::crypto;
-use crate::crypto::cipher::{
-    make_tls13_aad, AeadKey, InboundOpaqueMessage, Iv, MessageDecrypter, MessageEncrypter, Nonce,
-    Tls13AeadAlgorithm, UnsupportedOperationError,
-};
+use crate::crypto::cipher::{make_tls13_aad, AeadKey, InboundOpaqueMessage, Iv, MessageDecrypter, MessageEncrypter, Nonce, Tls13AeadAlgorithm, UnsupportedOperationError, make_tls13_aad_tcpls};
 use crate::crypto::tls13::{Hkdf, HkdfExpander, OkmBlock, OutputLengthError};
 use crate::enums::{CipherSuite, ContentType, ProtocolVersion};
 use crate::error::Error;
+use crate::msgs::codec::Codec;
 use crate::msgs::message::{
     InboundPlainMessage, OutboundOpaqueMessage, OutboundPlainMessage, PrefixedPayload,
 };
 use crate::suites::{CipherSuiteCommon, ConnectionTrafficSecrets, SupportedCipherSuite};
+use crate::tcpls::frame::{Frame, STREAM_FRAME_HEADER_SIZE, TCPLS_HEADER_SIZE, TcplsHeader};
 use crate::tls13::Tls13CipherSuite;
 
 /// The TLS1.3 ciphersuite TLS_CHACHA20_POLY1305_SHA256
@@ -202,7 +201,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         let total_len = self.encrypted_payload_len(msg.payload.len());
         let mut payload = PrefixedPayload::with_capacity(total_len);
 
-        let nonce = aead::Nonce::assume_unique_for_key(Nonce::new(&self.iv, seq).0);
+        let nonce = aead::Nonce::assume_unique_for_key(Nonce::new(&self.iv, seq, 0).0);
         let aad = aead::Aad::from(make_tls13_aad(total_len));
         payload.extend_from_chunks(&msg.payload);
         payload.extend_from_slice(&msg.typ.to_array());
@@ -223,6 +222,58 @@ impl MessageEncrypter for Tls13MessageEncrypter {
     fn encrypted_payload_len(&self, payload_len: usize) -> usize {
         payload_len + 1 + self.enc_key.algorithm().tag_len()
     }
+
+    fn encrypt_tcpls(
+        &mut self,
+        msg: OutboundPlainMessage,
+        seq: u64,
+        stream_id: u32,
+        tcpls_header: &TcplsHeader,
+        frame_header: Option<Frame>
+    ) -> Result<OutboundOpaqueMessage, Error> {
+        let enc_payload_len = self.encrypted_payload_len_tcpls(msg.payload.len(), frame_header);
+        let mut payload = PrefixedPayload::with_capacity_tcpls(enc_payload_len);
+        let total_len = TCPLS_HEADER_SIZE + enc_payload_len;
+
+        let nonce = aead::Nonce::assume_unique_for_key(Nonce::new(&self.iv, seq, stream_id).0);
+        let aad = aead::Aad::from(make_tls13_aad_tcpls(total_len, tcpls_header));
+        payload.extend_from_chunks(&msg.payload);
+        match frame_header {
+            Some(ref header) => {
+                let mut b = octets::OctetsMut::with_slice_at_offset(
+                    &mut payload.as_mut()[TCPLS_HEADER_SIZE..], msg.payload.len()
+                );
+                header.encode(&mut b).unwrap();
+                b.put_bytes(&msg.typ.to_array()).unwrap();
+                ()
+            },
+            None => {
+                payload.extend_from_slice(&msg.typ.to_array());
+                ()
+            },
+        }
+
+
+        self.enc_key
+            .seal_in_place_append_tag_tcpls(nonce, aad, &mut payload, TCPLS_HEADER_SIZE)
+            .map_err(|_| Error::EncryptError)?;
+
+        Ok(OutboundOpaqueMessage::new(
+            ContentType::ApplicationData,
+            // Note: all TLS 1.3 application data records use TLSv1_2 (0x0303) as the legacy record
+            // protocol version, see https://www.rfc-editor.org/rfc/rfc8446#section-5.1
+            ProtocolVersion::TLSv1_2,
+            payload,
+        ))
+    }
+
+    fn encrypted_payload_len_tcpls(&self, payload_len: usize, frame_header: Option<Frame>) -> usize {
+        let hdr_len =  match frame_header.as_ref() {
+            Some(_header) => STREAM_FRAME_HEADER_SIZE,
+            None => 0,
+        };
+        payload_len + hdr_len + 1 + self.enc_key.algorithm().tag_len()
+    }
 }
 
 impl MessageDecrypter for Tls13MessageDecrypter {
@@ -236,7 +287,7 @@ impl MessageDecrypter for Tls13MessageDecrypter {
             return Err(Error::DecryptError);
         }
 
-        let nonce = aead::Nonce::assume_unique_for_key(Nonce::new(&self.iv, seq).0);
+        let nonce = aead::Nonce::assume_unique_for_key(Nonce::new(&self.iv, seq, ).0);
         let aad = aead::Aad::from(make_tls13_aad(payload.len()));
         let plain_len = self
             .dec_key

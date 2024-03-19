@@ -369,7 +369,7 @@ impl CommonState {
 
 
         let em = self.record_layer.encrypt_outgoing(m);
-        self.queue_tls_message(em);
+        self.queue_message(em, id);
     }
 
     fn send_plain_non_buffering(&mut self, payload: OutboundChunks<'_>, limit: Limit) -> usize {
