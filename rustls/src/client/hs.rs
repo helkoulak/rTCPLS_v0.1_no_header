@@ -5,6 +5,7 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::ops::Deref;
+use std::prelude::rust_2021::ToString;
 
 use pki_types::ServerName;
 
@@ -35,7 +36,9 @@ use crate::msgs::handshake::{
 use crate::msgs::message::{Message, MessagePayload};
 use crate::msgs::persist;
 use crate::tls13::key_schedule::KeyScheduleEarly;
-use crate::SupportedCipherSuite;
+use crate::{NamedGroup, SupportedCipherSuite};
+use crate::common_state::Protocol::Tcpls;
+use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
 pub(super) type NextState<'a> = Box<dyn State<ClientConnectionData> + 'a>;
 pub(super) type NextStateOrError<'a> = Result<NextState<'a>, Error>;
@@ -205,14 +208,8 @@ fn emit_fake_client_hello(client_config: &Arc<ClientConfig>, common: &mut Common
 
     let mut exts = vec![
         ClientExtension::SupportedVersions(supported_versions),
-        ClientExtension::ECPointFormats(ECPointFormat::SUPPORTED.to_vec()),
-        ClientExtension::NamedGroups(
-            client_config
-                .kx_groups
-                .iter()
-                .map(|skxg| skxg.name)
-                .collect(),
-        ),
+        ClientExtension::EcPointFormats(ECPointFormat::SUPPORTED.to_vec()),
+        ClientExtension::NamedGroups(vec![NamedGroup::X25519]),
         ClientExtension::SignatureAlgorithms(
             client_config
                 .verifier

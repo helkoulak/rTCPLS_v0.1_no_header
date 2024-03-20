@@ -221,7 +221,7 @@ impl TcplsSession {
     pub fn stream_send(&mut self, str_id: u16, input: &[u8], fin: bool) -> Result<usize, Error> {
        let mut tls_conn = self.tls_conn.as_mut().unwrap();
         let buffered = tls_conn
-            .buffer_plaintext(input.into(), &mut tls_conn.sendable_plaintext, str_id, fin);
+            .buffer_plaintext(input.into(), tls_conn.get_sendable_plain_bufs(), str_id, fin);
         Ok(buffered)
     }
 

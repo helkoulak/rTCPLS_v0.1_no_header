@@ -6,6 +6,7 @@ use crate::error::Error;
 #[cfg(feature = "logging")]
 use crate::log::trace;
 use crate::msgs::message::{InboundPlainMessage, OutboundOpaqueMessage, OutboundPlainMessage};
+use crate::tcpls::frame::{Frame, TcplsHeader};
 use crate::tcpls::stream::{DEFAULT_STREAM_ID, StreamMap};
 
 static SEQ_SOFT_LIMIT: u64 = 0x16909E7; //(((2 as f64).powf(24.5) as i64) - 0xFFFF) as u64; //0xffff_ffff_ffff_0000u64;
@@ -119,10 +120,31 @@ impl RecordLayer {
     ) -> OutboundOpaqueMessage {
         debug_assert!(self.encrypt_state == DirectionState::Active);
         assert!(!self.encrypt_exhausted());
-        let seq = self.write_seq;
-        self.write_seq += 1;
+        let stream_id = self.stream_in_use;
+        let seq = self.streams.get(stream_id).unwrap().write_seq;
+        self.streams.get_mut(stream_id).unwrap().write_seq += 1;
         self.message_encrypter
             .encrypt(plain, seq)
+            .unwrap()
+    }
+
+    /// Encrypt a TLS message.
+    ///
+    /// `plain` is a TLS message we'd like to send.  This function
+    /// panics if the requisite keying material hasn't been established yet.
+    pub(crate) fn encrypt_outgoing_tcpls(
+        &mut self,
+        plain: OutboundPlainMessage,
+        tcpls_header: &TcplsHeader,
+        frame_header: Option<Frame>
+    ) -> OutboundOpaqueMessage {
+        debug_assert!(self.encrypt_state == DirectionState::Active);
+        assert!(!self.encrypt_exhausted());
+        let stream_id = self.stream_in_use;
+        let seq = self.streams.get(stream_id).unwrap().write_seq;
+        self.streams.get_mut(stream_id).unwrap().write_seq += 1;
+        self.message_encrypter
+            .encrypt_tcpls(plain, seq, stream_id as u32, tcpls_header, frame_header)
             .unwrap()
     }
 

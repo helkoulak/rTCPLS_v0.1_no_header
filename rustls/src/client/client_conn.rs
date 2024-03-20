@@ -151,7 +151,7 @@ pub trait ResolvesClientCert: fmt::Debug + Send + Sync {
 ///    ids or tickets, with a max of eight tickets per server.
 /// * [`ClientConfig::alpn_protocols`]: the default is empty -- no ALPN protocol is negotiated.
 /// * [`ClientConfig::key_log`]: key material is not logged.
-<<<<<<< HEAD
+
 #[derive(Clone)]
 
 ///
@@ -202,9 +202,7 @@ pub struct ClientConfig {
     pub enable_early_data: bool,
     /// exchange TCPLS extra client extensions if true
     pub enable_tcpls: bool,
-
-}
-
+    
     /// If set to `true`, requires the server to support the extended
     /// master secret extraction method defined in [RFC 7627].
     ///
@@ -404,6 +402,7 @@ impl Clone for ClientConfig {
             key_log: Arc::clone(&self.key_log),
             enable_secret_extraction: self.enable_secret_extraction,
             enable_early_data: self.enable_early_data,
+            enable_tcpls: true,
             #[cfg(feature = "tls12")]
             require_ems: self.require_ems,
             time_provider: Arc::clone(&self.time_provider),

@@ -320,7 +320,6 @@
     trivial_casts,
     trivial_numeric_casts,
     missing_docs,
->>>>>>> 5bd3300 (Add files of rustls v0.23.1)
     unreachable_pub,
     unused_import_braces,
     unused_extern_crates,
@@ -420,7 +419,6 @@ mod check;
 mod bs_debug;
 mod builder;
 mod enums;
-mod key;
 mod key_log;
 #[cfg(feature = "std")]
 mod key_log_file;

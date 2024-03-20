@@ -35,6 +35,7 @@ use crate::msgs::persist;
 use crate::sign::Signer;
 
 use crate::suites::{PartiallyExtractedSecrets, SupportedCipherSuite};
+use crate::tcpls::stream::DEFAULT_STREAM_ID;
 use crate::tls12::{self, ConnectionSecrets, Tls12CipherSuite};
 use crate::verify::{self, DigitallySignedStruct};
 

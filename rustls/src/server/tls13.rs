@@ -34,9 +34,10 @@ use crate::tls13::{
     construct_client_verify_message, construct_server_verify_message, Tls13CipherSuite,
 };
 use crate::{rand, verify};
+use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
 mod client_hello {
-    use std::prelude::rust_2024::ToString;
+    use std::prelude::rust_2021::ToString;
     use crate::AlertDescription::IllegalParameter;
     use super::*;
     use crate::crypto::SupportedKxGroup;
@@ -146,7 +147,7 @@ mod client_hello {
         ) -> hs::NextStateOrError<'static> {
             if client_hello.compression_methods.len() != 1 {
                 return Err(cx.common.send_fatal_alert(
-                    AlertDescription::IllegalParameter,
+                    IllegalParameter,
                     PeerMisbehaved::OfferedIncorrectCompressions,
                 ));
             }
@@ -164,7 +165,7 @@ mod client_hello {
 
             if client_hello.has_keyshare_extension_with_duplicates() {
                 return Err(cx.common.send_fatal_alert(
-                    AlertDescription::IllegalParameter,
+                    IllegalParameter,
                     PeerMisbehaved::OfferedDuplicateKeyShares,
                 ));
             }
@@ -176,7 +177,7 @@ mod client_hello {
 
                 return Err({
                     cx.common.send_fatal_alert(
-                        AlertDescription::IllegalParameter,
+                        IllegalParameter,
                         PeerMisbehaved::EarlyDataAttemptedInSecondClientHello,
                     )
                 });
@@ -196,7 +197,7 @@ mod client_hello {
 
                     if self.done_retry {
                         return Err(cx.common.send_fatal_alert(
-                            AlertDescription::IllegalParameter,
+                            IllegalParameter,
                             PeerMisbehaved::RefusedToFollowHelloRetryRequest,
                         ));
                     }
@@ -242,7 +243,7 @@ mod client_hello {
             if let Some(psk_offer) = client_hello.psk() {
                 if !client_hello.check_psk_ext_is_last() {
                     return Err(cx.common.send_fatal_alert(
-                        AlertDescription::IllegalParameter,
+                        IllegalParameter,
                         PeerMisbehaved::PskExtensionMustBeLast,
                     ));
                 }
@@ -268,7 +269,7 @@ mod client_hello {
                 if psk_offer.binders.len() != psk_offer.identities.len() {
 
                     return Err(cx.common.send_fatal_alert(
-                        AlertDescription::IllegalParameter,
+                        IllegalParameter,
                         PeerMisbehaved::PskExtensionWithMismatchedIdsAndBinders,
                     ));
                 }

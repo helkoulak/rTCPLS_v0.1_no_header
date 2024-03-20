@@ -1,5 +1,6 @@
-use std::io;
+use std::{io, vec};
 use std::io::Read;
+use std::prelude::rust_2021::Vec;
 use mio::net::TcpStream;
 use crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
 use crate::tcpls::stream::SimpleIdHashMap;

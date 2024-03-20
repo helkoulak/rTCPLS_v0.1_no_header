@@ -55,7 +55,7 @@ macro_rules! wrapped_payload(
             self.0.0.as_slice()
         }
     }
-    =
+
     impl Codec<'_> for $name {
         fn encode(&self, bytes: &mut Vec<u8>) {
             self.0.encode(bytes);
@@ -498,7 +498,7 @@ impl PartialEq for TcplsToken {
     }
 }
 
-impl Codec for TcplsToken {
+impl Codec<'_> for TcplsToken {
     fn encode(&self, bytes: &mut Vec<u8>) {
         debug_assert!(self.len <= 32);
         bytes.push(self.len as u8);

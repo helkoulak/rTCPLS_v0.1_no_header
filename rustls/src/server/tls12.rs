@@ -33,6 +33,7 @@ use crate::msgs::handshake::{
 use crate::msgs::message::{Message, MessagePayload};
 use crate::msgs::persist;
 use crate::suites::PartiallyExtractedSecrets;
+use crate::tcpls::stream::DEFAULT_STREAM_ID;
 use crate::tls12::{self, ConnectionSecrets, Tls12CipherSuite};
 use crate::verify;
 
@@ -49,6 +50,7 @@ mod client_hello {
         ServerKeyExchangeParams, ServerKeyExchangePayload,
     };
     use crate::sign;
+    use crate::tcpls::stream::DEFAULT_STREAM_ID;
     use crate::verify::DigitallySignedStruct;
 
     pub(in crate::server) struct CompleteClientHelloHandling {

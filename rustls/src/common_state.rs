@@ -25,6 +25,7 @@ use crate::unbuffered::{EncryptError, InsufficientSizeError};
 use crate::vecbuf::ChunkVecBuffer;
 use crate::{quic, record_layer};
 use crate::recvbuf::RecvBufMap;
+use crate::tcpls::frame::Frame;
 use crate::tcpls::outstanding_conn::OutstandingConnMap;
 use crate::tcpls::stream::{DEFAULT_STREAM_ID, SimpleIdHashMap};
 
@@ -59,7 +60,6 @@ pub struct CommonState {
 
     queued_key_update_message: Option<Vec<u8>>,
 
-    pub(crate) sendable_plaintext: PlainBufsMap,
     /// Protocol whose key schedule should be used. Unused for TLS < 1.3.
     pub(crate) protocol: Protocol,
     pub(crate) quic: quic::Quic,
@@ -93,7 +93,7 @@ impl CommonState {
             received_plaintext: ChunkVecBuffer::new(Some(DEFAULT_RECEIVED_PLAINTEXT_LIMIT)),
             conn_in_use: 0,
             queued_key_update_message: None,
-            sendable_plaintext: PlainBufsMap::default(),
+
             protocol: Protocol::Tcp,
             quic: quic::Quic::default(),
             enable_secret_extraction: false,
@@ -187,7 +187,7 @@ impl CommonState {
         msg: Message,
         mut state: Box<dyn State<Data>>,
         data: &mut Data,
-        sendable_plaintext: Option<&mut ChunkVecBuffer>,
+        sendable_plaintext: Option<&mut PlainBufsMap>,
     ) -> Result<Box<dyn State<Data>>, Error> {
         // For TLS1.2, outside of the handshake, send rejection alerts for
         // renegotiation requests.  These can occur any time.
@@ -341,7 +341,7 @@ impl CommonState {
             } else {
                 false
             };
-            self.send_single_fragment(m, DEFAULT_STREAM_ID, );
+            self.send_single_fragment(m, id, fin);
         }
 
         len
@@ -367,12 +367,27 @@ impl CommonState {
             return;
         }
 
+        let tcpls_header = self.record_layer
+            .streams
+            .get_mut(id)
+            .unwrap()
+            .build_header(m.payload.len() as u16);
 
-        let em = self.record_layer.encrypt_outgoing(m);
-        self.queue_message(em, id);
+        let stream_frame_header = match m.typ {
+            ContentType::ApplicationData => {
+                Some(Frame::Stream {
+                    length: m.payload.len() as u16,
+                    fin: fin.into(),
+                })
+            },
+            _ => None,
+        };
+
+        let em = self.record_layer.encrypt_outgoing_tcpls(m, &tcpls_header, stream_frame_header);
+        self.queue_message(em.encode(), id);
     }
 
-    fn send_plain_non_buffering(&mut self, payload: OutboundChunks<'_>, limit: Limit) -> usize {
+    fn send_plain_non_buffering(&mut self, payload: OutboundChunks<'_>, limit: Limit, id: u16) -> usize {
         debug_assert!(self.may_send_application_data);
         debug_assert!(self.record_layer.is_encrypting());
 
@@ -382,7 +397,7 @@ impl CommonState {
         }
 
 
-        self.send_appdata_encrypt(payload, limit, , false)
+        self.send_appdata_encrypt(payload, limit, id, false)
     }
 
     /// Mark the connection as ready to send application data.
@@ -408,15 +423,22 @@ impl CommonState {
 
     /// Send any buffered plaintext.  Plaintext is buffered if
     /// written during handshake.
-
-    fn flush_plaintext(&mut self, sendable_plaintext: &mut ChunkVecBuffer) {
+    fn flush_plaintext(&mut self) {
         if !self.may_send_application_data {
             return;
         }
 
+        if self.sendable_plaintext.plain_map.is_empty() {
+            return;
+        }
 
-        while let Some(buf) = sendable_plaintext.pop() {
-            self.send_plain_non_buffering(buf.as_slice().into(), Limit::No);
+        let keys: Vec<_> = self.sendable_plaintext.plain_map.keys().cloned().collect();
+
+        for key in keys   {
+            let mut stream = self.sendable_plaintext.plain_map.remove(&key).unwrap();
+            while let Some(buf) = stream.send_plain_buf.pop() {
+                self.send_plain(&buf, Limit::No, stream.id, false);
+            }
         }
     }
 
@@ -897,7 +919,7 @@ pub(crate) struct Context<'a, Data> {
 
     /// Buffered plaintext. This is `Some` if any plaintext was written during handshake and `None`
     /// otherwise.
-    pub(crate) sendable_plaintext: Option<&'a mut ChunkVecBuffer>,
+    pub(crate) sendable_plaintext: Option<&'a mut PlainBufsMap>,
 }
 
 /// Side of the connection.
@@ -922,6 +944,7 @@ impl Side {
 pub(crate) enum Protocol {
     Tcp,
     Quic,
+    Tcpls,
 }
 
 enum Limit {

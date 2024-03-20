@@ -3,6 +3,7 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
+use std::prelude::rust_2021::ToString;
 
 use pki_types::ServerName;
 use subtle::ConstantTimeEq;
@@ -47,6 +48,8 @@ use crate::tls13::{
 };
 use crate::verify::{self, DigitallySignedStruct};
 use crate::{crypto, KeyLog};
+use crate::Error::General;
+use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
 
 // Extensions we expect in plaintext in the ServerHello.

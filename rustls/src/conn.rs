@@ -6,7 +6,7 @@ use core::ops::{Deref, DerefMut};
 #[cfg(feature = "std")]
 use std::io;
 
-use crate::common_state::{CommonState, Context, IoState, State};
+use crate::common_state::{CommonState, Context, IoState, PlainBufsMap, State};
 use crate::enums::{AlertDescription, ContentType};
 use crate::error::{Error, PeerMisbehaved};
 #[cfg(feature = "logging")]
@@ -27,7 +27,7 @@ mod connection {
     use core::ops::{Deref, DerefMut};
     use std::io;
 
-    use crate::common_state::{CommonState, IoState};
+    use crate::common_state::{CommonState, IoState, PlainBufsMap};
     use crate::error::Error;
     use crate::msgs::message::OutboundChunks;
     use crate::suites::ExtractedSecrets;
@@ -58,8 +58,8 @@ mod connection {
         /// Writes TLS messages to `wr`.
         ///
         /// See [`ConnectionCommon::write_tls()`] for more information.
-        pub fn write_tls(&mut self, wr: &mut dyn io::Write) -> Result<usize, io::Error> {
-            self.sendable_tls.write_to(wr)
+        pub fn write_tls(&mut self, wr: &mut dyn io::Write, id: u16) -> Result<usize, io::Error> {
+            self.record_layer.streams.get_or_create(id).unwrap().send.write_to(wr)
         }
 
         /// Returns an object that allows reading plaintext.
@@ -85,6 +85,13 @@ mod connection {
             match self {
                 Self::Client(conn) => conn.process_new_packets(),
                 Self::Server(conn) => conn.process_new_packets(),
+            }
+        }
+
+        pub fn get_sendable_plain_bufs(&mut self) -> &mut PlainBufsMap {
+            match self {
+                Self::Client(conn) => &mut conn.sendable_plaintext,
+                Self::Server(conn) => &mut conn.sendable_plaintext,
             }
         }
 
@@ -375,6 +382,7 @@ impl ConnectionRandoms {
 pub struct ConnectionCommon<Data> {
     pub(crate) core: ConnectionCore<Data>,
     deframers_map: MessageDeframerMap,
+    pub(crate) sendable_plaintext: PlainBufsMap,
 }
 
 impl<Data> ConnectionCommon<Data> {
@@ -399,7 +407,7 @@ impl<Data> ConnectionCommon<Data> {
     #[inline]
     pub fn process_new_packets(&mut self) -> Result<IoState, Error> {
         self.core
-            .process_new_packets(self.deframers_map.get_or_create_def_vec_buff(self.conn_in_use as u64), self.sendable_plaintext)
+            .process_new_packets(self.deframers_map.get_or_create_def_vec_buff(self.conn_in_use as u64), &mut self.sendable_plaintext)
     }
 
     /// Derives key material from the agreed connection secrets.
@@ -490,9 +498,9 @@ impl<Data> ConnectionCommon<Data> {
     /// [`Connection::writer`]: crate::Connection::writer
     /// [`Connection::write_tls`]: crate::Connection::write_tls
     /// [`Connection::process_new_packets`]: crate::Connection::process_new_packets
-    pub fn set_buffer_limit(&mut self, limit: Option<usize>) {
-        self.sendable_plaintext.set_limit(limit);
-        self.sendable_tls.set_limit(limit);
+    pub fn set_buffer_limit(&mut self, limit: Option<usize>, id: u16) {
+        self.sendable_plaintext.get_or_create_plain_buf(id).unwrap().send_plain_buf.set_limit(limit);
+        self.record_layer.streams.get_or_create(id).unwrap().send.set_limit(limit);
     }
 }
 
@@ -668,6 +676,7 @@ impl<Data> ConnectionCommon<Data> {
 
     /// [`reader()`]: ConnectionCommon::reader
     pub fn read_tls(&mut self, rd: &mut dyn io::Read) -> Result<usize, io::Error> {
+        let active_conn = self.conn_in_use;
         if self.received_plaintext.is_full() {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
@@ -678,7 +687,7 @@ impl<Data> ConnectionCommon<Data> {
         let res = self
             .core
             .message_deframer
-            .read(rd, &mut self.deframer_buffer);
+            .read(rd, self.deframers_map.get_or_create_def_vec_buff(active_conn as u64));
         if let Ok(0) = res {
             self.has_seen_eof = true;
         }
@@ -769,7 +778,7 @@ impl<Data> ConnectionCore<Data> {
     pub(crate) fn process_new_packets(
         &mut self,
         deframer_buffer: &mut DeframerVecBuffer,
-        sendable_plaintext: &mut ChunkVecBuffer,
+        sendable_plaintext: &mut PlainBufsMap,
     ) -> Result<IoState, Error> {
         let mut state = match mem::replace(&mut self.state, Err(Error::HandshakeNotComplete)) {
             Ok(state) => state,
@@ -880,10 +889,9 @@ impl<Data> ConnectionCore<Data> {
 
     fn process_msg(
         &mut self,
-
         msg: InboundPlainMessage,
         state: Box<dyn State<Data>>,
-        sendable_plaintext: Option<&mut ChunkVecBuffer>,
+        sendable_plaintext: Option<&mut PlainBufsMap>,
     ) -> Result<Box<dyn State<Data>>, Error> {
         // Drop CCS messages during handshake in TLS1.3
         if msg.typ == ContentType::ChangeCipherSpec

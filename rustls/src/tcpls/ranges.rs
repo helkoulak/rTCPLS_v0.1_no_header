@@ -29,6 +29,7 @@ use std::ops::Range;
 
 use std::collections::BTreeMap;
 use std::collections::Bound;
+use std::prelude::rust_2021::Vec;
 
 use either::Either;
 use smallvec::SmallVec;

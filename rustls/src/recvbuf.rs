@@ -1,7 +1,8 @@
-use std::{cmp, io};
+use std::{cmp, io, vec};
 use std::collections::hash_map;
 use std::collections::hash_map::{Iter, IterMut};
 use std::io::Error;
+use std::prelude::rust_2021::Vec;
 use crate::tcpls::stream::{DEFAULT_BUFFER_LIMIT, SimpleIdHashMap, SimpleIdHashSet, StreamIter};
 
 /// This is the receive buffer of a stream
@@ -301,6 +302,7 @@ impl ReaderAppBufs {
 
 #[cfg(test)]
 mod test {
+    use std::vec;
     use crate::recvbuf::RecvBuf;
     use crate::tcpls::stream::DEFAULT_BUFFER_LIMIT;
     use crate::vecbuf::ChunkVecBuffer;
