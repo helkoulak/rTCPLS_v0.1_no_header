@@ -594,7 +594,8 @@ impl KeySchedule {
             .expander_for_okm(secret);
         let key = derive_traffic_key(expander.as_ref(), self.suite.aead_alg.key_len());
         let iv = derive_traffic_iv(expander.as_ref());
-        self.suite.aead_alg.decrypter(key, iv)
+        let header_decrypter = HeaderProtector::new( expander.as_ref(), self.suite.aead_alg.key_len());
+        self.suite.aead_alg.decrypter(key, iv, header_decrypter)
     }
 
     fn new_with_empty_secret(suite: &'static Tls13CipherSuite) -> Self {
