@@ -1,9 +1,12 @@
 use alloc::boxed::Box;
 use alloc::string::ToString;
 use core::fmt;
+use std::vec;
+use siphasher::sip::SipHasher;
 
 use zeroize::Zeroize;
-use ring::aead;
+use ring::{aead, hkdf};
+use crate::crypto::tls13::HkdfExpander;
 
 use crate::enums::{ContentType, ProtocolVersion};
 use crate::error::Error;
@@ -18,10 +21,10 @@ use crate::tcpls::frame::{Frame, STREAM_FRAME_HEADER_SIZE, TcplsHeader};
 /// Factory trait for building `MessageEncrypter` and `MessageDecrypter` for a TLS1.3 cipher suite.
 pub trait Tls13AeadAlgorithm: Send + Sync {
     /// Build a `MessageEncrypter` for the given key/iv.
-    fn encrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageEncrypter>;
+    fn encrypter(&self, key: AeadKey, iv: Iv, header_encrypter: HeaderProtector) -> Box<dyn MessageEncrypter>;
 
     /// Build a `MessageDecrypter` for the given key/iv.
-    fn decrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageDecrypter>;
+    fn decrypter(&self, key: AeadKey, iv: Iv, header_decrypter: HeaderProtector) -> Box<dyn MessageDecrypter>;
 
     /// The length of key in bytes required by `encrypter()` and `decrypter()`.
     fn key_len(&self) -> usize;
@@ -298,6 +301,80 @@ pub fn make_tls12_aad(
     out
 }
 
+
+
+pub(crate) struct HeaderProtector{
+    key: [u8;16],
+    sip_hasher: SipHasher
+}
+
+impl HeaderProtector {
+    pub(crate) fn new(expander: &dyn HkdfExpander, aead_key_len: usize) -> Self {
+
+        let mut derived_key= vec![0; aead_key_len]; // 16 or 32 bytes
+        expander.expand_slice(&[b"tcpls header protection"], derived_key.as_mut_slice()).unwrap();
+        let mut key = [0; 16];
+        key.copy_from_slice(&derived_key[..16]);
+        Self{
+            key,
+            sip_hasher: SipHasher::new_with_key(&key),
+        }
+    }
+
+    /// Adds TCPLS Header Protection.
+    ///
+    /// `input` references the calculated tag bytes
+    ///
+    /// `header` references the header slice of the encrypted TLS record
+    #[inline]
+    pub(crate) fn encrypt_in_place(
+        &mut self,
+        input: &[u8],
+        header: &mut [u8],
+    ) -> Result<(), Error> {
+        self.xor_in_place(input, header)
+    }
+
+    fn xor_in_place(
+        &mut self,
+        input: &[u8],
+        header: &mut [u8],
+    ) -> Result<(), Error> {
+        let out = self.sip_hasher.hash(input).to_be_bytes();
+        for i in 0..header.len() {
+            header[i] ^= out[i];
+        }
+        Ok(())
+    }
+
+
+    #[inline]
+    pub(crate) fn decrypt_in_output(
+        &mut self,
+        input: &[u8],
+        header: &[u8],
+    ) -> Result<[u8; 8], Error> {
+        self.xor_in_output(input, header)
+    }
+
+    fn xor_in_output(
+        &mut self,
+        input: &[u8],
+        header: & [u8],
+    ) -> Result<[u8; 8], Error> {
+        let mut out = self.sip_hasher.hash(input).to_be_bytes();
+        for i in 0..header.len() {
+            out[i] ^= header[i];
+        }
+        Ok(out)
+    }
+
+    pub(crate) fn calculate_hash(&mut self, input: &[u8]) -> [u8;8] {
+        self.sip_hasher.hash(input).to_be_bytes()
+    }
+
+}
+
 const TLS12_AAD_SIZE: usize = 8 + 1 + 2 + 2;
 
 /// A key for an AEAD algorithm.
@@ -365,6 +442,14 @@ impl MessageEncrypter for InvalidMessageEncrypter {
 
     fn encrypted_payload_len(&self, payload_len: usize) -> usize {
         payload_len
+    }
+
+    fn encrypt_tcpls(&mut self, msg: OutboundPlainMessage, seq: u64, stream_id: u32, tcpls_header: &TcplsHeader, frame_header: Option<Frame>) -> Result<OutboundOpaqueMessage, Error> {
+        todo!()
+    }
+
+    fn encrypted_payload_len_tcpls(&self, payload_len: usize, frame_header: Option<Frame>) -> usize {
+        todo!()
     }
 }
 

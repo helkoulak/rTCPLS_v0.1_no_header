@@ -3,7 +3,9 @@ use alloc::boxed::Box;
 use super::ring_like::hkdf::KeyType;
 use super::ring_like::{aead, hkdf, hmac};
 use crate::crypto;
-use crate::crypto::cipher::{make_tls13_aad, AeadKey, InboundOpaqueMessage, Iv, MessageDecrypter, MessageEncrypter, Nonce, Tls13AeadAlgorithm, UnsupportedOperationError, make_tls13_aad_tcpls};
+use crate::crypto::cipher::{make_tls13_aad, AeadKey, InboundOpaqueMessage, Iv,
+                            MessageDecrypter, MessageEncrypter, Nonce, Tls13AeadAlgorithm,
+                            UnsupportedOperationError, make_tls13_aad_tcpls, HeaderProtector};
 use crate::crypto::tls13::{Hkdf, HkdfExpander, OkmBlock, OutputLengthError};
 use crate::enums::{CipherSuite, ContentType, ProtocolVersion};
 use crate::error::Error;
@@ -76,12 +78,12 @@ pub(crate) static TLS13_AES_128_GCM_SHA256_INTERNAL: &Tls13CipherSuite = &Tls13C
 struct Chacha20Poly1305Aead(AeadAlgorithm);
 
 impl Tls13AeadAlgorithm for Chacha20Poly1305Aead {
-    fn encrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageEncrypter> {
-        self.0.encrypter(key, iv)
+    fn encrypter(&self, key: AeadKey, iv: Iv, header_protector: HeaderProtector) -> Box<dyn MessageEncrypter> {
+        self.0.encrypter(key, iv, header_protector)
     }
 
-    fn decrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageDecrypter> {
-        self.0.decrypter(key, iv)
+    fn decrypter(&self, key: AeadKey, iv: Iv, header_protector: HeaderProtector) -> Box<dyn MessageDecrypter> {
+        self.0.decrypter(key, iv, header_protector)
     }
 
     fn key_len(&self) -> usize {
@@ -104,12 +106,12 @@ impl Tls13AeadAlgorithm for Chacha20Poly1305Aead {
 struct Aes256GcmAead(AeadAlgorithm);
 
 impl Tls13AeadAlgorithm for Aes256GcmAead {
-    fn encrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageEncrypter> {
-        self.0.encrypter(key, iv)
+    fn encrypter(&self, key: AeadKey, iv: Iv, header_encrypter: HeaderProtector) -> Box<dyn MessageEncrypter> {
+        self.0.encrypter(key, iv, header_encrypter)
     }
 
-    fn decrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageDecrypter> {
-        self.0.decrypter(key, iv)
+    fn decrypter(&self, key: AeadKey, iv: Iv, header_decrypter: HeaderProtector) -> Box<dyn MessageDecrypter> {
+        self.0.decrypter(key, iv, header_decrypter)
     }
 
     fn key_len(&self) -> usize {
@@ -132,12 +134,12 @@ impl Tls13AeadAlgorithm for Aes256GcmAead {
 struct Aes128GcmAead(AeadAlgorithm);
 
 impl Tls13AeadAlgorithm for Aes128GcmAead {
-    fn encrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageEncrypter> {
-        self.0.encrypter(key, iv)
+    fn encrypter(&self, key: AeadKey, iv: Iv, header_encrypter: HeaderProtector) -> Box<dyn MessageEncrypter> {
+        self.0.encrypter(key, iv, header_encrypter)
     }
 
-    fn decrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageDecrypter> {
-        self.0.decrypter(key, iv)
+    fn decrypter(&self, key: AeadKey, iv: Iv, header_decrypter: HeaderProtector) -> Box<dyn MessageDecrypter> {
+        self.0.decrypter(key, iv, header_decrypter)
     }
 
     fn key_len(&self) -> usize {
@@ -161,19 +163,21 @@ impl Tls13AeadAlgorithm for Aes128GcmAead {
 struct AeadAlgorithm(&'static aead::Algorithm);
 
 impl AeadAlgorithm {
-    fn encrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageEncrypter> {
+    fn encrypter(&self, key: AeadKey, iv: Iv, header_encrypter: HeaderProtector) -> Box<dyn MessageEncrypter> {
         // safety: the caller arranges that `key` is `key_len()` in bytes, so this unwrap is safe.
         Box::new(Tls13MessageEncrypter {
             enc_key: aead::LessSafeKey::new(aead::UnboundKey::new(self.0, key.as_ref()).unwrap()),
             iv,
+            header_encrypter,
         })
     }
 
-    fn decrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageDecrypter> {
+    fn decrypter(&self, key: AeadKey, iv: Iv, header_decrypter: HeaderProtector) -> Box<dyn MessageDecrypter> {
         // safety: the caller arranges that `key` is `key_len()` in bytes, so this unwrap is safe.
         Box::new(Tls13MessageDecrypter {
             dec_key: aead::LessSafeKey::new(aead::UnboundKey::new(self.0, key.as_ref()).unwrap()),
             iv,
+            header_decrypter,
         })
     }
 
@@ -185,11 +189,13 @@ impl AeadAlgorithm {
 struct Tls13MessageEncrypter {
     enc_key: aead::LessSafeKey,
     iv: Iv,
+    header_encrypter: HeaderProtector,
 }
 
 struct Tls13MessageDecrypter {
     dec_key: aead::LessSafeKey,
     iv: Iv,
+    header_decrypter: HeaderProtector,
 }
 
 impl MessageEncrypter for Tls13MessageEncrypter {
@@ -231,18 +237,26 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         tcpls_header: &TcplsHeader,
         frame_header: Option<Frame>
     ) -> Result<OutboundOpaqueMessage, Error> {
-        let enc_payload_len = self.encrypted_payload_len_tcpls(msg.payload.len(), frame_header);
+        let (enc_payload_len, tag_len) = self.encrypted_payload_len_tcpls(msg.payload.len(), frame_header);
         let mut payload = PrefixedPayload::with_capacity_tcpls(enc_payload_len);
         let total_len = TCPLS_HEADER_SIZE + enc_payload_len;
 
+        let header_protecter = &mut self.header_encrypter;
         let nonce = aead::Nonce::assume_unique_for_key(Nonce::new(&self.iv, seq, stream_id).0);
         let aad = aead::Aad::from(make_tls13_aad_tcpls(total_len, tcpls_header));
+
+        //Write payload in output buffer
         payload.extend_from_chunks(&msg.payload);
+        let mut b = octets::OctetsMut::with_slice(payload.as_mut());
+        //Write TCPLS header
+        b.put_u32(tcpls_header.chunk_num).unwrap();
+        b.put_u16(tcpls_header.offset_step).unwrap();
+        b.put_u16(tcpls_header.stream_id).unwrap();
+
+        b.skip(msg.payload.len()).unwrap();
+        // Write frame header and type
         match frame_header {
             Some(ref header) => {
-                let mut b = octets::OctetsMut::with_slice_at_offset(
-                    &mut payload.as_mut()[TCPLS_HEADER_SIZE..], msg.payload.len()
-                );
                 header.encode(&mut b).unwrap();
                 b.put_bytes(&msg.typ.to_array()).unwrap();
                 ()
@@ -258,6 +272,16 @@ impl MessageEncrypter for Tls13MessageEncrypter {
             .seal_in_place_append_tag_tcpls(nonce, aad, &mut payload, TCPLS_HEADER_SIZE)
             .map_err(|_| Error::EncryptError)?;
 
+        // Take the LSBs of calculated tag as input sample for hash function
+        let sample = payload.rchunks(tag_len).next().unwrap();
+
+        let mut i = TCPLS_HEADER_OFFSET;
+        // Calculate hash(sample) XOR TCPLS header
+        for byte in header_protecter.calculate_hash(sample){
+            payload[i] ^= byte;
+            i += 1;
+        }
+
         Ok(OutboundOpaqueMessage::new(
             ContentType::ApplicationData,
             // Note: all TLS 1.3 application data records use TLSv1_2 (0x0303) as the legacy record
@@ -267,12 +291,13 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         ))
     }
 
-    fn encrypted_payload_len_tcpls(&self, payload_len: usize, frame_header: Option<Frame>) -> usize {
+    fn encrypted_payload_len_tcpls(&self, payload_len: usize, frame_header: Option<Frame>) -> (usize, usize) {
+        let tag_len = self.enc_key.algorithm().tag_len();
         let hdr_len =  match frame_header.as_ref() {
             Some(_header) => STREAM_FRAME_HEADER_SIZE,
             None => 0,
         };
-        payload_len + hdr_len + 1 + self.enc_key.algorithm().tag_len()
+        (payload_len + hdr_len + 1 + tag_len, tag_len)
     }
 }
 
@@ -378,3 +403,5 @@ impl KeyType for Len {
         self.0
     }
 }
+
+const TCPLS_HEADER_OFFSET: usize = 5;

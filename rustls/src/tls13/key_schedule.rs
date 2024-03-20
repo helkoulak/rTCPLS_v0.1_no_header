@@ -3,7 +3,7 @@ use alloc::boxed::Box;
 use alloc::string::ToString;
 
 use crate::common_state::{CommonState, Side};
-use crate::crypto::cipher::{AeadKey, Iv, MessageDecrypter};
+use crate::crypto::cipher::{AeadKey, HeaderProtector, Iv, MessageDecrypter};
 use crate::crypto::tls13::{expand, Hkdf, HkdfExpander, OkmBlock, OutputLengthError};
 use crate::crypto::{hash, hmac, ActiveKeyExchange};
 use crate::error::Error;
@@ -573,10 +573,10 @@ impl KeySchedule {
             .expander_for_okm(secret);
         let key = derive_traffic_key(expander.as_ref(), self.suite.aead_alg.key_len());
         let iv = derive_traffic_iv(expander.as_ref());
-
+        let header_encrypter = HeaderProtector::new( expander.as_ref(), self.suite.aead_alg.key_len());
         common
             .record_layer
-            .set_message_encrypter(self.suite.aead_alg.encrypter(key, iv));
+            .set_message_encrypter(self.suite.aead_alg.encrypter(key, iv, header_encrypter));
     }
 
     fn set_decrypter(&self, secret: &OkmBlock, common: &mut CommonState) {
