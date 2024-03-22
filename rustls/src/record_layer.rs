@@ -240,7 +240,7 @@ impl RecordLayer {
     /// Returns the number of remaining write sequences
     pub(crate) fn remaining_write_seq(&self) -> Option<NonZeroU64> {
         SEQ_SOFT_LIMIT
-            .checked_sub(self.write_seq)
+            .checked_sub(self.streams.get(DEFAULT_STREAM_ID).unwrap().write_seq)
             .and_then(NonZeroU64::new)
     }
 

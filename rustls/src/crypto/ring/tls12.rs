@@ -14,6 +14,7 @@ use crate::msgs::message::{
     InboundPlainMessage, OutboundOpaqueMessage, OutboundPlainMessage, PrefixedPayload,
 };
 use crate::suites::{CipherSuiteCommon, ConnectionTrafficSecrets, SupportedCipherSuite};
+use crate::tcpls::frame::{Frame, TcplsHeader};
 use crate::tls12::Tls12CipherSuite;
 
 /// The TLS1.2 ciphersuite TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256.
@@ -288,7 +289,7 @@ impl MessageEncrypter for GcmMessageEncrypter {
         let total_len = self.encrypted_payload_len(msg.payload.len());
         let mut payload = PrefixedPayload::with_capacity(total_len);
 
-        let nonce = aead::Nonce::assume_unique_for_key(Nonce::new(&self.iv, seq, ).0);
+        let nonce = aead::Nonce::assume_unique_for_key(Nonce::new(&self.iv, seq, 0).0);
         let aad = aead::Aad::from(make_tls12_aad(seq, msg.typ, msg.version, msg.payload.len()));
         payload.extend_from_slice(&nonce.as_ref()[4..]);
         payload.extend_from_chunks(&msg.payload);
@@ -303,6 +304,14 @@ impl MessageEncrypter for GcmMessageEncrypter {
 
     fn encrypted_payload_len(&self, payload_len: usize) -> usize {
         payload_len + GCM_EXPLICIT_NONCE_LEN + self.enc_key.algorithm().tag_len()
+    }
+
+    fn encrypt_tcpls(&mut self, msg: OutboundPlainMessage, seq: u64, stream_id: u32, tcpls_header: &TcplsHeader, frame_header: Option<Frame>) -> Result<OutboundOpaqueMessage, Error> {
+        todo!()
+    }
+
+    fn encrypted_payload_len_tcpls(&self, payload_len: usize, frame_header: Option<Frame>) -> (usize, usize) {
+        todo!()
     }
 }
 
@@ -336,7 +345,7 @@ impl MessageDecrypter for ChaCha20Poly1305MessageDecrypter {
             return Err(Error::DecryptError);
         }
 
-        let nonce = aead::Nonce::assume_unique_for_key(Nonce::new(&self.dec_offset, seq, ).0);
+        let nonce = aead::Nonce::assume_unique_for_key(Nonce::new(&self.dec_offset, seq, 0).0);
         let aad = aead::Aad::from(make_tls12_aad(
             seq,
             msg.typ,
@@ -369,7 +378,7 @@ impl MessageEncrypter for ChaCha20Poly1305MessageEncrypter {
         let total_len = self.encrypted_payload_len(msg.payload.len());
         let mut payload = PrefixedPayload::with_capacity(total_len);
 
-        let nonce = aead::Nonce::assume_unique_for_key(Nonce::new(&self.enc_offset, seq, ).0);
+        let nonce = aead::Nonce::assume_unique_for_key(Nonce::new(&self.enc_offset, seq, 0).0);
         let aad = aead::Aad::from(make_tls12_aad(seq, msg.typ, msg.version, msg.payload.len()));
         payload.extend_from_chunks(&msg.payload);
 
@@ -382,6 +391,14 @@ impl MessageEncrypter for ChaCha20Poly1305MessageEncrypter {
 
     fn encrypted_payload_len(&self, payload_len: usize) -> usize {
         payload_len + self.enc_key.algorithm().tag_len()
+    }
+
+    fn encrypt_tcpls(&mut self, msg: OutboundPlainMessage, seq: u64, stream_id: u32, tcpls_header: &TcplsHeader, frame_header: Option<Frame>) -> Result<OutboundOpaqueMessage, Error> {
+        todo!()
+    }
+
+    fn encrypted_payload_len_tcpls(&self, payload_len: usize, frame_header: Option<Frame>) -> (usize, usize) {
+        todo!()
     }
 }
 

@@ -244,7 +244,8 @@ pub enum PeerMisbehaved {
     WrongGroupForKeyShare,
     TcplsJoinExtensionNotFound,
     EmptyTcplsJoinExtension,
-    InvalidTcplsJoinToken
+    InvalidTcplsJoinToken,
+    InvalidTcplsTokensExtension
 }
 
 impl From<PeerMisbehaved> for Error {

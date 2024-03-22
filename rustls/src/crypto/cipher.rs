@@ -5,7 +5,6 @@ use std::vec;
 use siphasher::sip::SipHasher;
 
 use zeroize::Zeroize;
-use ring::{aead, hkdf};
 use crate::crypto::tls13::HkdfExpander;
 
 use crate::enums::{ContentType, ProtocolVersion};
@@ -16,7 +15,7 @@ pub use crate::msgs::message::{
     OutboundOpaqueMessage, OutboundPlainMessage, PlainMessage, PrefixedPayload,
 };
 use crate::suites::ConnectionTrafficSecrets;
-use crate::tcpls::frame::{Frame, STREAM_FRAME_HEADER_SIZE, TcplsHeader};
+use crate::tcpls::frame::{Frame, TcplsHeader};
 
 /// Factory trait for building `MessageEncrypter` and `MessageDecrypter` for a TLS1.3 cipher suite.
 pub trait Tls13AeadAlgorithm: Send + Sync {
@@ -170,7 +169,7 @@ pub trait MessageEncrypter: Send + Sync {
         tcpls_header: &TcplsHeader,
         frame_header: Option<Frame>
     ) -> Result<OutboundOpaqueMessage, Error>;
-    fn encrypted_payload_len_tcpls(&self, payload_len: usize, frame_header: Option<Frame>) -> usize;
+    fn encrypted_payload_len_tcpls(&self, payload_len: usize, frame_header: Option<Frame>) -> (usize, usize);
 }
 
 impl dyn MessageEncrypter {
@@ -229,7 +228,7 @@ impl Nonce {
     pub fn new(iv: &Iv, seq: u64, stream_id: u32) -> Self {
         let mut nonce = Self([0u8; NONCE_LEN]);
         codec::put_u64(seq, &mut nonce.0[4..]);
-        codec::put_u32(stream_id,&mut nonce[..4]);
+        codec::put_u32(stream_id,&mut nonce.0[..4]);
         nonce
             .0
             .iter_mut()
@@ -448,7 +447,7 @@ impl MessageEncrypter for InvalidMessageEncrypter {
         todo!()
     }
 
-    fn encrypted_payload_len_tcpls(&self, payload_len: usize, frame_header: Option<Frame>) -> usize {
+    fn encrypted_payload_len_tcpls(&self, payload_len: usize, frame_header: Option<Frame>) -> (usize, usize) {
         todo!()
     }
 }

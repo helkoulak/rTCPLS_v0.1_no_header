@@ -273,12 +273,12 @@ impl MessageEncrypter for Tls13MessageEncrypter {
             .map_err(|_| Error::EncryptError)?;
 
         // Take the LSBs of calculated tag as input sample for hash function
-        let sample = payload.rchunks(tag_len).next().unwrap();
+        let sample = payload.as_mut_tcpls().rchunks(tag_len).next().unwrap();
 
         let mut i = TCPLS_HEADER_OFFSET;
         // Calculate hash(sample) XOR TCPLS header
         for byte in header_protecter.calculate_hash(sample){
-            payload[i] ^= byte;
+            payload.as_mut_tcpls()[i] ^= byte;
             i += 1;
         }
 
@@ -312,7 +312,7 @@ impl MessageDecrypter for Tls13MessageDecrypter {
             return Err(Error::DecryptError);
         }
 
-        let nonce = aead::Nonce::assume_unique_for_key(Nonce::new(&self.iv, seq, ).0);
+        let nonce = aead::Nonce::assume_unique_for_key(Nonce::new(&self.iv, seq, 0).0);
         let aad = aead::Aad::from(make_tls13_aad(payload.len()));
         let plain_len = self
             .dec_key

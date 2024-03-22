@@ -14,6 +14,7 @@ use crate::msgs::codec;
 use crate::msgs::message::MAX_WIRE_SIZE;
 use crate::msgs::message::{InboundOpaqueMessage, InboundPlainMessage, MessageError};
 use crate::record_layer::{Decrypted, RecordLayer};
+use crate::recvbuf::RecvBufMap;
 
 use crate::tcpls::stream::SimpleIdHashMap;
 
@@ -46,6 +47,7 @@ impl MessageDeframer {
         record_layer: &mut RecordLayer,
         negotiated_version: Option<ProtocolVersion>,
         buffer: &mut DeframerSliceBuffer<'b>,
+        app_buffers: &mut RecvBufMap,
     ) -> Result<Option<Deframed<'b>>, Error> {
         if let Some(last_err) = self.last_error.clone() {
             return Err(last_err);
@@ -1056,7 +1058,7 @@ mod tests {
             let mut deframer_buffer = self.buffer.borrow();
             let err = self
                 .inner
-                .pop(record_layer, negotiated_version, &mut deframer_buffer)
+                .pop(record_layer, negotiated_version, &mut deframer_buffer, &mut RecvBufMap::new())
                 .unwrap_err();
             let discard = deframer_buffer.pending_discard();
             self.buffer.discard(discard);
@@ -1071,7 +1073,7 @@ mod tests {
             let mut deframer_buffer = self.buffer.borrow();
             let m = self
                 .inner
-                .pop(record_layer, negotiated_version, &mut deframer_buffer)
+                .pop(record_layer, negotiated_version, &mut deframer_buffer, &mut RecvBufMap::default())
                 .unwrap()
                 .unwrap()
                 .message

@@ -11,6 +11,8 @@ use crate::client::ClientConnectionData;
 use crate::msgs::deframer::DeframerSliceBuffer;
 use crate::server::ServerConnectionData;
 use crate::Error;
+use crate::recvbuf::RecvBufMap;
+use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
 impl UnbufferedConnectionCommon<ClientConnectionData> {
     /// Processes the TLS records in `incoming_tls` buffer until a new [`UnbufferedStatus`] is
@@ -45,6 +47,7 @@ impl<Data> UnbufferedConnectionCommon<Data> {
         mut check: impl FnMut(&mut Self) -> Option<T>,
         execute: impl FnOnce(&'c mut Self, &'i mut [u8], T) -> ConnectionState<'c, 'i, Data>,
     ) -> UnbufferedStatus<'c, 'i, Data> {
+        let mut app_bufs = RecvBufMap::new();
         let mut buffer = DeframerSliceBuffer::new(incoming_tls);
 
         let (discard, state) = loop {
@@ -67,7 +70,11 @@ impl<Data> UnbufferedConnectionCommon<Data> {
             if let Some(chunk) = self
                 .core
                 .common_state
-                .sendable_tls
+                .record_layer
+                .streams
+                .get_or_create(DEFAULT_STREAM_ID)
+                .unwrap()
+                .send
                 .pop()
             {
                 break (
@@ -76,7 +83,7 @@ impl<Data> UnbufferedConnectionCommon<Data> {
                 );
             }
 
-            let deframer_output = match self.core.deframe(None, &mut buffer) {
+            let deframer_output = match self.core.deframe(None, &mut buffer, &mut app_bufs) {
                 Err(err) => {
                     return UnbufferedStatus {
                         discard: buffer.pending_discard(),

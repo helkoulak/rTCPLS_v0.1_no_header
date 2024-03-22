@@ -161,6 +161,9 @@ impl CommonState {
             Some(&self.tcpls_tokens)
         } else { None }
     }
+    pub(crate) fn get_next_tcpls_token(&mut self) -> Option<TcplsToken> {
+        self.tcpls_tokens.pop()
+    }
     pub fn next_tcpls_token(&mut self) -> Option<TcplsToken> {
         self.get_next_tcpls_token()
     }
@@ -326,13 +329,14 @@ impl CommonState {
             fin = false;
         }
 
-        let (iter, mut count) = self
+        let iter = self
             .message_fragmenter
             .fragment_payload(
                 ContentType::ApplicationData,
                 ProtocolVersion::TLSv1_2,
                 payload.split_at(len).0,
             );
+        let mut count = iter.len();
         for m in iter {
             count -= 1;
             //consider flag fin when reaching last chunk
@@ -405,7 +409,7 @@ impl CommonState {
     /// Also flush `sendable_plaintext` if it is `Some`.  
     pub(crate) fn start_outgoing_traffic(
         &mut self,
-        sendable_plaintext: &mut Option<&mut ChunkVecBuffer>,
+        sendable_plaintext: &mut Option<&mut PlainBufsMap>,
     ) {
         self.may_send_application_data = true;
         if let Some(sendable_plaintext) = sendable_plaintext {
@@ -416,28 +420,28 @@ impl CommonState {
     /// Mark the connection as ready to send and receive application data.
     ///
     /// Also flush `sendable_plaintext` if it is `Some`.  
-    pub(crate) fn start_traffic(&mut self, sendable_plaintext: &mut Option<&mut ChunkVecBuffer>) {
+    pub(crate) fn start_traffic(&mut self, sendable_plaintext: &mut Option<&mut PlainBufsMap>) {
         self.may_receive_application_data = true;
         self.start_outgoing_traffic(sendable_plaintext);
     }
 
     /// Send any buffered plaintext.  Plaintext is buffered if
     /// written during handshake.
-    fn flush_plaintext(&mut self) {
+    fn flush_plaintext(&mut self, sendable_plaintext: &mut PlainBufsMap) {
         if !self.may_send_application_data {
             return;
         }
 
-        if self.sendable_plaintext.plain_map.is_empty() {
+        if sendable_plaintext.plain_map.is_empty() {
             return;
         }
 
-        let keys: Vec<_> = self.sendable_plaintext.plain_map.keys().cloned().collect();
+        let keys: Vec<_> = sendable_plaintext.plain_map.keys().cloned().collect();
 
         for key in keys   {
-            let mut stream = self.sendable_plaintext.plain_map.remove(&key).unwrap();
+            let mut stream = sendable_plaintext.plain_map.remove(&key).unwrap();
             while let Some(buf) = stream.send_plain_buf.pop() {
-                self.send_plain(&buf, Limit::No, stream.id, false);
+                self.send_plain(buf.as_slice().into(), Limit::No, Some(sendable_plaintext), stream.id, false);
             }
         }
     }
@@ -445,7 +449,7 @@ impl CommonState {
     // Put m into sendable_tls for writing.
 
     fn queue_tls_message(&mut self, m: OutboundOpaqueMessage) {
-        self.sendable_tls.append(m.encode());
+        self.record_layer.streams.get_or_create(DEFAULT_STREAM_ID).unwrap().send.append(m.encode());
     }
 
     /// Send a raw TLS message, fragmenting it if needed.
@@ -556,7 +560,7 @@ impl CommonState {
     ) -> Error {
         debug_assert!(!self.sent_fatal_alert);
         let m = Message::build_alert(AlertLevel::Fatal, desc);
-        self.send_msg(m, self.record_layer.is_encrypting());
+        self.send_msg(m, self.record_layer.is_encrypting(), DEFAULT_STREAM_ID);
         self.sent_fatal_alert = true;
         err.into()
     }
@@ -599,7 +603,7 @@ impl CommonState {
 
     fn send_warning_alert_no_log(&mut self, desc: AlertDescription) {
         let m = Message::build_alert(AlertLevel::Warning, desc);
-        self.send_msg(m, self.record_layer.is_encrypting());
+        self.send_msg(m, self.record_layer.is_encrypting(), DEFAULT_STREAM_ID);
     }
 
     fn check_required_size<'a>(
@@ -731,8 +735,9 @@ impl CommonState {
             .build_header(message.payload.bytes().len() as u16);
         self.queued_key_update_message =
             Some(self
-                .record_layer
-                .encrypt_outgoing_zc(message.borrow(), header, None)
+                     .record_layer
+                     .encrypt_outgoing_tcpls(message.borrow_outbound(), header, None)
+                     .encode(),
             );
     }
 }
@@ -752,7 +757,7 @@ impl CommonState {
         fin: bool,
     ) -> usize {
         self.perhaps_write_key_update();
-        self.send_plain(payload, Limit::Yes, sendable_plaintext, id, fin)
+        self.send_plain(payload, Limit::Yes, Some(sendable_plaintext), id, fin)
     }
 
     pub(crate) fn send_early_plaintext(&mut self, data: &[u8], id: u16) -> usize {
@@ -776,7 +781,7 @@ impl CommonState {
         &mut self,
         payload: OutboundChunks<'_>,
         limit: Limit,
-        sendable_plaintext: &mut PlainBufsMap,
+        sendable_plaintext: Option<&mut PlainBufsMap>,
         id: u16,
         fin: bool,
     ) -> usize {
@@ -785,11 +790,13 @@ impl CommonState {
             // plaintext to send once we do.
             let len = match limit {
                 Limit::Yes => sendable_plaintext
+                    .expect("Sendable plaintext map not provided")
                     .get_or_create_plain_buf(id)
                     .unwrap()
                     .send_plain_buf
                     .append_limited_copy(payload),
                 Limit::No => sendable_plaintext
+                    .expect("Sendable plaintext map not provided")
                     .get_or_create_plain_buf(id)
                     .unwrap()
                     .send_plain_buf
@@ -798,7 +805,7 @@ impl CommonState {
             return len;
         }
 
-        self.send_plain_non_buffering(payload, limit)
+        self.send_plain_non_buffering(payload, limit, id)
     }
 
     pub(crate) fn perhaps_write_key_update(&mut self) {

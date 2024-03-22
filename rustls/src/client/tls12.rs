@@ -521,7 +521,7 @@ fn emit_certificate(
     };
 
     transcript.add_message(&cert);
-    common.send_msg(cert, false);
+    common.send_msg(cert, false, DEFAULT_STREAM_ID);
 }
 
 fn emit_client_kx(

@@ -74,13 +74,6 @@ impl ChunkVecBuffer {
     pub(crate)  fn shuffle_records(&mut self, n: usize) {
         self.chunks.rotate_left(n)
     }
-    #[inline]
-    pub(crate)  fn is_full(&self) -> bool {
-        self.limit
-            .map(|limit| self.len() > limit)
-            .unwrap_or_default()
-    }
-
 
     /// How many bytes we're storing
     pub(crate) fn len(&self) -> usize {

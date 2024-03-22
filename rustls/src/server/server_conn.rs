@@ -531,8 +531,10 @@ mod connection {
     use crate::common_state::{CommonState, Context, Side};
     use crate::conn::{ConnectionCommon, ConnectionCore};
     use crate::error::Error;
+    use crate::recvbuf::RecvBufMap;
     use crate::server::hs;
     use crate::suites::ExtractedSecrets;
+    use crate::tcpls::stream::DEFAULT_STREAM_ID;
     use crate::vecbuf::ChunkVecBuffer;
 
     /// Allows reading of early data in resumed TLS1.3 connections.
@@ -784,6 +786,7 @@ mod connection {
         /// application should call `alert.write()` to send the alert to the client. It should
         /// not call `accept()` again.
         pub fn accept(&mut self) -> Result<Option<Accepted>, (Error, AcceptedAlert)> {
+            let mut app_buffers = RecvBufMap::new();
             let mut connection = match self.inner.take() {
                 Some(conn) => conn,
                 None => {
@@ -794,7 +797,7 @@ mod connection {
                 }
             };
 
-            let message = match connection.first_handshake_message() {
+            let message = match connection.first_handshake_message(&mut app_buffers) {
                 Ok(Some(msg)) => msg,
                 Ok(None) => {
                     self.inner = Some(connection);
@@ -838,7 +841,7 @@ mod connection {
 
     impl From<ConnectionCommon<ServerConnectionData>> for AcceptedAlert {
         fn from(conn: ConnectionCommon<ServerConnectionData>) -> Self {
-            Self(conn.core.common_state.sendable_tls)
+            Self(conn.core.common_state.record_layer.streams.get(DEFAULT_STREAM_ID).unwrap().send)
         }
     }
 

@@ -21,9 +21,6 @@ use crate::log::trace;
 use crate::msgs::enums::NamedGroup;
 use crate::msgs::handshake::ClientExtension;
 use crate::msgs::persist;
-
-use crate::tcpls::stream::DEFAULT_STREAM_ID;
-
 use crate::suites::SupportedCipherSuite;
 #[cfg(feature = "std")]
 use crate::time_provider::DefaultTimeProvider;
@@ -152,7 +149,6 @@ pub trait ResolvesClientCert: fmt::Debug + Send + Sync {
 /// * [`ClientConfig::alpn_protocols`]: the default is empty -- no ALPN protocol is negotiated.
 /// * [`ClientConfig::key_log`]: key material is not logged.
 
-#[derive(Clone)]
 
 ///
 /// [`RootCertStore`]: crate::RootCertStore

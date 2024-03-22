@@ -164,6 +164,7 @@ impl ConfigBuilder<ClientConfig, WantsClientCert> {
 
             enable_secret_extraction: false,
             enable_early_data: false,
+            enable_tcpls: true,
             #[cfg(feature = "tls12")]
             require_ems: cfg!(feature = "fips"),
             time_provider: self.state.time_provider,

@@ -122,7 +122,7 @@ impl TcplsSession {
         let mut ch_payload = get_sample_ch_payload();
 
         //Get next available token and push TcplsJoin Extension in ch payload
-        let tcpls_token = match client_conn.get_next_tcpls_token() {
+        let tcpls_token = match client_conn.next_tcpls_token() {
             Some(token) => token,
             None => return Err(Error::General("No tcpls token found".to_string())),
         };
@@ -262,7 +262,7 @@ impl TcplsSession {
 
                 sent = match stream.send.write_to(socket) {
                     Ok(sent) => sent,
-                    (_Error) => return Err(Error::General("Data sending on socket failed".to_string())),
+                    _Error => return Err(Error::General("Data sending on socket failed".to_string())),
 
                 };
 
@@ -326,7 +326,7 @@ impl TcplsSession {
             .get_mut(&id)
             .unwrap().used;
 
-        let mut rd = codec::ReaderMut::init(&self.tls_conn.as_mut()
+        let mut rd = codec::ReaderMut::init(&mut self.tls_conn.as_mut()
             .unwrap()
             .outstanding_tcp_conns
             .as_mut_ref()
@@ -355,7 +355,7 @@ impl TcplsSession {
             return Err(Error::InvalidMessage(InvalidContentType))
         }
 
-        let msg = Message::try_from(m).unwrap();
+        let msg = Message::try_from(m.into_plain_message()).unwrap();
 
         //Validate token received and send fake sh
         match self.tls_conn.as_ref().unwrap().side {
@@ -417,7 +417,7 @@ impl TcplsSession {
         let random: [u8; 32] = rng.gen();
         let mut extensions = Vec::new();
 
-        let kse = client_hello.get_keyshare_extension().unwrap();
+        let kse = client_hello.keyshare_extension().unwrap();
         extensions.push(ServerExtension::KeyShare(kse[0].clone()));
         extensions.push(ServerExtension::SupportedVersions(ProtocolVersion::TLSv1_3));
 
@@ -450,7 +450,7 @@ impl TcplsSession {
     fn process_fake_client_hello<'a>(
         &mut self,
         m: &'a Message,
-    ) -> Result<(&'a ClientHelloPayload), Error>{
+    ) -> Result<&'a ClientHelloPayload, Error>{
         let client_hello =
             require_handshake_msg!(m, HandshakeType::ClientHello, HandshakePayload::ClientHello)?;
         trace!("we got a clienthello {:?}", client_hello);

@@ -369,7 +369,7 @@ mod client_hello {
         trace!("sending server hello {:?}", sh);
         transcript.add_message(&sh);
 
-        cx.common.send_msg(sh, false);
+        cx.common.send_msg(sh, false, DEFAULT_STREAM_ID);
         Ok(ep.send_ticket)
     }
 

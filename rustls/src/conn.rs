@@ -16,7 +16,6 @@ use crate::msgs::deframer::{Deframed, DeframerSliceBuffer, DeframerVecBuffer, Me
 use crate::msgs::handshake::Random;
 use crate::msgs::message::{InboundPlainMessage, Message, MessagePayload};
 use crate::suites::{ExtractedSecrets, PartiallyExtractedSecrets};
-use crate::vecbuf::ChunkVecBuffer;
 
 pub(crate) mod unbuffered;
 
@@ -33,6 +32,7 @@ mod connection {
     use crate::suites::ExtractedSecrets;
     use crate::vecbuf::ChunkVecBuffer;
     use crate::ConnectionCommon;
+    use crate::recvbuf::RecvBufMap;
     use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
     /// A client or server connection.
@@ -81,10 +81,10 @@ mod connection {
         /// Processes any new packets read by a previous call to [`Connection::read_tls`].
         ///
         /// See [`ConnectionCommon::process_new_packets()`] for more information.
-        pub fn process_new_packets(&mut self) -> Result<IoState, Error> {
+        pub fn process_new_packets(&mut self, app_buffers: &mut RecvBufMap) -> Result<IoState, Error> {
             match self {
-                Self::Client(conn) => conn.process_new_packets(),
-                Self::Server(conn) => conn.process_new_packets(),
+                Self::Client(conn) => conn.process_new_packets(app_buffers),
+                Self::Server(conn) => conn.process_new_packets(app_buffers),
             }
         }
 
@@ -113,14 +113,14 @@ mod connection {
         /// This function uses `io` to complete any outstanding IO for this connection.
         ///
         /// See [`ConnectionCommon::complete_io()`] for more information.
-        pub fn complete_io<T>(&mut self, io: &mut T) -> Result<(usize, usize), io::Error>
+        pub fn complete_io<T>(&mut self, io: &mut T, recv_map: Option<&mut RecvBufMap>) -> Result<(usize, usize), io::Error>
         where
             Self: Sized,
             T: io::Read + io::Write,
         {
             match self {
-                Self::Client(conn) => conn.complete_io(io),
-                Self::Server(conn) => conn.complete_io(io),
+                Self::Client(conn) => conn.complete_io(io, recv_map),
+                Self::Server(conn) => conn.complete_io(io, recv_map),
             }
         }
 
@@ -136,10 +136,10 @@ mod connection {
         /// Sets a limit on the internal buffers
         ///
         /// See [`ConnectionCommon::set_buffer_limit()`] for more information.
-        pub fn set_buffer_limit(&mut self, limit: Option<usize>) {
+        pub fn set_buffer_limit(&mut self, limit: Option<usize>, id: u16) {
             match self {
-                Self::Client(client) => client.set_buffer_limit(limit),
-                Self::Server(server) => server.set_buffer_limit(limit),
+                Self::Client(client) => client.set_buffer_limit(limit, id),
+                Self::Server(server) => server.set_buffer_limit(limit, id),
             }
         }
     }
@@ -344,7 +344,7 @@ https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
             Ok(self
                 .core
                 .common_state
-                .buffer_plaintext(payload, &mut self.sendable_plaintext))
+                .buffer_plaintext(payload, &mut self.sendable_plaintext, DEFAULT_STREAM_ID, false))
         }
 
         fn flush(&mut self) -> io::Result<()> {
@@ -355,6 +355,7 @@ https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
 
 #[cfg(feature = "std")]
 pub use connection::{Connection, Reader, Writer};
+use crate::recvbuf::RecvBufMap;
 use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
 #[derive(Debug)]
@@ -405,9 +406,10 @@ impl<Data> ConnectionCommon<Data> {
     /// [`read_tls`]: Connection::read_tls
     /// [`process_new_packets`]: Connection::process_new_packets
     #[inline]
-    pub fn process_new_packets(&mut self) -> Result<IoState, Error> {
+    pub fn process_new_packets(&mut self, app_buffers: &mut RecvBufMap) -> Result<IoState, Error> {
         self.core
-            .process_new_packets(self.deframers_map.get_or_create_def_vec_buff(self.conn_in_use as u64), &mut self.sendable_plaintext)
+            .process_new_packets(self.deframers_map.get_or_create_def_vec_buff(self.conn_in_use as u64),
+                                 &mut self.sendable_plaintext, app_buffers)
     }
 
     /// Derives key material from the agreed connection secrets.
@@ -509,13 +511,14 @@ impl<Data> ConnectionCommon<Data> {
     /// Returns an object that allows reading plaintext.
     pub fn reader(&mut self) -> Reader {
         let common = &mut self.core.common_state;
+        let active_conn = common.conn_in_use;
         Reader {
             received_plaintext: &mut common.received_plaintext,
             // Are we done? i.e., have we processed all received messages, and received a
             // close_notify to indicate that no new messages will arrive?
             peer_cleanly_closed: common.has_received_close_notify
 
-                && !self.deframer_buffer.has_pending(),
+                && !self.deframers_map.get_or_create_def_vec_buff(active_conn as u64).has_pending(),
             has_seen_eof: common.has_seen_eof,
         }
     }
@@ -555,11 +558,16 @@ impl<Data> ConnectionCommon<Data> {
     /// [`read_tls`]: ConnectionCommon::read_tls
     /// [`process_new_packets`]: ConnectionCommon::process_new_packets
 
-    pub fn complete_io<T>(&mut self, io: &mut T) -> Result<(usize, usize), io::Error>
+    pub fn complete_io<T>(&mut self, io: &mut T, recv_map: Option<&mut RecvBufMap>) -> Result<(usize, usize), io::Error>
     where
         Self: Sized,
         T: io::Read + io::Write,
     {
+
+        let mut recv = match recv_map  {
+            Some(map) => map,
+            None => &mut RecvBufMap::new(),
+        };
 
         let mut eof = false;
         let mut wrlen = 0;
@@ -579,7 +587,7 @@ impl<Data> ConnectionCommon<Data> {
             }
 
 
-            while !eof && self.wants_read() {
+            while !eof && self.wants_read(&recv) {
                 let read_size = match self.read_tls(io) {
                     Ok(0) => {
                         eof = true;
@@ -598,7 +606,7 @@ impl<Data> ConnectionCommon<Data> {
             }
 
 
-            match self.process_new_packets() {
+            match self.process_new_packets(&mut recv) {
                 Ok(_) => {}
                 Err(e) => {
                     // In case we have an alert to send describing this error,
@@ -634,14 +642,14 @@ impl<Data> ConnectionCommon<Data> {
     /// This is a shortcut to the `process_new_packets()` -> `process_msg()` ->
     /// `process_handshake_messages()` path, specialized for the first handshake message.
 
-    pub(crate) fn first_handshake_message(&mut self) -> Result<Option<Message<'static>>, Error> {
+    pub(crate) fn first_handshake_message(&mut self, recv_buf: &mut RecvBufMap) -> Result<Option<Message<'static>>, Error> {
         let mut deframer_buffer = self.deframers_map.get_or_create_def_vec_buff(DEFAULT_STREAM_ID as u64).borrow();
         let res = self
             .core
-            .deframe(None, &mut deframer_buffer)
+            .deframe(None, &mut deframer_buffer, recv_buf)
             .map(|opt| opt.map(|pm| Message::try_from(pm).map(|m| m.into_owned())));
         let discard = deframer_buffer.pending_discard();
-        self.deframer_buffer.discard(discard);
+        self.deframers_map.get_or_create_def_vec_buff(DEFAULT_STREAM_ID as u64).discard(discard);
 
         match res? {
             Some(Ok(msg)) => Ok(Some(msg)),
@@ -702,8 +710,8 @@ impl<Data> ConnectionCommon<Data> {
     /// After this function returns, the connection buffer may not yet be fully flushed. The
     /// [`CommonState::wants_write`] function can be used to check if the output buffer is empty.
 
-    pub fn write_tls(&mut self, wr: &mut dyn io::Write) -> Result<usize, io::Error> {
-        self.sendable_tls.write_to(wr)
+    pub fn write_tls(&mut self, wr: &mut dyn io::Write, id: u16) -> Result<usize, io::Error> {
+        self.record_layer.streams.get_or_create(id).unwrap().send.write_to(wr)
     }
 }
 
@@ -738,6 +746,7 @@ impl<Data> From<ConnectionCore<Data>> for ConnectionCommon<Data> {
         Self {
             core,
             deframers_map: MessageDeframerMap::new(),
+            sendable_plaintext: PlainBufsMap::default(),
         }
     }
 }
@@ -779,6 +788,7 @@ impl<Data> ConnectionCore<Data> {
         &mut self,
         deframer_buffer: &mut DeframerVecBuffer,
         sendable_plaintext: &mut PlainBufsMap,
+        app_buffers: &mut RecvBufMap,
     ) -> Result<IoState, Error> {
         let mut state = match mem::replace(&mut self.state, Err(Error::HandshakeNotComplete)) {
             Ok(state) => state,
@@ -794,7 +804,7 @@ impl<Data> ConnectionCore<Data> {
             let mut borrowed_buffer = deframer_buffer.borrow();
             borrowed_buffer.queue_discard(discard);
 
-            let res = self.deframe(Some(&*state), &mut borrowed_buffer);
+            let res = self.deframe(Some(&*state), &mut borrowed_buffer, app_buffers);
             discard = borrowed_buffer.pending_discard();
 
             let opt_msg = match res {
@@ -824,7 +834,7 @@ impl<Data> ConnectionCore<Data> {
 
         deframer_buffer.discard(discard);
         self.state = Ok(state);
-        Ok(self.common_state.current_io_state())
+        Ok(self.common_state.current_io_state(Some(app_buffers)))
     }
 
     /// Pull a message out of the deframer and send any messages that need to be sent as a result.
@@ -832,11 +842,13 @@ impl<Data> ConnectionCore<Data> {
         &mut self,
         state: Option<&dyn State<Data>>,
         deframer_buffer: &mut DeframerSliceBuffer<'b>,
+        app_buffers: &mut RecvBufMap,
     ) -> Result<Option<InboundPlainMessage<'b>>, Error> {
         match self.message_deframer.pop(
             &mut self.common_state.record_layer,
             self.common_state.negotiated_version,
             deframer_buffer,
+            app_buffers,
         ) {
             Ok(Some(Deframed {
                 want_close_before_decrypt,

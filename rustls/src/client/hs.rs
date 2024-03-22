@@ -244,6 +244,7 @@ fn emit_fake_client_hello(client_config: &Arc<ClientConfig>, common: &mut Common
 
 
     let mut cipher_suites: Vec<_> = client_config
+        .provider
         .cipher_suites
         .iter()
         .map(|cs| cs.suite())
@@ -255,7 +256,7 @@ fn emit_fake_client_hello(client_config: &Arc<ClientConfig>, common: &mut Common
         typ: HandshakeType::ClientHello,
         payload: HandshakePayload::ClientHello(ClientHelloPayload {
             client_version: ProtocolVersion::TLSv1_2,
-            random: Random::new().unwrap(),
+            random: Random::new(client_config.provider.secure_random).unwrap(),
             session_id: SessionId::empty(),
             cipher_suites,
             compression_methods: vec![Compression::Null],

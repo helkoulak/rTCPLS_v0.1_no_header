@@ -378,7 +378,7 @@ mod connection {
                 &mut self.deframer_buffer,
             )?;
             self.core
-                .process_new_packets(&mut self.deframer_buffer, &mut self.sendable_plaintext)?;
+                .process_new_packets(&mut self.deframer_buffer, &mut self.sendable_plaintext, )?;
             Ok(())
         }
 

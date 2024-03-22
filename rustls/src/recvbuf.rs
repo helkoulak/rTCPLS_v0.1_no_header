@@ -310,10 +310,10 @@ mod test {
     #[test]
     fn short_append_copy_with_limit() {
         let mut cvb = ChunkVecBuffer::new(Some(12));
-        assert_eq!(cvb.append_limited_copy(b"hello"), 5);
-        assert_eq!(cvb.append_limited_copy(b"world"), 5);
-        assert_eq!(cvb.append_limited_copy(b"hello"), 2);
-        assert_eq!(cvb.append_limited_copy(b"world"), 0);
+        assert_eq!(cvb.append_limited_copy(b"hello"[..].into()), 5);
+        assert_eq!(cvb.append_limited_copy(b"world"[..].into()), 5);
+        assert_eq!(cvb.append_limited_copy(b"hello"[..].into()), 2);
+        assert_eq!(cvb.append_limited_copy(b"world"[..].into()), 0);
 
         let mut buf = [0u8; 12];
         assert_eq!(cvb.read(&mut buf).unwrap(), 12);
