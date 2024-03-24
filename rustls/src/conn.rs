@@ -578,7 +578,7 @@ impl<Data> ConnectionCommon<Data> {
             let until_handshaked = self.is_handshaking();
 
             while self.wants_write() {
-                wrlen += self.write_tls(io)?;
+                wrlen += self.write_tls(io, DEFAULT_STREAM_ID)?;
             }
             io.flush()?;
 
@@ -613,7 +613,7 @@ impl<Data> ConnectionCommon<Data> {
                     // try a last-gasp write -- but don't predate the primary
                     // error.
 
-                    let _ignored = self.write_tls(io);
+                    let _ignored = self.write_tls(io, DEFAULT_STREAM_ID);
                     let _ignored = io.flush();
 
                     return Err(io::Error::new(io::ErrorKind::InvalidData, e));
