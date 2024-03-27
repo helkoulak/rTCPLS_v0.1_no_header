@@ -1,8 +1,9 @@
 use alloc::boxed::Box;
+use std::prelude::rust_2015::Vec;
 
 use super::ring_like::hkdf::KeyType;
 use super::ring_like::{aead, hkdf, hmac};
-use crate::crypto;
+use crate::{crypto, PeerMisbehaved};
 use crate::crypto::cipher::{make_tls13_aad, AeadKey, InboundOpaqueMessage, Iv,
                             MessageDecrypter, MessageEncrypter, Nonce, Tls13AeadAlgorithm,
                             UnsupportedOperationError, make_tls13_aad_tcpls, HeaderProtector};
@@ -10,9 +11,9 @@ use crate::crypto::tls13::{Hkdf, HkdfExpander, OkmBlock, OutputLengthError};
 use crate::enums::{CipherSuite, ContentType, ProtocolVersion};
 use crate::error::Error;
 use crate::msgs::codec::Codec;
-use crate::msgs::message::{
-    InboundPlainMessage, OutboundOpaqueMessage, OutboundPlainMessage, PrefixedPayload,
-};
+use crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
+use crate::msgs::message::{BorrowedPayload, InboundPlainMessage, OutboundOpaqueMessage, OutboundPlainMessage, PrefixedPayload};
+use crate::recvbuf::RecvBuf;
 use crate::suites::{CipherSuiteCommon, ConnectionTrafficSecrets, SupportedCipherSuite};
 use crate::tcpls::frame::{Frame, STREAM_FRAME_HEADER_SIZE, TCPLS_HEADER_SIZE, TcplsHeader};
 use crate::tls13::Tls13CipherSuite;
@@ -74,6 +75,21 @@ pub(crate) static TLS13_AES_128_GCM_SHA256_INTERNAL: &Tls13CipherSuite = &Tls13C
         integrity_limit: 1 << 52,
     }),
 };
+
+fn unpad_tls13_from_slice(v: &mut [u8]) -> (ContentType, usize) {
+    let mut last = v.len() - 1;
+    loop {
+        match v[last] {
+            0 => last -= 1,
+            content_type => {
+                let typ = ContentType::from(content_type);
+                v[last] = 0x00;
+                return (typ, last)
+            },
+            _ => return (ContentType::Unknown(0), last),
+        }
+    }
+}
 
 struct Chacha20Poly1305Aead(AeadAlgorithm);
 
@@ -323,6 +339,66 @@ impl MessageDecrypter for Tls13MessageDecrypter {
         payload.truncate(plain_len);
         msg.into_tls13_unpadded_message()
     }
+
+    fn decrypt_tcpls<'a>(
+        &mut self,
+        mut msg: InboundOpaqueMessage<'a>,
+        seq: u64,
+        stream_id: u32,
+        recv_buf: &mut RecvBuf,
+        tcpls_header: &TcplsHeader,
+    ) -> Result<InboundPlainMessage<'a>, Error> {
+
+        let payload = &mut msg.payload;
+        if payload.len() < self.dec_key.algorithm().tag_len() {
+            return Err(Error::DecryptError);
+        }
+
+        // output buffer must be at least as big as the input buffer
+        if recv_buf.capacity() < payload.len() {
+            return Err(Error::BufferTooShort);
+        }
+
+        let nonce = aead::Nonce::assume_unique_for_key(Nonce::new(&self.iv, seq, stream_id).0);
+        let aad = aead::Aad::from(make_tls13_aad_tcpls(payload.len(), &tcpls_header));
+
+
+
+        let plain_len = self
+            .dec_key
+            .open_in_output(nonce, aad, payload, recv_buf.get_mut(), TCPLS_HEADER_SIZE)
+            .map_err(|_| Error::DecryptError)?
+            .len();
+
+        if recv_buf.get_mut()[..plain_len].len() > MAX_FRAGMENT_LEN + 1 {
+            return Err(Error::PeerSentOversizedRecord);
+        }
+
+        let mut type_pos = 0;
+        (msg.typ, type_pos)  = unpad_tls13_from_slice(&mut recv_buf.get_mut()[..plain_len]);
+
+        let payload_len_no_type = recv_buf.get_mut()[..type_pos].len();
+
+        if msg.typ == ContentType::Unknown(0) {
+            return Err(PeerMisbehaved::IllegalTlsInnerPlaintext.into());
+        }
+
+        if payload_len_no_type > MAX_FRAGMENT_LEN {
+            return Err(Error::PeerSentOversizedRecord);
+        }
+
+        Ok(InboundOpaqueMessage::new(msg.typ, ProtocolVersion::TLSv1_3, match msg.typ {
+            ContentType::ApplicationData => {
+                recv_buf.offset += payload_len_no_type as u64;
+                &mut recv_buf.get_mut()[..type_pos]
+            },
+            _ => &mut recv_buf.get_mut()[..type_pos]
+        },).into_plain_message()
+        )
+
+    }
+
+
 }
 
 struct RingHkdf(hkdf::Algorithm, hmac::Algorithm);

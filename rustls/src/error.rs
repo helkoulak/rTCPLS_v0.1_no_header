@@ -106,6 +106,7 @@ pub enum Error {
 
     BufNotFound,
     Done,
+    BufferTooShort,
 }
 
 /// A corrupt TLS message payload that resulted in an error.

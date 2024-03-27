@@ -6,6 +6,7 @@ use crate::error::Error;
 #[cfg(feature = "logging")]
 use crate::log::trace;
 use crate::msgs::message::{InboundPlainMessage, OutboundOpaqueMessage, OutboundPlainMessage};
+use crate::recvbuf::RecvBuf;
 use crate::tcpls::frame::{Frame, TcplsHeader};
 use crate::tcpls::stream::{DEFAULT_STREAM_ID, StreamMap};
 
@@ -85,15 +86,69 @@ impl RecordLayer {
         //
         // Note that there's no reason to refuse to decrypt: the security
         // failure has already happened.
-        let want_close_before_decrypt = self.read_seq == SEQ_SOFT_LIMIT;
+        let want_close_before_decrypt = 0 == SEQ_SOFT_LIMIT;
 
         let encrypted_len = encr.payload.len();
         match self
             .message_decrypter
-            .decrypt(encr, self.read_seq)
+            .decrypt(encr, 0)
         {
             Ok(plaintext) => {
-                self.read_seq += 1;
+                0 += 1;
+                if !self.has_decrypted {
+                    self.has_decrypted = true;
+                }
+                Ok(Some(Decrypted {
+                    want_close_before_decrypt,
+                    plaintext,
+                }))
+            }
+            Err(Error::DecryptError) if self.doing_trial_decryption(encrypted_len) => {
+                trace!("Dropping undecryptable message after aborted early_data");
+                Ok(None)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+
+    /// Decrypt a TLS message.
+    ///
+    /// `encr` is a decoded message allegedly received from the peer.
+    /// If it can be decrypted, its decryption is returned.  Otherwise,
+    /// an error is returned.
+    pub(crate) fn decrypt_incoming_tcpls<'a>(
+        &mut self,
+        encr: InboundOpaqueMessage<'a>,
+        recv_buf: &mut RecvBuf,
+        tcpls_header: &TcplsHeader,
+    ) -> Result<Option<Decrypted<'a>>, Error> {
+        if self.decrypt_state != DirectionState::Active {
+            return Ok(Some(Decrypted {
+                want_close_before_decrypt: false,
+                plaintext: encr.into_plain_message(),
+            }));
+        }
+
+        // Set to `true` if the peer appears to getting close to encrypting
+        // too many messages with this key.
+        //
+        // Perhaps if we send an alert well before their counter wraps, a
+        // buggy peer won't make a terrible mistake here?
+        //
+        // Note that there's no reason to refuse to decrypt: the security
+        // failure has already happened.
+        self.stream_in_use = tcpls_header.stream_id;
+        let want_close_before_decrypt = recv_buf.read_seq == SEQ_SOFT_LIMIT;
+
+        let encrypted_len = encr.payload.len();
+        match self
+            .message_decrypter
+            .decrypt_tcpls(encr, recv_buf.read_seq, self.stream_in_use as u32, recv_buf, &tcpls_header)
+        {
+            Ok(plaintext) => {
+                recv_buf.read_seq += 1;
+                recv_buf.next_recv_pkt_num += 1;
                 if !self.has_decrypted {
                     self.has_decrypted = true;
                 }

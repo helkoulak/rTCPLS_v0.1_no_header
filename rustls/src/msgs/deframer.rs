@@ -145,7 +145,7 @@ impl MessageDeframer {
             }
 
             // Decrypt the encrypted message (if necessary).
-            let (typ, version, plain_payload_slice) = match record_layer.decrypt_incoming(m) {
+            let (typ, version, plain_payload_slice) = match record_layer.decrypt_incoming_tcpls(m) {
                 Ok(Some(decrypted)) => {
                     let Decrypted {
                         want_close_before_decrypt,
