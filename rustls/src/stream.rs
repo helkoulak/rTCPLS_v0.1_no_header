@@ -3,6 +3,7 @@ use core::ops::{Deref, DerefMut};
 use std::io::{IoSlice, Read, Result, Write};
 
 use crate::conn::{ConnectionCommon, SideData};
+use crate::recvbuf::RecvBufMap;
 
 /// This type implements `io::Read` and `io::Write`, encapsulating
 /// a Connection `C` and an underlying transport `T`, such as a socket.
@@ -16,6 +17,8 @@ pub struct Stream<'a, C: 'a + ?Sized, T: 'a + Read + Write + ?Sized> {
     /// The underlying transport, like a socket
     pub sock: &'a mut T,
 
+    pub recv_conn: &'a mut RecvBufMap,
+
 }
 
 impl<'a, C, T, S> Stream<'a, C, T>
@@ -27,8 +30,8 @@ where
     /// Make a new Stream using the Connection `conn` and socket-like object
     /// `sock`.  This does not fail and does no IO.
 
-    pub fn new(conn: &'a mut C, sock: &'a mut T) -> Self {
-        Self { conn, sock }
+    pub fn new(conn: &'a mut C, sock: &'a mut T, recv_conn: &'a mut RecvBufMap) -> Self {
+        Self { conn, sock, recv_conn }
     }
 
     /// If we're handshaking, complete all the IO for that.
@@ -36,10 +39,10 @@ where
     fn complete_prior_io(&mut self) -> Result<()> {
 
         if self.conn.is_handshaking() {
-            self.conn.complete_io(self.sock)?;
+            self.conn.complete_io(self.sock, Some(&mut self.recv_conn))?;
         }
         if self.conn.wants_write() {
-            self.conn.complete_io(self.sock)?;
+            self.conn.complete_io(self.sock, Some(&mut self.recv_conn))?;
         }
 
         Ok(())
@@ -60,8 +63,8 @@ where
         // needed to get more plaintext, which we must do if EOF has not been
 
         // hit.
-        while self.conn.wants_read() {
-            if self.conn.complete_io(self.sock)?.0 == 0 {
+        while self.conn.wants_read(&self.recv_conn) {
+            if self.conn.complete_io(self.sock, Some(&mut self.recv_conn))?.0 == 0 {
                 break;
             }
         }
@@ -104,7 +107,7 @@ where
         // any errors mask the fact we've consumed `len` bytes.
         // Callers will learn of permanent errors on the next call.
 
-        let _ = self.conn.complete_io(self.sock);
+        let _ = self.conn.complete_io(self.sock, Some(&mut self.recv_conn));
         Ok(len)
     }
 
@@ -120,7 +123,7 @@ where
         // any errors mask the fact we've consumed `len` bytes.
         // Callers will learn of permanent errors on the next call.
 
-        let _ = self.conn.complete_io(self.sock);
+        let _ = self.conn.complete_io(self.sock, Some(&mut self.recv_conn));
 
         Ok(len)
     }
@@ -131,7 +134,7 @@ where
         self.conn.writer().flush()?;
         if self.conn.wants_write() {
 
-            self.conn.complete_io(self.sock)?;
+            self.conn.complete_io(self.sock, None)?;
         }
         Ok(())
     }
@@ -149,6 +152,7 @@ pub struct StreamOwned<C: Sized, T: Read + Write + Sized> {
 
     /// The underlying transport, like a socket
     pub sock: T,
+    pub recv_conn: RecvBufMap,
 }
 
 impl<C, T, S> StreamOwned<C, T>
@@ -163,8 +167,8 @@ where
     /// This is the same as `Stream::new` except `conn` and `sock` are
     /// moved into the StreamOwned.
 
-    pub fn new(conn: C, sock: T) -> Self {
-        Self { conn, sock }
+    pub fn new(conn: C, sock: T, recv_conn: RecvBufMap) -> Self {
+        Self { conn, sock, recv_conn }
     }
 
     /// Get a reference to the underlying socket
@@ -194,6 +198,7 @@ where
         Stream {
             conn: &mut self.conn,
             sock: &mut self.sock,
+            recv_conn: &mut self.recv_conn,
         }
     }
 }

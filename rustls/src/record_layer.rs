@@ -1,14 +1,16 @@
 use alloc::boxed::Box;
 use core::num::NonZeroU64;
+use std::collections::hash_map;
 
 use crate::crypto::cipher::{InboundOpaqueMessage, MessageDecrypter, MessageEncrypter};
 use crate::error::Error;
 #[cfg(feature = "logging")]
 use crate::log::trace;
+use crate::msgs::deframer::DeframerVecBuffer;
 use crate::msgs::message::{InboundPlainMessage, OutboundOpaqueMessage, OutboundPlainMessage};
 use crate::recvbuf::RecvBuf;
 use crate::tcpls::frame::{Frame, TcplsHeader};
-use crate::tcpls::stream::{DEFAULT_STREAM_ID, StreamMap};
+use crate::tcpls::stream::{DEFAULT_STREAM_ID, SimpleIdHashMap, StreamMap};
 
 static SEQ_SOFT_LIMIT: u64 = 0x16909E7; //(((2 as f64).powf(24.5) as i64) - 0xFFFF) as u64; //0xffff_ffff_ffff_0000u64;
 static SEQ_HARD_LIMIT: u64 = 0x16A09E6; //((2 as f64).powf(24.5) as i64) as u64; //0xffff_ffff_ffff_fffeu64;
@@ -39,6 +41,9 @@ pub struct RecordLayer {
     is_handshaking: bool,
     has_decrypted: bool,
 
+    pub write_seq_map: WriteSeqMap,
+    pub read_seq_map: ReadSeqMap,
+
     // Message encrypted with other keys may be encountered, so failures
     // should be swallowed by the caller.  This struct tracks the amount
     // of message size this is allowed for.
@@ -55,10 +60,12 @@ impl RecordLayer {
             streams: StreamMap::new(),
             is_handshaking: true,
             has_decrypted: false,
+            write_seq_map: WriteSeqMap::default() ,
             encrypt_state: DirectionState::Invalid,
             decrypt_state: DirectionState::Invalid,
             stream_in_use: 0,
             trial_decryption_len: None,
+            read_seq_map: ReadSeqMap::default(),
         }
     }
 
@@ -94,7 +101,7 @@ impl RecordLayer {
             .decrypt(encr, 0)
         {
             Ok(plaintext) => {
-                0 += 1;
+                let seq= 1;
                 if !self.has_decrypted {
                     self.has_decrypted = true;
                 }
@@ -120,7 +127,7 @@ impl RecordLayer {
     pub(crate) fn decrypt_incoming_tcpls<'a>(
         &mut self,
         encr: InboundOpaqueMessage<'a>,
-        recv_buf: &mut RecvBuf,
+        recv_buf: &'a mut RecvBuf,
         tcpls_header: &TcplsHeader,
     ) -> Result<Option<Decrypted<'a>>, Error> {
         if self.decrypt_state != DirectionState::Active {
@@ -139,16 +146,16 @@ impl RecordLayer {
         // Note that there's no reason to refuse to decrypt: the security
         // failure has already happened.
         self.stream_in_use = tcpls_header.stream_id;
-        let want_close_before_decrypt = recv_buf.read_seq == SEQ_SOFT_LIMIT;
+        let read_seq = self.read_seq_map.get_or_create(self.stream_in_use as u64).seq;
+        let want_close_before_decrypt = read_seq == SEQ_SOFT_LIMIT;
 
         let encrypted_len = encr.payload.len();
         match self
             .message_decrypter
-            .decrypt_tcpls(encr, recv_buf.read_seq, self.stream_in_use as u32, recv_buf, &tcpls_header)
+            .decrypt_tcpls(encr, read_seq, self.stream_in_use as u32, recv_buf, &tcpls_header)
         {
             Ok(plaintext) => {
-                recv_buf.read_seq += 1;
-                recv_buf.next_recv_pkt_num += 1;
+                self.read_seq_map.get_or_create(self.stream_in_use as u64).seq += 1;
                 if !self.has_decrypted {
                     self.has_decrypted = true;
                 }
@@ -196,13 +203,21 @@ impl RecordLayer {
         debug_assert!(self.encrypt_state == DirectionState::Active);
         assert!(!self.encrypt_exhausted());
         let stream_id = self.stream_in_use;
-        let seq = self.streams.get(stream_id).unwrap().write_seq;
-        self.streams.get_mut(stream_id).unwrap().write_seq += 1;
+        let seq = self.write_seq_map.get_or_create(stream_id as u64).seq;
+        self.write_seq_map.get_or_create(stream_id as u64).seq += 1;
         self.message_encrypter
             .encrypt_tcpls(plain, seq, stream_id as u32, tcpls_header, frame_header)
             .unwrap()
     }
 
+    pub fn get_tag_length(&self) -> usize {
+        self.message_encrypter.get_tag_length()
+    }
+
+
+    pub fn decrypt_header(&mut self, input: &[u8], header: & [u8]) -> Result<[u8; 8], Error> {
+        self.message_decrypter.decrypt_header(input, header)
+    }
     /// Prepare to use the given `MessageEncrypter` for future message encryption.
     /// It is not used until you call `start_encrypting`.
     pub(crate) fn prepare_message_encrypter(&mut self, cipher: Box<dyn MessageEncrypter>) {
@@ -338,9 +353,72 @@ pub(crate) struct Decrypted<'a> {
     /// The decrypted message.
     pub(crate) plaintext: InboundPlainMessage<'a>,
 }
+#[derive(Default)]
+pub(crate) struct WriteSeqMap {
+    map: SimpleIdHashMap<WriteSeq>,
+}
+
+impl WriteSeqMap {
+    pub(crate) fn get_or_create(&mut self, stream_id: u64) -> &mut WriteSeq {
+        match self.map.entry(stream_id) {
+            hash_map::Entry::Vacant(v) => {
+                v.insert(WriteSeq::new(stream_id))
+            },
+            hash_map::Entry::Occupied(v) => v.into_mut(),
+        }
+    }
+
+}
+
+#[derive(Default)]
+pub(crate) struct ReadSeqMap {
+    map: SimpleIdHashMap<ReadSeq>,
+}
+
+impl ReadSeqMap {
+    pub(crate) fn get_or_create(&mut self, stream_id: u64) -> &mut ReadSeq {
+        match self.map.entry(stream_id) {
+            hash_map::Entry::Vacant(v) => {
+                v.insert(ReadSeq::new(stream_id))
+            },
+            hash_map::Entry::Occupied(v) => v.into_mut(),
+        }
+    }
+
+}
+#[derive(Default)]
+pub(crate) struct WriteSeq {
+    id: u64,
+    seq: u64,
+}
+
+impl WriteSeq {
+    pub fn new(id: u64) -> Self {
+        Self {
+            id,
+            seq: 0,
+        }
+    }
+
+}
+pub(crate) struct ReadSeq {
+    id: u64,
+    seq: u64,
+}
+
+impl ReadSeq {
+    pub fn new(id: u64) -> Self {
+        Self {
+            id,
+            seq: 0,
+        }
+    }
+
+}
 
 #[cfg(test)]
 mod tests {
+    use crate::recvbuf::RecvBufMap;
     use super::*;
 
     #[test]
@@ -356,7 +434,18 @@ mod tests {
             ) -> Result<InboundPlainMessage<'a>, Error> {
                 Ok(m.into_plain_message())
             }
+
+            fn decrypt_tcpls<'a, 'b>(&mut self, msg: InboundOpaqueMessage<'a>, seq: u64, stream_id: u32, recv_buf: &'b mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<InboundPlainMessage<'b>, Error> {
+                todo!()
+            }
+
+            fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error> {
+                todo!()
+            }
         }
+
+        let mut app_buffs = RecvBufMap::new();
+        let mut rev_buf = app_buffs.get_or_create_recv_buffer(0, None);
 
         // A record layer starts out invalid, having never decrypted.
         let mut record_layer = RecordLayer::new();
@@ -364,7 +453,7 @@ mod tests {
             record_layer.decrypt_state,
             DirectionState::Invalid
         ));
-        assert_eq!(record_layer.read_seq, 0);
+        assert_eq!(rev_buf.read_seq, 0);
         assert!(!record_layer.has_decrypted());
 
         // Preparing the record layer should update the decrypt state, but shouldn't affect whether it
@@ -374,33 +463,33 @@ mod tests {
             record_layer.decrypt_state,
             DirectionState::Prepared
         ));
-        assert_eq!(record_layer.read_seq, 0);
+        assert_eq!(rev_buf.read_seq, 0);
         assert!(!record_layer.has_decrypted());
 
         // Starting decryption should update the decrypt state, but not affect whether it has decrypted.
         record_layer.start_decrypting();
         assert!(matches!(record_layer.decrypt_state, DirectionState::Active));
-        assert_eq!(record_layer.read_seq, 0);
+        assert_eq!(rev_buf.read_seq, 0);
         assert!(!record_layer.has_decrypted());
 
         // Decrypting a message should update the read_seq and track that we have now performed
         // a decryption.
         record_layer
-            .decrypt_incoming(InboundOpaqueMessage::new(
+            .decrypt_incoming_tcpls(InboundOpaqueMessage::new(
                 ContentType::Handshake,
                 ProtocolVersion::TLSv1_2,
                 &mut [0xC0, 0xFF, 0xEE],
-            ))
+            ), &mut rev_buf, &TcplsHeader::default())
             .unwrap();
         assert!(matches!(record_layer.decrypt_state, DirectionState::Active));
-        assert_eq!(record_layer.read_seq, 1);
+        assert_eq!(rev_buf.read_seq, 1);
         assert!(record_layer.has_decrypted());
 
         // Resetting the record layer message decrypter (as if a key update occurred) should reset
         // the read_seq number, but not our knowledge of whether we have decrypted previously.
         record_layer.set_message_decrypter(Box::new(PassThroughDecrypter));
         assert!(matches!(record_layer.decrypt_state, DirectionState::Active));
-        assert_eq!(record_layer.read_seq, 0);
+        assert_eq!(rev_buf.read_seq, 0);
         assert!(record_layer.has_decrypted());
     }
 }

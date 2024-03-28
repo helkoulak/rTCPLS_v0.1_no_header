@@ -13,6 +13,7 @@ use crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
 use crate::msgs::message::{
     InboundPlainMessage, OutboundOpaqueMessage, OutboundPlainMessage, PrefixedPayload,
 };
+use crate::recvbuf::RecvBuf;
 use crate::suites::{CipherSuiteCommon, ConnectionTrafficSecrets, SupportedCipherSuite};
 use crate::tcpls::frame::{Frame, TcplsHeader};
 use crate::tls12::Tls12CipherSuite;
@@ -278,6 +279,14 @@ impl MessageDecrypter for GcmMessageDecrypter {
         payload.truncate(plain_len);
         Ok(msg.into_plain_message())
     }
+
+    fn decrypt_tcpls<'a, 'b>(&mut self, _msg: InboundOpaqueMessage<'a>, _seq: u64, stream_id: u32, recv_buf: &'b mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<InboundPlainMessage<'b>, Error> {
+        todo!()
+    }
+
+    fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error> {
+        todo!()
+    }
 }
 
 impl MessageEncrypter for GcmMessageEncrypter {
@@ -310,7 +319,11 @@ impl MessageEncrypter for GcmMessageEncrypter {
         todo!()
     }
 
-    fn encrypted_payload_len_tcpls(&self, payload_len: usize, frame_header: Option<Frame>) -> (usize, usize) {
+    fn encrypted_payload_len_tcpls(&self, payload_len: usize, header_len: usize) -> (usize, usize) {
+        todo!()
+    }
+
+    fn get_tag_length(&self) -> usize {
         todo!()
     }
 }
@@ -367,6 +380,14 @@ impl MessageDecrypter for ChaCha20Poly1305MessageDecrypter {
         payload.truncate(plain_len);
         Ok(msg.into_plain_message())
     }
+
+    fn decrypt_tcpls<'a, 'b>(&mut self, msg: InboundOpaqueMessage<'a>, seq: u64, stream_id: u32, recv_buf: &'b mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<InboundPlainMessage<'b>, Error> {
+        todo!()
+    }
+
+    fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error> {
+        todo!()
+    }
 }
 
 impl MessageEncrypter for ChaCha20Poly1305MessageEncrypter {
@@ -397,7 +418,11 @@ impl MessageEncrypter for ChaCha20Poly1305MessageEncrypter {
         todo!()
     }
 
-    fn encrypted_payload_len_tcpls(&self, payload_len: usize, frame_header: Option<Frame>) -> (usize, usize) {
+    fn encrypted_payload_len_tcpls(&self, payload_len: usize, header_len: usize) -> (usize, usize) {
+        todo!()
+    }
+
+    fn get_tag_length(&self) -> usize {
         todo!()
     }
 }

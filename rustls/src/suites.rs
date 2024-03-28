@@ -124,6 +124,7 @@ impl SupportedCipherSuite {
                 .tls13()
                 .and_then(|cs| cs.quic)
                 .is_some(),
+            _ => false,
         }
     }
 

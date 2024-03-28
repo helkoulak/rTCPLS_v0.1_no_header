@@ -1,6 +1,4 @@
 use alloc::boxed::Box;
-use std::prelude::rust_2015::Vec;
-
 use super::ring_like::hkdf::KeyType;
 use super::ring_like::{aead, hkdf, hmac};
 use crate::{crypto, PeerMisbehaved};
@@ -253,7 +251,11 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         tcpls_header: &TcplsHeader,
         frame_header: Option<Frame>
     ) -> Result<OutboundOpaqueMessage, Error> {
-        let (enc_payload_len, tag_len) = self.encrypted_payload_len_tcpls(msg.payload.len(), frame_header);
+        let hdr_len =  match frame_header.as_ref() {
+            Some(_header) => STREAM_FRAME_HEADER_SIZE,
+            None => 0,
+        };
+        let (enc_payload_len, tag_len) = self.encrypted_payload_len_tcpls(msg.payload.len(), hdr_len);
         let mut payload = PrefixedPayload::with_capacity_tcpls(enc_payload_len);
         let total_len = TCPLS_HEADER_SIZE + enc_payload_len;
 
@@ -307,13 +309,14 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         ))
     }
 
-    fn encrypted_payload_len_tcpls(&self, payload_len: usize, frame_header: Option<Frame>) -> (usize, usize) {
+    fn encrypted_payload_len_tcpls(&self, payload_len: usize, header_len: usize) -> (usize, usize) {
         let tag_len = self.enc_key.algorithm().tag_len();
-        let hdr_len =  match frame_header.as_ref() {
-            Some(_header) => STREAM_FRAME_HEADER_SIZE,
-            None => 0,
-        };
-        (payload_len + hdr_len + 1 + tag_len, tag_len)
+
+        (payload_len + header_len + 1 + tag_len, tag_len)
+    }
+
+    fn get_tag_length(&self) -> usize {
+        self.enc_key.algorithm().tag_len()
     }
 }
 
@@ -345,7 +348,7 @@ impl MessageDecrypter for Tls13MessageDecrypter {
         mut msg: InboundOpaqueMessage<'a>,
         seq: u64,
         stream_id: u32,
-        recv_buf: &mut RecvBuf,
+        recv_buf: &'a mut RecvBuf,
         tcpls_header: &TcplsHeader,
     ) -> Result<InboundPlainMessage<'a>, Error> {
 
@@ -389,15 +392,21 @@ impl MessageDecrypter for Tls13MessageDecrypter {
 
         Ok(InboundOpaqueMessage::new(msg.typ, ProtocolVersion::TLSv1_3, match msg.typ {
             ContentType::ApplicationData => {
+                recv_buf.next_recv_pkt_num += 1;
                 recv_buf.offset += payload_len_no_type as u64;
                 &mut recv_buf.get_mut()[..type_pos]
             },
-            _ => &mut recv_buf.get_mut()[..type_pos]
+            _ => {
+                recv_buf.next_recv_pkt_num += 1;
+                &mut recv_buf.get_mut()[..type_pos]
+            },
         },).into_plain_message()
         )
 
     }
-
+    fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error> {
+        self.header_decrypter.decrypt_in_output(input, header)
+    }
 
 }
 

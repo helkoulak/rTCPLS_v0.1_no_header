@@ -2,7 +2,7 @@
 use alloc::vec::Vec;
 use core::ops::Range;
 use core::slice::SliceIndex;
-use std::collections::hash_map;
+use std::collections::{BTreeMap, hash_map};
 #[cfg(feature = "std")]
 use std::io;
 
@@ -14,7 +14,8 @@ use crate::msgs::codec;
 use crate::msgs::message::MAX_WIRE_SIZE;
 use crate::msgs::message::{InboundOpaqueMessage, InboundPlainMessage, MessageError};
 use crate::record_layer::{Decrypted, RecordLayer};
-use crate::recvbuf::RecvBufMap;
+use crate::recvbuf::{RecvBuf, RecvBufMap};
+use crate::tcpls::frame::{TCPLS_HEADER_SIZE, TcplsHeader};
 
 use crate::tcpls::stream::SimpleIdHashMap;
 
@@ -33,6 +34,9 @@ pub struct MessageDeframer {
 
     /// If we're in the middle of joining a handshake payload, this is the metadata.
     joining_hs: Option<HandshakePayloadMeta>,
+
+    /// Info of records delivered
+    pub(crate) record_info: BTreeMap<u64, RangeBufInfo>,
 }
 
 impl MessageDeframer {
@@ -55,13 +59,21 @@ impl MessageDeframer {
             return Ok(None);
         }
 
+        let mut start = 0;
+        let tag_len = record_layer.get_tag_length();
+        let mut header_decoded = TcplsHeader::default();
+        let mut payload_offset = 0;
+        let mut payload_length = 0;
+        let mut end = 0;
+        let mut recv_buf = &mut RecvBuf::default();
+
 
         // We loop over records we've received but not processed yet.
         // For records that decrypt as `Handshake`, we keep the current state of the joined
         // handshake message payload in `self.joining_hs`, appending to it as we see records.
         let expected_len = loop {
 
-            let start = match &self.joining_hs {
+            start = match &self.joining_hs {
 
                 Some(meta) => {
                     match meta.expected_len {
@@ -74,7 +86,21 @@ impl MessageDeframer {
                     }
                 }
 
-                None => 0,
+                None => {
+                    if !self.record_info.is_empty(){
+                        for (offset, info) in self.record_info.iter() {
+                            if (app_buffers.get(info.id).unwrap().next_recv_pkt_num == info.chunk_num && !info.processed) {
+                                end = *offset as usize;
+                                break
+                            }
+                            else {
+                                end = *offset as usize + info.len;
+                                continue
+                            }
+                        }
+                    }
+                    end
+                },
             };
 
             // Does our `buf` contain a full message?  It does if it is big enough to
@@ -101,7 +127,7 @@ impl MessageDeframer {
             };
 
             // Return CCS messages and early plaintext alerts immediately without decrypting.
-            let end = start + rd.used();
+            end = start + rd.used();
             let version_is_tls13 = matches!(negotiated_version, Some(ProtocolVersion::TLSv1_3));
             let allowed_plaintext = match m.typ {
                 // CCS messages are always plaintext.
@@ -130,7 +156,7 @@ impl MessageDeframer {
                 } = m;
                 let raw_payload_slice = RawSlice::from(&*payload);
                 // This is unencrypted. We check the contents later.
-                buffer.queue_discard(end);
+                buffer.queue_discard(end - start);
                 let message = InboundPlainMessage {
                     typ,
                     version,
@@ -144,8 +170,28 @@ impl MessageDeframer {
                 }));
             }
 
+            // Consider header protection in case dec/enc state is active
+            if tag_len != 0 {
+                // Take the LSBs of calculated tag as input sample for hash function
+                let sample = m.payload.rchunks(tag_len).next().unwrap();
+                // Decode tcpls header and choose recv_buf accordingly
+                header_decoded =
+                    TcplsHeader::decode_tcpls_header_from_slice(
+                        &record_layer.decrypt_header(sample, &m.payload[..TCPLS_HEADER_SIZE]).expect("decrypting header failed")
+                    );
+            }
+
+            self.record_info.insert(start as u64, RangeBufInfo::from(header_decoded.chunk_num, header_decoded.stream_id, end - start));
+
+            recv_buf = app_buffers.get_or_create_recv_buffer(header_decoded.stream_id as u64, None);
+
+            if recv_buf.next_recv_pkt_num != header_decoded.chunk_num {
+                self.record_info.insert(start as u64, RangeBufInfo::from(header_decoded.chunk_num, header_decoded.stream_id, end - start));
+                continue
+            }
+
             // Decrypt the encrypted message (if necessary).
-            let (typ, version, plain_payload_slice) = match record_layer.decrypt_incoming_tcpls(m) {
+            let (typ, version, plain_payload_slice) = match record_layer.decrypt_incoming_tcpls(m, recv_buf, &header_decoded) {
                 Ok(Some(decrypted)) => {
                     let Decrypted {
                         want_close_before_decrypt,
@@ -686,6 +732,32 @@ trait FilledDeframerBuffer {
 
     fn filled(&self) -> &[u8];
 
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct RangeBufInfo {
+    /// The id of the stream this record belongs to
+    pub(crate) id: u16,
+
+    /// The chunk number of record.
+    pub(crate) chunk_num: u32,
+
+    /// Length of chunk
+    pub(crate) len: usize,
+
+    /// If record already processed
+    pub(crate) processed: bool,
+}
+
+impl RangeBufInfo {
+    pub fn from(chunk_num: u32, id: u16, len: usize) -> RangeBufInfo {
+        RangeBufInfo {
+            id,
+            chunk_num,
+            len,
+            processed: false,
+        }
+    }
 }
 
 enum HandshakePayloadState {

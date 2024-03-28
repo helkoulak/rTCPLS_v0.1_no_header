@@ -5,7 +5,7 @@ use std::io::Error;
 use std::prelude::rust_2021::Vec;
 use crate::tcpls::stream::{DEFAULT_BUFFER_LIMIT, SimpleIdHashMap, SimpleIdHashSet, StreamIter};
 
-/// This is the receive buffer of a stream
+/// The application receive buffer
 #[derive(Default)]
 #[derive(Debug)]
 pub struct RecvBuf {
@@ -30,23 +30,18 @@ impl RecvBuf {
     /// create a new instance of RecvBuffer
     pub fn new(stream_id: u64, capacity: Option<usize>) -> RecvBuf {
         if let Some(capacity) = capacity {
-            let mut appbuf = RecvBuf {
+            let appbuf = RecvBuf {
                 id: stream_id,
                 data :vec![0; capacity],
                 ..Default::default()
             };
-            // set_len is safe assuming
-            // 1) the data is initialized
-            // 2) the new len is <= capacity
-            unsafe { appbuf.data.set_len(capacity) };
             appbuf
         } else {
-            let mut appbuf = RecvBuf {
+            let appbuf = RecvBuf {
                 id: stream_id,
                 data: vec![0; DEFAULT_BUFFER_LIMIT],
                 ..Default::default()
             };
-            unsafe { appbuf.data.set_len(DEFAULT_BUFFER_LIMIT) };
             appbuf
         }
     }
@@ -321,7 +316,7 @@ mod test {
     }
     #[test]
     fn test_reset_stream() {
-        let mut vector = vec![0x0A; DEFAULT_BUFFER_LIMIT];
+        let  vector = vec![0x0A; DEFAULT_BUFFER_LIMIT];
         let mut stream = RecvBuf::new(0, Some(DEFAULT_BUFFER_LIMIT));
         stream.data.copy_from_slice(vector.as_slice());
         stream.len = 1234;
@@ -347,7 +342,7 @@ mod test {
         let mut stream = RecvBuf::new(0, Some(DEFAULT_BUFFER_LIMIT));
         stream.data.fill(0x0A);
         stream.offset += DEFAULT_BUFFER_LIMIT as u64;
-        let mut data_read = stream.read(&mut buffer).unwrap();
+        let data_read = stream.read(&mut buffer).unwrap();
 
         assert_eq!(data_read, stream.data.len());
         assert_eq!(buffer[..data_read], stream.data);
@@ -357,7 +352,7 @@ mod test {
 
         stream.consumed = 0;
 
-        let mut data_read = stream.read(&mut buffer).unwrap();
+        let data_read = stream.read(&mut buffer).unwrap();
 
         assert_eq!(data_read, buffer.len());
         assert_eq!(buffer, stream.data[..data_read]);

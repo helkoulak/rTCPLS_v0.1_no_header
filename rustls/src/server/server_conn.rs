@@ -528,7 +528,7 @@ mod connection {
     use std::io;
 
     use super::{Accepted, Accepting, EarlyDataState, ServerConfig, ServerConnectionData};
-    use crate::common_state::{CommonState, Context, Side};
+    use crate::common_state::{CommonState, Context, DEFAULT_BUFFER_LIMIT, Side};
     use crate::conn::{ConnectionCommon, ConnectionCore};
     use crate::error::Error;
     use crate::recvbuf::RecvBufMap;
@@ -841,7 +841,7 @@ mod connection {
 
     impl From<ConnectionCommon<ServerConnectionData>> for AcceptedAlert {
         fn from(conn: ConnectionCommon<ServerConnectionData>) -> Self {
-            Self(conn.core.common_state.record_layer.streams.get(DEFAULT_STREAM_ID).unwrap().send)
+            Self(ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)))
         }
     }
 

@@ -531,6 +531,9 @@ impl fmt::Display for Error {
             Self::NoApplicationProtocol => write!(f, "peer doesn't support any known protocol"),
             Self::FailedToGetCurrentTime => write!(f, "failed to get current time"),
             Self::FailedToGetRandomBytes => write!(f, "failed to get random bytes"),
+            Self::BufNotFound => write!(f, "Stream buffer of the id provided not found"),
+            Self::Done => write!(f, "There is no more work to do"),
+            Self::BufferTooShort => write!(f, "The provided buffer is too short"),
             Self::BadMaxFragmentSize => {
                 write!(f, "the supplied max_fragment_size was too small or large")
             }

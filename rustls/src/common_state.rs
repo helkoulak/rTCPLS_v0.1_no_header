@@ -57,6 +57,10 @@ pub struct CommonState {
     /// id of currently used tcp connection
     pub(crate) conn_in_use: u32,
 
+    ///Id of stream to write to
+    pub write_to: u16,
+    ///Whether this is the last of data to send
+    pub fin: bool,
 
     queued_key_update_message: Option<Vec<u8>>,
 

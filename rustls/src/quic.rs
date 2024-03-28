@@ -28,12 +28,13 @@ mod connection {
 
     use super::{DirectionalKeys, KeyChange, Version};
     use crate::client::{ClientConfig, ClientConnectionData};
-    use crate::common_state::{CommonState, Protocol, DEFAULT_BUFFER_LIMIT};
+    use crate::common_state::{CommonState, Protocol, DEFAULT_BUFFER_LIMIT, PlainBufsMap};
     use crate::conn::{ConnectionCore, SideData};
     use crate::enums::{AlertDescription, ProtocolVersion};
     use crate::error::Error;
     use crate::msgs::deframer::DeframerVecBuffer;
     use crate::msgs::handshake::{ClientExtension, ServerExtension};
+    use crate::recvbuf::RecvBufMap;
     use crate::server::{ServerConfig, ServerConnectionData};
     use crate::vecbuf::ChunkVecBuffer;
 
@@ -378,7 +379,7 @@ mod connection {
                 &mut self.deframer_buffer,
             )?;
             self.core
-                .process_new_packets(&mut self.deframer_buffer, &mut self.sendable_plaintext, )?;
+                .process_new_packets(&mut self.deframer_buffer, &mut PlainBufsMap::default(), &mut RecvBufMap::new())?;
             Ok(())
         }
 

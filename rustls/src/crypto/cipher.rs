@@ -152,12 +152,14 @@ pub trait MessageDecrypter: Send + Sync {
     ) -> Result<InboundPlainMessage<'a>, Error>;
     fn decrypt_tcpls<'a>(
         &mut self,
-        mut msg: InboundOpaqueMessage<'a>,
+        msg: InboundOpaqueMessage<'a>,
         seq: u64,
         stream_id: u32,
-        recv_buf: &mut RecvBuf,
+        recv_buf: &'a mut RecvBuf,
         tcpls_header: &TcplsHeader,
     ) -> Result<InboundPlainMessage<'a>, Error>;
+
+    fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error>;
 }
 
 /// Objects with this trait can encrypt TLS messages.
@@ -181,7 +183,9 @@ pub trait MessageEncrypter: Send + Sync {
         tcpls_header: &TcplsHeader,
         frame_header: Option<Frame>
     ) -> Result<OutboundOpaqueMessage, Error>;
-    fn encrypted_payload_len_tcpls(&self, payload_len: usize, frame_header: Option<Frame>) -> (usize, usize);
+    fn encrypted_payload_len_tcpls(&self, payload_len: usize, header_len: usize) -> (usize, usize);
+
+    fn get_tag_length(&self) -> usize;
 }
 
 impl dyn MessageEncrypter {
@@ -459,7 +463,11 @@ impl MessageEncrypter for InvalidMessageEncrypter {
         todo!()
     }
 
-    fn encrypted_payload_len_tcpls(&self, payload_len: usize, frame_header: Option<Frame>) -> (usize, usize) {
+    fn encrypted_payload_len_tcpls(&self, payload_len: usize, header_len: usize) -> (usize, usize) {
+        todo!()
+    }
+
+    fn get_tag_length(&self) -> usize {
         todo!()
     }
 }
@@ -476,7 +484,11 @@ impl MessageDecrypter for InvalidMessageDecrypter {
         Err(Error::DecryptError)
     }
 
-    fn decrypt_tcpls<'a>(&mut self, msg: InboundOpaqueMessage<'a>, seq: u64, stream_id: u32, recv_buf: &mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<InboundPlainMessage<'a>, Error> {
+    fn decrypt_tcpls<'a, 'b>(&mut self, msg: InboundOpaqueMessage<'a>, seq: u64, stream_id: u32, recv_buf: &'b mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<InboundPlainMessage<'b>, Error> {
+        todo!()
+    }
+
+    fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error> {
         todo!()
     }
 }

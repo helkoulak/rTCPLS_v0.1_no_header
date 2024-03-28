@@ -366,7 +366,7 @@ impl TcplsHeader {
 fn test_encode_decode_stream_frame() {
     let mut buf = [0; 3];
 
-    let mut stream_frame = Frame::Stream {
+    let stream_frame = Frame::Stream {
         length: 24,
         fin: 1,
     };
@@ -386,7 +386,7 @@ fn test_encode_decode_stream_frame() {
 fn test_encode_decode_ack_frame() {
     let mut buf = [0; 6];
 
-    let mut ack_frame = Frame::ACK {
+    let ack_frame = Frame::ACK {
         highest_record_sn_received: 1753698,
         connection_id: 8,
     };
@@ -406,7 +406,7 @@ fn test_encode_decode_ack_frame() {
 fn test_encode_decode_new_token_frame() {
     let mut buf = [0; 37];
 
-    let mut token_frame = Frame::NewToken {
+    let token_frame = Frame::NewToken {
         token: [0x0F; 32],
         sequence: 854785486,
     };
@@ -426,7 +426,7 @@ fn test_encode_decode_new_token_frame() {
 fn test_parse_new_address_frame() {
     let mut v4 = [0; 12];
 
-    let mut v4_frame = Frame::NewAddress {
+    let v4_frame = Frame::NewAddress {
         port: 9874,
         address: vec![0x0A, 0x00, 0x00, 0x0C],
         address_version: 0x04,
@@ -452,7 +452,7 @@ fn test_parse_new_address_frame() {
 
     let mut v6 = [0; 30];
 
-    let mut v6_frame = Frame::NewAddress {
+    let v6_frame = Frame::NewAddress {
         port: 987455,
         address: vec![
             0x0A, 0x00, 0x00, 0x0C, 0x0A, 0x00, 0x00, 0x0C, 0x0A, 0x00, 0x00, 0x0C, 0x0A, 0x00,

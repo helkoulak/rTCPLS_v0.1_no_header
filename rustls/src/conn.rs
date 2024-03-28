@@ -324,7 +324,7 @@ https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
             Ok(self
                 .core
                 .common_state
-                .buffer_plaintext(buf.into(), &mut self.sendable_plaintext, DEFAULT_STREAM_ID, false))
+                .buffer_plaintext(buf.into(), &mut self.sendable_plaintext, self.write_to, self.fin))
         }
 
         fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
@@ -564,9 +564,10 @@ impl<Data> ConnectionCommon<Data> {
         T: io::Read + io::Write,
     {
 
+        let mut map = RecvBufMap::new();
         let mut recv = match recv_map  {
             Some(map) => map,
-            None => &mut RecvBufMap::new(),
+            None => &mut map,
         };
 
         let mut eof = false;
