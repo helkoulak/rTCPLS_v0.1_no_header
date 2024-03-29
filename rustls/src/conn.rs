@@ -321,10 +321,12 @@ https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
 
     impl<T> PlaintextSink for ConnectionCommon<T> {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            let stream_id = self.write_to;
+            let fin = self.fin;
             Ok(self
                 .core
                 .common_state
-                .buffer_plaintext(buf.into(), &mut self.sendable_plaintext, self.write_to, self.fin))
+                .buffer_plaintext(buf.into(), &mut self.sendable_plaintext, stream_id, fin))
         }
 
         fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {

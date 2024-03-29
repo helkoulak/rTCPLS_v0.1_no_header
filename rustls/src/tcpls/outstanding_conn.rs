@@ -51,6 +51,10 @@ impl OutstandingConnMap {
         &mut self.map
     }
 
+    pub fn as_ref(&mut self) -> & SimpleIdHashMap<OutstandingTcpConn> {
+        & self.map
+    }
+
     pub fn wants_write(&self, id: u64) -> bool {
         self.map.get(&id).unwrap().request_sent == false
     }

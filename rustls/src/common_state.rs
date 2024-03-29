@@ -96,6 +96,8 @@ impl CommonState {
             tcpls_tokens: Vec::new(),
             received_plaintext: ChunkVecBuffer::new(Some(DEFAULT_RECEIVED_PLAINTEXT_LIMIT)),
             conn_in_use: 0,
+            write_to: 0,
+            fin: false,
             queued_key_update_message: None,
 
             protocol: Protocol::Tcp,

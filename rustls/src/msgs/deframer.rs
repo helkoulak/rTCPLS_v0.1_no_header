@@ -735,7 +735,7 @@ trait FilledDeframerBuffer {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct RangeBufInfo {
+pub(crate) struct RangeBufInfo {
     /// The id of the stream this record belongs to
     pub(crate) id: u16,
 
@@ -750,7 +750,7 @@ pub struct RangeBufInfo {
 }
 
 impl RangeBufInfo {
-    pub fn from(chunk_num: u32, id: u16, len: usize) -> RangeBufInfo {
+    pub(crate) fn from(chunk_num: u32, id: u16, len: usize) -> RangeBufInfo {
         RangeBufInfo {
             id,
             chunk_num,
@@ -836,12 +836,12 @@ const READ_SIZE: usize = 4096;
 
 
 #[derive(Default)]
-pub struct MessageDeframerMap {
+pub(crate) struct MessageDeframerMap {
     deframers: SimpleIdHashMap<DeframerVecBuffer>,
 }
 
 impl MessageDeframerMap {
-    pub fn new() -> MessageDeframerMap {
+    pub(crate) fn new() -> MessageDeframerMap {
         MessageDeframerMap {
             ..Default::default()
         }

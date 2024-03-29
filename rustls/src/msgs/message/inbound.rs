@@ -81,29 +81,7 @@ impl<'a> InboundOpaqueMessage<'a> {
     }
 }
 
-pub struct InboundOpaqueMessageImmut<'a> {
-    pub typ: ContentType,
-    pub version: ProtocolVersion,
-    pub payload: &'a [u8],
-}
 
-impl InboundOpaqueMessageImmut {
-    pub(crate) fn read(r: &mut Reader) -> Result<Self, MessageError> {
-        let (typ, version, len) = r.as_reader(read_opaque_message_header)?;
-
-        let mut sub = r
-            .sub(len as usize)
-            .map_err(|_| MessageError::TooShortForLength)?;
-        let payload = sub.rest();
-
-        Ok(Self {
-            typ,
-            version,
-            payload,
-        })
-    }
-
-}
 
 
 pub struct BorrowedPayload<'a>(&'a mut [u8]);

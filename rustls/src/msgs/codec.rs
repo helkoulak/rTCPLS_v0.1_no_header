@@ -260,7 +260,7 @@ pub(crate) fn put_u64(v: u64, bytes: &mut [u8]) {
 }
 
 
-pub fn put_u32(v: u32, bytes: &mut [u8]) {
+pub(crate) fn put_u32(v: u32, bytes: &mut [u8]) {
     let bytes: &mut [u8; 4] = (&mut bytes[..4]).try_into().unwrap();
     *bytes = u32::to_be_bytes(v);
 }

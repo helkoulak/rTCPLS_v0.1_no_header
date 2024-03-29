@@ -23,7 +23,7 @@ pub struct RecvBuf {
 
     pub next_recv_pkt_num: u32,
 
-    pub read_seq: u64,
+
 }
 
 impl RecvBuf {
@@ -112,7 +112,6 @@ impl RecvBuf {
             *byte = 0;
         }
         self.offset = 0;
-        self.read_seq = 0;
         self.next_recv_pkt_num = 0;
         self.consumed = 0;
         self.len = 0;
@@ -321,14 +320,13 @@ mod test {
         stream.data.copy_from_slice(vector.as_slice());
         stream.len = 1234;
         stream.next_recv_pkt_num = 95475;
-        stream.read_seq = 65454;
+
         stream.consumed = 54455;
         stream.offset = 412;
 
         stream.reset_stream();
 
         assert!(stream.data.iter().all(|&x| x == 0));
-        assert_eq!(stream.read_seq, 0);
         assert_eq!(stream.offset, 0);
         assert_eq!(stream.next_recv_pkt_num, 0);
         assert_eq!(stream.consumed, 0);
