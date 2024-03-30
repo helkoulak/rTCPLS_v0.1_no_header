@@ -263,7 +263,7 @@ impl TcplsSession {
 
                 sent = match stream.send.write_to(socket) {
                     Ok(sent) => sent,
-                    _Error => return Err(Error::General("Data sending on socket failed".to_string())),
+                    _error => return Err(Error::General("Data sending on socket failed".to_string())),
 
                 };
 

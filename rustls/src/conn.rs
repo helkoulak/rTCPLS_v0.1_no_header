@@ -358,6 +358,7 @@ https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
 #[cfg(feature = "std")]
 pub use connection::{Connection, Reader, Writer};
 use crate::recvbuf::RecvBufMap;
+use crate::tcpls::frame::{Frame, STREAM_FRAME_HEADER_SIZE};
 use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
 #[derive(Debug)]
@@ -823,6 +824,10 @@ impl<Data> ConnectionCore<Data> {
                 Some(msg) => msg,
                 None => break,
             };
+            self.process_tcpls_payload(app_buffers);
+            if msg.typ == ContentType::ApplicationData {
+                continue;
+            }
 
             match self.process_msg(msg, state, Some(sendable_plaintext)) {
                 Ok(new) => state = new,
@@ -838,6 +843,53 @@ impl<Data> ConnectionCore<Data> {
         deframer_buffer.discard(discard);
         self.state = Ok(state);
         Ok(self.common_state.current_io_state(Some(app_buffers)))
+    }
+
+
+    ///TODO: Add process functionality to other TCPLS control frames
+    fn process_tcpls_payload(&mut self, app_buffers: &mut RecvBufMap) {
+        let mut output = app_buffers.get_mut(self.common_state.record_layer.get_stream_in_use()).unwrap();
+        let offset = output.get_offset();
+        let mut b = octets::Octets::with_slice_at_offset(output.as_ref(), offset as usize);
+
+        loop {
+            let decoded_frame = Frame::parse(&mut b).unwrap();
+            match decoded_frame {
+                Frame::Padding => {},
+                Frame::Ping => {},
+                Frame::Stream {
+                    length,
+                    fin,
+                } => {
+                    output.truncate_processed(STREAM_FRAME_HEADER_SIZE);
+                    break
+                },
+
+                Frame::ACK {
+                    highest_record_sn_received,
+                    connection_id,
+                } => {},
+
+                Frame::NewToken { token, sequence } => {},
+
+                Frame::ConnectionReset { connection_id } => {},
+                Frame::NewAddress {
+                    port,
+                    address,
+                    address_version,
+                    address_id,
+                } => {},
+
+                Frame::RemoveAddress { address_id } => {},
+
+                Frame::StreamChange {
+                    next_record_stream_id,
+                    next_offset,
+                } => {},
+
+                _ => {}
+            }
+        }
     }
 
     /// Pull a message out of the deframer and send any messages that need to be sent as a result.

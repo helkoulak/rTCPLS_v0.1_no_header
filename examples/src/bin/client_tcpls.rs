@@ -1,10 +1,11 @@
 #[macro_use]
 extern crate serde_derive;
 
-use std::process;
+use std::{fs, process};
 use std::io;
-use std::io::{Read, Write};
-
+use std::io::{BufReader, Read, Write};
+use std::net::ToSocketAddrs;
+use rustls::crypto::{ring as provider, CryptoProvider};
 use std::ops::{Deref, DerefMut};
 use std::str;
 use std::sync::Arc;
@@ -12,9 +13,11 @@ use std::time::Duration;
 
 use docopt::Docopt;
 use mio::Token;
+use pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use ring::digest;
 use rustls::recvbuf::RecvBufMap;
-use rustls::tcpls::{build_tls_client_config, lookup_address, TcplsSession};
+use rustls::RootCertStore;
+use rustls::tcpls::TcplsSession;
 use rustls::tcpls::stream::SimpleIdHashSet;
 
 const CLIENT: mio::Token = mio::Token(0);
@@ -167,7 +170,7 @@ impl TlsClient {
         len += input.len() as u16;
         // Calculate the hash of input using SHA-256
         let hash = TlsClient::calculate_sha256_hash(input);
-        len += hash.algorithm().output_len as u16;
+        len += hash.algorithm().output_len() as u16;
         len += 4;
         // Append total length and hash value to the input to be sent to the peer
         data.extend_from_slice([((len >> 8) & 0xFF) as u8, ((len & 0xFF) as u8)].as_slice());
@@ -247,34 +250,231 @@ struct Args {
     arg_hostname: String,
 }
 
-#[cfg(feature = "dangerous_configuration")]
-mod danger {
-    pub struct NoCertificateVerification {}
 
-    impl rustls::client::ServerCertVerifier for NoCertificateVerification {
+
+
+fn find_suite(name: &str) -> Option<rustls::SupportedCipherSuite> {
+    for suite in provider::ALL_CIPHER_SUITES {
+        let sname = format!("{:?}", suite.suite()).to_lowercase();
+
+        if sname == name.to_string().to_lowercase() {
+            return Some(*suite);
+        }
+    }
+
+    None
+}
+
+/// Make a vector of ciphersuites named in `suites`
+fn lookup_suites(suites: &[String]) -> Vec<rustls::SupportedCipherSuite> {
+    let mut out = Vec::new();
+
+    for csname in suites {
+        let scs = find_suite(csname);
+        match scs {
+            Some(s) => out.push(s),
+            None => panic!("cannot look up ciphersuite '{}'", csname),
+        }
+    }
+
+    out
+}
+
+/// Make a vector of protocol versions named in `versions`
+fn lookup_versions(versions: &[String]) -> Vec<&'static rustls::SupportedProtocolVersion> {
+    let mut out = Vec::new();
+
+    for vname in versions {
+        let version = match vname.as_ref() {
+            "1.2" => &rustls::version::TLS12,
+            "1.3" => &rustls::version::TLS13,
+            _ => panic!(
+                "cannot look up version '{}', valid are '1.2' and '1.3'",
+                vname
+            ),
+        };
+        out.push(version);
+    }
+
+    out
+}
+
+fn load_certs(filename: &str) -> Vec<CertificateDer<'static>> {
+    let certfile = fs::File::open(filename).expect("cannot open certificate file");
+    let mut reader = BufReader::new(certfile);
+    rustls_pemfile::certs(&mut reader)
+        .map(|result| result.unwrap())
+        .collect()
+}
+
+fn load_private_key(filename: &str) -> PrivateKeyDer<'static> {
+    let keyfile = fs::File::open(filename).expect("cannot open private key file");
+    let mut reader = BufReader::new(keyfile);
+
+    loop {
+        match rustls_pemfile::read_one(&mut reader).expect("cannot parse private key .pem file") {
+            Some(rustls_pemfile::Item::Pkcs1Key(key)) => return key.into(),
+            Some(rustls_pemfile::Item::Pkcs8Key(key)) => return key.into(),
+            Some(rustls_pemfile::Item::Sec1Key(key)) => return key.into(),
+            None => break,
+            _ => {}
+        }
+    }
+
+    panic!(
+        "no keys found in {:?} (encrypted keys not supported)",
+        filename
+    );
+}
+
+mod danger {
+    use pki_types::{CertificateDer, ServerName, UnixTime};
+    use rustls::client::danger::HandshakeSignatureValid;
+    use rustls::crypto::{verify_tls12_signature, verify_tls13_signature, CryptoProvider};
+    use rustls::DigitallySignedStruct;
+
+    #[derive(Debug)]
+    pub struct NoCertificateVerification(CryptoProvider);
+
+    impl NoCertificateVerification {
+        pub fn new(provider: CryptoProvider) -> Self {
+            Self(provider)
+        }
+    }
+
+    impl rustls::client::danger::ServerCertVerifier for NoCertificateVerification {
         fn verify_server_cert(
             &self,
-            _end_entity: &rustls::Certificate,
-            _intermediates: &[rustls::Certificate],
-            _server_name: &rustls::ServerName,
-            _scts: &mut dyn Iterator<Item = &[u8]>,
+            _end_entity: &CertificateDer<'_>,
+            _intermediates: &[CertificateDer<'_>],
+            _server_name: &ServerName<'_>,
             _ocsp: &[u8],
-            _now: std::time::SystemTime,
-        ) -> Result<rustls::client::ServerCertVerified, rustls::Error> {
-            Ok(rustls::client::ServerCertVerified::assertion())
+            _now: UnixTime,
+        ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+            Ok(rustls::client::danger::ServerCertVerified::assertion())
+        }
+
+        fn verify_tls12_signature(
+            &self,
+            message: &[u8],
+            cert: &CertificateDer<'_>,
+            dss: &DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, rustls::Error> {
+            verify_tls12_signature(
+                message,
+                cert,
+                dss,
+                &self.0.signature_verification_algorithms,
+            )
+        }
+
+        fn verify_tls13_signature(
+            &self,
+            message: &[u8],
+            cert: &CertificateDer<'_>,
+            dss: &DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, rustls::Error> {
+            verify_tls13_signature(
+                message,
+                cert,
+                dss,
+                &self.0.signature_verification_algorithms,
+            )
+        }
+
+        fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+            self.0
+                .signature_verification_algorithms
+                .supported_schemes()
         }
     }
 }
 
-
-
 /// Build a `ClientConfig` from our arguments
-fn build_tls_client_config_args(args: &Args) -> Arc<rustls::ClientConfig> {
+fn make_config(args: &Args) -> Arc<rustls::ClientConfig> {
+    let mut root_store = RootCertStore::empty();
 
+    if args.flag_cafile.is_some() {
+        let cafile = args.flag_cafile.as_ref().unwrap();
 
-    build_tls_client_config(args.flag_cafile.as_ref(), None, args.flag_suite.clone(), args.flag_protover.clone(), args.flag_auth_key.clone(),
-                            args.flag_auth_certs.clone(), args.flag_no_tickets, args.flag_no_sni, args.flag_proto.clone(), args.flag_max_frag_size)
+        let certfile = fs::File::open(cafile).expect("Cannot open CA file");
+        let mut reader = BufReader::new(certfile);
+        root_store.add_parsable_certificates(
+            rustls_pemfile::certs(&mut reader).map(|result| result.unwrap()),
+        );
+    } else {
+        root_store.extend(
+            webpki_roots::TLS_SERVER_ROOTS
+                .iter()
+                .cloned(),
+        );
+    }
 
+    let suites = if !args.flag_suite.is_empty() {
+        lookup_suites(&args.flag_suite)
+    } else {
+        provider::DEFAULT_CIPHER_SUITES.to_vec()
+    };
+
+    let versions = if !args.flag_protover.is_empty() {
+        lookup_versions(&args.flag_protover)
+    } else {
+        rustls::DEFAULT_VERSIONS.to_vec()
+    };
+
+    let config = rustls::ClientConfig::builder_with_provider(
+        CryptoProvider {
+            cipher_suites: suites,
+            ..provider::default_provider()
+        }
+            .into(),
+    )
+        .with_protocol_versions(&versions)
+        .expect("inconsistent cipher-suite/versions selected")
+        .with_root_certificates(root_store);
+
+    let mut config = match (&args.flag_auth_key, &args.flag_auth_certs) {
+        (Some(key_file), Some(certs_file)) => {
+            let certs = load_certs(certs_file);
+            let key = load_private_key(key_file);
+            config
+                .with_client_auth_cert(certs, key)
+                .expect("invalid client auth certs/key")
+        }
+        (None, None) => config.with_no_client_auth(),
+        (_, _) => {
+            panic!("must provide --auth-certs and --auth-key together");
+        }
+    };
+
+    config.key_log = Arc::new(rustls::KeyLogFile::new());
+
+    if args.flag_no_tickets {
+        config.resumption = config
+            .resumption
+            .tls12_resumption(rustls::client::Tls12Resumption::SessionIdOnly);
+    }
+
+    if args.flag_no_sni {
+        config.enable_sni = false;
+    }
+
+    config.alpn_protocols = args
+        .flag_proto
+        .iter()
+        .map(|proto| proto.as_bytes().to_vec())
+        .collect();
+    config.max_fragment_size = args.flag_max_frag_size;
+
+    if args.flag_insecure {
+        config
+            .dangerous()
+            .set_certificate_verifier(Arc::new(danger::NoCertificateVerification::new(
+                provider::default_provider(),
+            )));
+    }
+
+    Arc::new(config)
 }
 
 
@@ -297,13 +497,19 @@ fn main() {
 
     let mut recv_map = RecvBufMap::new();
 
-    let dest_address = lookup_address(args.arg_hostname.as_str(), args.flag_port.unwrap());
+    let dest_address = (args.arg_hostname.as_str(), args.flag_port.unwrap())
+        .to_socket_addrs()
+        .unwrap()
+        .next()
+        .unwrap();
 
     let mut client = TlsClient::new();
 
-    let config = build_tls_client_config_args(&args);
+    let config = make_config(&args);
 
-    let server_name = args.arg_hostname.as_str().try_into().expect("invalid DNS name");
+    let server_name = ServerName::try_from(args.arg_hostname.as_str())
+        .expect("invalid DNS name")
+        .to_owned();
 
     client.tcpls_session.tcpls_connect(dest_address, Some(config), Some(server_name), false);
 

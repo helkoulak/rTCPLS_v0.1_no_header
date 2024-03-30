@@ -319,7 +319,6 @@
     clippy::upper_case_acronyms,
     trivial_casts,
     trivial_numeric_casts,
-    missing_docs,
     unreachable_pub,
     unused_import_braces,
     unused_extern_crates,

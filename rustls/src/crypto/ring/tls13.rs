@@ -390,15 +390,16 @@ impl MessageDecrypter for Tls13MessageDecrypter {
             return Err(Error::PeerSentOversizedRecord);
         }
 
+        recv_buf.last_recv_len = payload_len_no_type;
         Ok(InboundOpaqueMessage::new(msg.typ, ProtocolVersion::TLSv1_3, match msg.typ {
             ContentType::ApplicationData => {
                 recv_buf.next_recv_pkt_num += 1;
                 recv_buf.offset += payload_len_no_type as u64;
-                &mut recv_buf.get_mut()[..type_pos]
+                core::mem::take(&mut &mut recv_buf.get_mut()[..type_pos])
             },
             _ => {
                 recv_buf.next_recv_pkt_num += 1;
-                &mut recv_buf.get_mut()[..type_pos]
+                core::mem::take(&mut &mut recv_buf.get_mut()[..type_pos])
             },
         },).into_plain_message()
         )

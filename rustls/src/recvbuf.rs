@@ -15,7 +15,7 @@ pub struct RecvBuf {
     pub offset: u64,
 
     // Length of last decrypted data chunk
-    len: usize,
+    pub last_recv_len: usize,
 
     /// indicates to which offset data within offset has already been marked consumed by the
     /// application.
@@ -59,7 +59,7 @@ impl RecvBuf {
     }
 
     pub fn get_mut_consumed(&mut self) -> &mut [u8] {
-        &mut self.data[self.consumed..]
+        &mut self.data[self.consumed..self.offset as usize]
     }
 
     pub  fn get_offset(&self) -> u64 {
@@ -114,7 +114,7 @@ impl RecvBuf {
         self.offset = 0;
         self.next_recv_pkt_num = 0;
         self.consumed = 0;
-        self.len = 0;
+        self.last_recv_len = 0;
     }
 
     pub fn empty_stream(&mut self) {
@@ -123,7 +123,7 @@ impl RecvBuf {
         }
         self.offset = 0;
         self.consumed = 0;
-        self.len = 0;
+        self.last_recv_len = 0;
 
     }
 
@@ -318,7 +318,7 @@ mod test {
         let  vector = vec![0x0A; DEFAULT_BUFFER_LIMIT];
         let mut stream = RecvBuf::new(0, Some(DEFAULT_BUFFER_LIMIT));
         stream.data.copy_from_slice(vector.as_slice());
-        stream.len = 1234;
+        stream.last_recv_len = 1234;
         stream.next_recv_pkt_num = 95475;
 
         stream.consumed = 54455;
@@ -330,7 +330,7 @@ mod test {
         assert_eq!(stream.offset, 0);
         assert_eq!(stream.next_recv_pkt_num, 0);
         assert_eq!(stream.consumed, 0);
-        assert_eq!(stream.len, 0);
+        assert_eq!(stream.last_recv_len, 0);
     }
 
     #[test]

@@ -5,21 +5,18 @@ use std::vec;
 use siphasher::sip::SipHasher;
 
 use zeroize::Zeroize;
-use ring::aead;
 use crate::crypto::tls13::HkdfExpander;
 
 use crate::enums::{ContentType, ProtocolVersion};
 use crate::error::Error;
 use crate::msgs::codec;
-use crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
 pub use crate::msgs::message::{
     BorrowedPayload, InboundOpaqueMessage, InboundPlainMessage, OutboundChunks,
     OutboundOpaqueMessage, OutboundPlainMessage, PlainMessage, PrefixedPayload,
 };
-use crate::PeerMisbehaved;
 use crate::recvbuf::RecvBuf;
 use crate::suites::ConnectionTrafficSecrets;
-use crate::tcpls::frame::{Frame, TCPLS_HEADER_SIZE, TcplsHeader};
+use crate::tcpls::frame::{Frame, TcplsHeader};
 
 /// Factory trait for building `MessageEncrypter` and `MessageDecrypter` for a TLS1.3 cipher suite.
 pub trait Tls13AeadAlgorithm: Send + Sync {
@@ -468,7 +465,7 @@ impl MessageEncrypter for InvalidMessageEncrypter {
     }
 
     fn get_tag_length(&self) -> usize {
-        todo!()
+        0
     }
 }
 

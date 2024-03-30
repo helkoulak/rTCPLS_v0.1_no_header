@@ -62,8 +62,6 @@ impl MessageDeframer {
         let mut start = 0;
         let tag_len = record_layer.get_tag_length();
         let mut header_decoded = TcplsHeader::default();
-        let mut payload_offset = 0;
-        let mut payload_length = 0;
         let mut end = 0;
         let mut recv_buf = &mut RecvBuf::default();
 
@@ -128,6 +126,9 @@ impl MessageDeframer {
 
             // Return CCS messages and early plaintext alerts immediately without decrypting.
             end = start + rd.used();
+            //Create an info object for the received record
+            self.record_info.insert(start as u64, RangeBufInfo::from(header_decoded.chunk_num, header_decoded.stream_id, end - start));
+
             let version_is_tls13 = matches!(negotiated_version, Some(ProtocolVersion::TLSv1_3));
             let allowed_plaintext = match m.typ {
                 // CCS messages are always plaintext.
@@ -162,6 +163,9 @@ impl MessageDeframer {
                     version,
                     payload: buffer.take(raw_payload_slice),
                 };
+                self.record_info
+                    .get_mut(&(start as u64))
+                    .unwrap().processed = true;
                 return Ok(Some(Deframed {
                     want_close_before_decrypt: false,
                     aligned: true,
@@ -179,20 +183,25 @@ impl MessageDeframer {
                     TcplsHeader::decode_tcpls_header_from_slice(
                         &record_layer.decrypt_header(sample, &m.payload[..TCPLS_HEADER_SIZE]).expect("decrypting header failed")
                     );
+                //Update record info if header is present
+                self.record_info.insert(start as u64, RangeBufInfo::from(header_decoded.chunk_num, header_decoded.stream_id, end - start));
+
             }
 
-            self.record_info.insert(start as u64, RangeBufInfo::from(header_decoded.chunk_num, header_decoded.stream_id, end - start));
 
             recv_buf = app_buffers.get_or_create_recv_buffer(header_decoded.stream_id as u64, None);
 
             if recv_buf.next_recv_pkt_num != header_decoded.chunk_num {
-                self.record_info.insert(start as u64, RangeBufInfo::from(header_decoded.chunk_num, header_decoded.stream_id, end - start));
                 continue
             }
 
             // Decrypt the encrypted message (if necessary).
             let (typ, version, plain_payload_slice) = match record_layer.decrypt_incoming_tcpls(m, recv_buf, &header_decoded) {
                 Ok(Some(decrypted)) => {
+                    self.record_info
+                        .get_mut(&(start as u64))
+                        .unwrap().processed = true;
+
                     let Decrypted {
                         want_close_before_decrypt,
                         plaintext:
@@ -1128,9 +1137,10 @@ mod tests {
             negotiated_version: Option<ProtocolVersion>,
         ) -> Error {
             let mut deframer_buffer = self.buffer.borrow();
+            let mut binding = RecvBufMap::new();
             let err = self
                 .inner
-                .pop(record_layer, negotiated_version, &mut deframer_buffer, &mut RecvBufMap::new())
+                .pop(record_layer, negotiated_version, &mut deframer_buffer, &mut binding)
                 .unwrap_err();
             let discard = deframer_buffer.pending_discard();
             self.buffer.discard(discard);
@@ -1143,9 +1153,10 @@ mod tests {
             negotiated_version: Option<ProtocolVersion>,
         ) -> PlainMessage {
             let mut deframer_buffer = self.buffer.borrow();
+            let mut binding = RecvBufMap::default();
             let m = self
                 .inner
-                .pop(record_layer, negotiated_version, &mut deframer_buffer, &mut RecvBufMap::default())
+                .pop(record_layer, negotiated_version, &mut deframer_buffer, &mut binding)
                 .unwrap()
                 .unwrap()
                 .message
