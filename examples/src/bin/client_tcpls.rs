@@ -9,8 +9,6 @@ use rustls::crypto::{ring as provider, CryptoProvider};
 use std::ops::{Deref, DerefMut};
 use std::str;
 use std::sync::Arc;
-use std::time::Duration;
-
 use docopt::Docopt;
 use mio::Token;
 use pki_types::{CertificateDer, PrivateKeyDer, ServerName};
@@ -20,7 +18,7 @@ use rustls::RootCertStore;
 use rustls::tcpls::TcplsSession;
 use rustls::tcpls::stream::SimpleIdHashSet;
 
-const CLIENT: mio::Token = mio::Token(0);
+const CLIENT: Token = Token(0);
 
 
 
@@ -520,7 +518,14 @@ fn main() {
     client.register(poll.registry(), &recv_map);
 
     loop {
-        poll.poll(&mut events, Some(Duration::new(5, 0))).unwrap();
+     match poll.poll(&mut events, None){
+        Ok(_) => {}
+        // Polling can be interrupted (e.g. by a debugger) - retry if so.
+        Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+        Err(e) => {
+            panic!("poll failed: {:?}", e)
+        }
+    }
 
         for ev in events.iter() {
             client.handle_event(ev, &mut recv_map);

@@ -74,9 +74,9 @@ impl RecvBuf {
      self.data.len() >= self.data.capacity()
     }
 
-    /// How many bytes we're storing
+    /// How many bytes written in buffer in the last decryption
     pub fn len(&self) -> usize {
-        self.offset as usize
+        self.last_recv_len
     }
 
     pub fn capacity(&self) -> usize {

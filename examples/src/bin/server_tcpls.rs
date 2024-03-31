@@ -526,7 +526,7 @@ fn load_crls(filenames: &[String]) -> Vec<CertificateRevocationListDer<'static>>
         .collect()
 }
 
-fn make_config(args: &Args) -> Arc<rustls::ServerConfig> {
+fn make_config(args: &Args, num_of_tokens: usize) -> Arc<rustls::ServerConfig> {
     let client_auth = if args.flag_auth.is_some() {
         let roots = load_certs(args.flag_auth.as_ref().unwrap());
         let mut client_auth_roots = RootCertStore::empty();
@@ -589,6 +589,8 @@ fn make_config(args: &Args) -> Arc<rustls::ServerConfig> {
 
     config.key_log = Arc::new(rustls::KeyLogFile::new());
 
+    config.max_tcpls_tokens_cap = num_of_tokens;
+
     if args.flag_resumption {
         config.session_storage = rustls::server::ServerSessionMemoryCache::new(256);
     }
@@ -624,7 +626,7 @@ fn main() {
     //Map of application controlled receive buffers
     let mut recv_map = RecvBufMap::new();
 
-    let config = make_config(&args);
+    let config = make_config(&args, 5);
 
     let mut listener = server_create_listener("0.0.0.0:443", Some(args.flag_port.unwrap()));
 
@@ -646,8 +648,14 @@ fn main() {
 
     let mut events = mio::Events::with_capacity(256);
     loop {
-        poll.poll(&mut events, Some(Duration::new(5, 0))).unwrap();
-
+       match poll.poll(&mut events, None){
+            Ok(_) => {}
+            // Polling can be interrupted (e.g. by a debugger) - retry if so.
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => {
+                panic!("poll failed: {:?}", e)
+            }
+        }
         for event in events.iter() {
             match event.token() {
                 LISTENER => {

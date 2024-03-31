@@ -104,7 +104,7 @@ impl MessageDeframer {
             // Does our `buf` contain a full message?  It does if it is big enough to
             // contain a header, and that header has a length which falls within `buf`.
             // If so, deframe it and place the message onto the frames output queue.
-            let mut rd = codec::ReaderMut::init(buffer.filled_get_mut(start..));
+            let mut rd = codec::ReaderMut::init(buffer.get_mut(start));
             let m = match InboundOpaqueMessage::read(&mut rd) {
                 Ok(m) => m,
                 Err(msg_err) => {
@@ -265,7 +265,11 @@ impl MessageDeframer {
             // than the currently buffered payload, we need to wait for more data.
 
             let src = buffer.raw_slice_to_filled_range(plain_payload_slice);
-            match self.append_hs(version, InternalPayload(src), end, buffer)? {
+            match self.append_hs(version, InternalPayload(src), end, buffer, match recv_buf.last_recv_len > 0 {
+                true => Some(recv_buf),
+                false => None,
+            }
+            )? {
 
                 HandshakePayloadState::Blocked => return Ok(None),
                 HandshakePayloadState::Complete(len) => break len,
@@ -308,6 +312,8 @@ impl MessageDeframer {
             payload: buffer.take(raw_payload),
         };
 
+        //Reset offset of recv buffer in case type != ApplicationType
+        recv_buf.truncate_processed(recv_buf.last_recv_len);
         Ok(Some(Deframed {
             want_close_before_decrypt: false,
             aligned: self.joining_hs.is_none(),
@@ -336,6 +342,7 @@ impl MessageDeframer {
         payload: P,
         end: usize,
         buffer: &mut B,
+        recv_buf: Option<&mut RecvBuf>,
     ) -> Result<HandshakePayloadState, Error> {
         let meta = match &mut self.joining_hs {
             Some(meta) => {
@@ -363,15 +370,25 @@ impl MessageDeframer {
                 // We've found a new handshake message here.
                 // Write it into the buffer and create the metadata.
 
-                let expected_len = payload.size(buffer)?;
-                buffer.copy(&payload, 0);
+                let expected_len = match recv_buf {
+                    Some(ref buf) => payload_size(buf.as_ref_consumed())?,
+                    None => payload.size(buffer)?,
+                };
+
+                match recv_buf {
+                    Some(ref buf) => {},
+                    None => buffer.copy(&payload, 0),
+                };
 
                 self.joining_hs
                     .insert(HandshakePayloadMeta {
                         message: Range { start: 0, end },
                         payload: Range {
                             start: 0,
-                            end: payload.len(),
+                            end: match recv_buf {
+                                Some(ref buf) => buf.last_recv_len,
+                                None => payload.len(),
+                            } ,
                         },
                         version,
                         expected_len,
@@ -385,11 +402,18 @@ impl MessageDeframer {
         Ok(match meta.expected_len {
             Some(len) if len <= meta.payload.len() => HandshakePayloadState::Complete(len),
 
-            _ => match buffer.len() > meta.message.end {
+            _ => match recv_buf {
+                Some(buf) => match buf.last_recv_len > meta.message.end {
 
-                true => HandshakePayloadState::Continue,
-                false => HandshakePayloadState::Blocked,
-            },
+                    true => HandshakePayloadState::Continue,
+                    false => HandshakePayloadState::Blocked,
+                },
+                None => match buffer.len() > meta.message.end {
+
+                    true => HandshakePayloadState::Continue,
+                    false => HandshakePayloadState::Blocked,
+                },
+            }
         })
     }
 
@@ -413,7 +437,7 @@ impl MessageDeframer {
         }
 
         let end = buffer.len() + payload.len();
-        self.append_hs(version, ExternalPayload(payload), end, buffer)?;
+        self.append_hs(version, ExternalPayload(payload), end, buffer, None)?;
         Ok(())
     }
 
@@ -478,7 +502,8 @@ impl<'a> AppendPayload<'a> for InternalPayload {
         &self,
         internal_buffer: &B,
     ) -> Result<Option<usize>, Error> {
-        payload_size(internal_buffer.filled_get(self.0.clone()))
+        let temp = internal_buffer.filled_get(self.0.clone());
+        payload_size(temp)
     }
 }
 
@@ -598,6 +623,10 @@ impl FilledDeframerBuffer for DeframerVecBuffer {
     fn filled(&self) -> &[u8] {
         &self.buf[..self.used]
     }
+
+    fn get_mut(&mut self, index: usize) -> &mut [u8] {
+        &mut self.buf[index..]
+    }
 }
 
 #[cfg(feature = "std")]
@@ -687,6 +716,10 @@ impl FilledDeframerBuffer for DeframerSliceBuffer<'_> {
     fn filled(&self) -> &[u8] {
         &self.buf[self.discard - self.taken..]
     }
+
+    fn get_mut(&mut self, index: usize) -> &mut [u8] {
+        &mut self.buf[index..]
+    }
 }
 
 impl DeframerBuffer<'_, InternalPayload> for DeframerSliceBuffer<'_> {
@@ -740,6 +773,8 @@ trait FilledDeframerBuffer {
     }
 
     fn filled(&self) -> &[u8];
+
+    fn get_mut(&mut self, index: usize) -> &mut [u8];
 
 }
 

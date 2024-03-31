@@ -647,14 +647,12 @@ pub enum ClientExtension {
     Cookie(PayloadU16),
     ExtendedMasterSecretRequest,
     CertificateStatusRequest(CertificateStatusRequest),
-    TCPLS,
-    TcplsTokens(Vec<TcplsToken>),
-    TcplsJoin(TcplsToken),
-
     TransportParameters(Vec<u8>),
     TransportParametersDraft(Vec<u8>),
     EarlyData,
-
+    TCPLS,
+    TcplsTokens(Vec<TcplsToken>),
+    TcplsJoin(TcplsToken),
     Unknown(UnknownExtension),
 }
 
@@ -676,14 +674,12 @@ impl ClientExtension {
             Self::Cookie(_) => ExtensionType::Cookie,
             Self::ExtendedMasterSecretRequest => ExtensionType::ExtendedMasterSecret,
             Self::CertificateStatusRequest(_) => ExtensionType::StatusRequest,
-
-            Self::TCPLS => ExtensionType::TCPLS,
-            Self::TcplsTokens(_) => ExtensionType::TcplsTokens,
-            Self::TcplsJoin(_) => ExtensionType::TcplsJoin,
-
             Self::TransportParameters(_) => ExtensionType::TransportParameters,
             Self::TransportParametersDraft(_) => ExtensionType::TransportParametersDraft,
             Self::EarlyData => ExtensionType::EarlyData,
+            Self::TCPLS => ExtensionType::TCPLS,
+            Self::TcplsTokens(_) => ExtensionType::TcplsTokens,
+            Self::TcplsJoin(_) => ExtensionType::TcplsJoin,
             Self::Unknown(ref r) => r.typ,
         }
     }
@@ -928,7 +924,7 @@ impl ServerExtension {
 
     pub fn make_tcpls_tokens(tokens_count: usize, secure_random: &dyn SecureRandom) -> Vec<TcplsToken> {
         let mut tokens: Vec<TcplsToken> = Vec::with_capacity(tokens_count);
-        //Generate five tokens
+        //Generate tokens
         for i in 1..=tokens_count {
             tokens.push(TcplsToken::random(secure_random).unwrap());
         }
@@ -1485,7 +1481,6 @@ impl TlsListElement for CertificateDer<'_> {
 // context-free any more.
 
 #[derive(Debug)]
-
 pub(crate) enum CertificateExtension {
     CertificateStatus(CertificateStatus),
     Unknown(UnknownExtension),
@@ -1601,7 +1596,6 @@ impl TlsListElement for CertificateEntry {
 }
 
 #[derive(Debug)]
-
 pub struct CertificatePayloadTls13 {
     pub(crate) context: PayloadU8,
     pub(crate) entries: Vec<CertificateEntry>,
@@ -2473,7 +2467,6 @@ impl CertificateStatus {
 }
 
 #[derive(Debug)]
-
 pub enum HandshakePayload<'a> {
 
     HelloRequest,

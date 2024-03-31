@@ -1,4 +1,5 @@
 use alloc::boxed::Box;
+use ring::rand::SecureRandom;
 use super::ring_like::hkdf::KeyType;
 use super::ring_like::{aead, hkdf, hmac};
 use crate::{crypto, PeerMisbehaved};
@@ -291,12 +292,12 @@ impl MessageEncrypter for Tls13MessageEncrypter {
             .map_err(|_| Error::EncryptError)?;
 
         // Take the LSBs of calculated tag as input sample for hash function
-        let sample = payload.as_mut_tcpls().rchunks(tag_len).next().unwrap();
+        let sample = payload.as_mut_tcpls_payload().rchunks(tag_len).next().unwrap();
 
-        let mut i = TCPLS_HEADER_OFFSET;
+        let mut i = 0;
         // Calculate hash(sample) XOR TCPLS header
         for byte in header_protecter.calculate_hash(sample){
-            payload.as_mut_tcpls()[i] ^= byte;
+            payload.as_mut_tcpls_header()[i] ^= byte;
             i += 1;
         }
 
@@ -391,18 +392,11 @@ impl MessageDecrypter for Tls13MessageDecrypter {
         }
 
         recv_buf.last_recv_len = payload_len_no_type;
-        Ok(InboundOpaqueMessage::new(msg.typ, ProtocolVersion::TLSv1_3, match msg.typ {
-            ContentType::ApplicationData => {
+        Ok(InboundOpaqueMessage::new(msg.typ, ProtocolVersion::TLSv1_3, {
                 recv_buf.next_recv_pkt_num += 1;
                 recv_buf.offset += payload_len_no_type as u64;
-                core::mem::take(&mut &mut recv_buf.get_mut()[..type_pos])
-            },
-            _ => {
-                recv_buf.next_recv_pkt_num += 1;
-                core::mem::take(&mut &mut recv_buf.get_mut()[..type_pos])
-            },
-        },).into_plain_message()
-        )
+                core::mem::take(&mut &mut recv_buf.get_mut()[..type_pos])}
+        ).into_plain_message())
 
     }
     fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error> {

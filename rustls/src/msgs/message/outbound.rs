@@ -243,8 +243,12 @@ impl PrefixedPayload {
         self.0.len() - HEADER_SIZE
     }
 
-    pub fn as_mut_tcpls(&mut self) -> &mut [u8] {
+    pub fn as_mut_tcpls_payload(&mut self) -> &mut [u8] {
         &mut self.0[HEADER_SIZE + TCPLS_HEADER_SIZE..]
+    }
+
+    pub fn as_mut_tcpls_header(&mut self) -> &mut [u8] {
+        &mut self.0[HEADER_SIZE..]
     }
 
     pub fn as_ref_tcpls(&self) -> &[u8] {

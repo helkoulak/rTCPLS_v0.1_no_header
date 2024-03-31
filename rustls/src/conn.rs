@@ -824,8 +824,9 @@ impl<Data> ConnectionCore<Data> {
                 Some(msg) => msg,
                 None => break,
             };
-            self.process_tcpls_payload(app_buffers);
+
             if msg.typ == ContentType::ApplicationData {
+                self.process_tcpls_payload(app_buffers);
                 continue;
             }
 

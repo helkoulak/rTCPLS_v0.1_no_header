@@ -5,7 +5,7 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::ops::Deref;
-use std::prelude::rust_2021::ToString;
+
 
 use pki_types::ServerName;
 
@@ -223,11 +223,11 @@ fn emit_fake_client_hello(client_config: &Arc<ClientConfig>, common: &mut Common
 
     if client_config.enable_tcpls {
         if !client_config.supports_version(ProtocolVersion::TLSv1_3) {
-            return Err(Error::General("TLS 1.3 support is required for TCPLS".to_string()))
+            return Err(Error::General("TLS 1.3 support is required for TCPLS".parse().unwrap()))
         }
         let tcpls_token = match common.get_next_tcpls_token() {
             Some(token) => token,
-            None => return Err(Error::General("No tcpls token found".to_string())),
+            None => return Err(Error::General("No tcpls token found".parse().unwrap())),
         };
 
         exts.push(ClientExtension::TcplsJoin(tcpls_token));
@@ -327,14 +327,7 @@ fn emit_client_hello_for_retry(
         ClientExtension::CertificateStatusRequest(CertificateStatusRequest::build_ocsp()),
     ];
 
-    if config.enable_tcpls {
-        if !config.supports_version(ProtocolVersion::TLSv1_3) {
-            panic!("TLS 1.3 support is required for TCPLS");
-        }
-        exts.push(ClientExtension::TCPLS);
-        exts.push(ClientExtension::TcplsTokens(Vec::new()));
-        cx.common.protocol = Tcpls;
-    }
+
 
     // Send the ECPointFormat extension only if we are proposing ECDHE
     if config
@@ -380,6 +373,15 @@ fn emit_client_hello_for_retry(
                 .collect::<Vec<_>>(),
         )));
     }
+
+    /*if config.enable_tcpls {
+        if !config.supports_version(ProtocolVersion::TLSv1_3) {
+            panic!("TLS 1.3 support is required for TCPLS");
+        }
+        exts.push(ClientExtension::TCPLS);
+        exts.push(ClientExtension::TcplsTokens(Vec::new()));
+        cx.common.protocol = Tcpls;
+    }*/
 
     // Extra extensions must be placed before the PSK extension
     exts.extend(extra_exts.iter().cloned());

@@ -278,7 +278,6 @@ fn test_header_protection() {
 
 
 #[test]
-
 fn test_building_header_from_header_dec() {
     let mut encrypted_with_header_protected= [0u8;52];
     let mut encrypted_with_header_unprotected= [0u8;52];
