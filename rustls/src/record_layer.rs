@@ -100,7 +100,6 @@ impl RecordLayer {
             .decrypt(encr, 0)
         {
             Ok(plaintext) => {
-                let seq= 1;
                 if !self.has_decrypted {
                     self.has_decrypted = true;
                 }
@@ -304,8 +303,8 @@ impl RecordLayer {
     pub(crate) fn write_seq(& self) -> u64 {
         self.write_seq_map.get(self.stream_in_use as u64).write_seq
     }
-
-    pub fn get_stream_in_use(& self) -> u16 {
+    ///Get id of stream in use
+    pub fn get_stream_id(& self) -> u16 {
         self.stream_in_use
     }
     /// Returns the number of remaining write sequences
@@ -466,7 +465,7 @@ mod tests {
         }
 
         let mut app_buffs = RecvBufMap::new();
-        let mut rev_buf = app_buffs.get_or_create_recv_buffer(0, None);
+        let mut rev_buf = app_buffs.get_or_create(0, None);
 
         // A record layer starts out invalid, having never decrypted.
         let mut record_layer = RecordLayer::new();

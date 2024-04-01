@@ -53,11 +53,12 @@ impl RecvBuf {
         &self.data
     }
 
-    ///Gives an immutable reference to the still unconsumed slice of the buffer
+    ///Gives immutable reference to the still unconsumed slice of the buffer
     pub fn as_ref_consumed(&self) -> & [u8] {
         &self.data[self.consumed..self.offset as usize]
     }
 
+    ///Gives mutable reference to the still unconsumed slice of the buffer
     pub fn get_mut_consumed(&mut self) -> &mut [u8] {
         &mut self.data[self.consumed..self.offset as usize]
     }
@@ -158,7 +159,7 @@ impl RecvBufMap {
     }
 
 
-    pub fn get_or_create_recv_buffer(&mut self, stream_id: u64, capacity: Option<usize>) -> &mut RecvBuf {
+    pub fn get_or_create(&mut self, stream_id: u64, capacity: Option<usize>) -> &mut RecvBuf {
         match self.buffers.entry(stream_id) {
             hash_map::Entry::Vacant(v) => {
                 v.insert(RecvBuf::new(stream_id, capacity))
@@ -275,7 +276,7 @@ pub struct ReaderAppBufs {
 
 impl ReaderAppBufs {
     pub fn read_app_bufs(&mut self, buf: &mut [u8], app_bufs: &mut RecvBufMap, id: u16) -> io::Result<usize> {
-        let len = app_bufs.get_or_create_recv_buffer(id as u64, None).read(buf)?;
+        let len = app_bufs.get_or_create(id as u64, None).read(buf)?;
 
         if len == 0 && !buf.is_empty() {
             // No bytes available:

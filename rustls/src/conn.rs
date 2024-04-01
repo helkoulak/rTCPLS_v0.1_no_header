@@ -650,7 +650,7 @@ impl<Data> ConnectionCommon<Data> {
         let mut deframer_buffer = self.deframers_map.get_or_create_def_vec_buff(DEFAULT_STREAM_ID as u64).borrow();
         let res = self
             .core
-            .deframe(None, &mut deframer_buffer, recv_buf)
+            .deframe(None, &mut deframer_buffer, Some(recv_buf))
             .map(|opt| opt.map(|pm| Message::try_from(pm).map(|m| m.into_owned())));
         let discard = deframer_buffer.pending_discard();
         self.deframers_map.get_or_create_def_vec_buff(DEFAULT_STREAM_ID as u64).discard(discard);
@@ -808,7 +808,7 @@ impl<Data> ConnectionCore<Data> {
             let mut borrowed_buffer = deframer_buffer.borrow();
             borrowed_buffer.queue_discard(discard);
 
-            let res = self.deframe(Some(&*state), &mut borrowed_buffer, app_buffers);
+            let res = self.deframe(Some(&*state), &mut borrowed_buffer, Some(app_buffers));
             discard = borrowed_buffer.pending_discard();
 
             let opt_msg = match res {
@@ -849,7 +849,7 @@ impl<Data> ConnectionCore<Data> {
 
     ///TODO: Add process functionality to other TCPLS control frames
     fn process_tcpls_payload(&mut self, app_buffers: &mut RecvBufMap) {
-        let mut output = app_buffers.get_mut(self.common_state.record_layer.get_stream_in_use()).unwrap();
+        let mut output = app_buffers.get_mut(self.common_state.record_layer.get_stream_id()).unwrap();
         let offset = output.get_offset();
         let mut b = octets::Octets::with_slice_at_offset(output.as_ref(), offset as usize);
 
@@ -888,7 +888,6 @@ impl<Data> ConnectionCore<Data> {
                     next_offset,
                 } => {},
 
-                _ => {}
             }
         }
     }
@@ -898,13 +897,13 @@ impl<Data> ConnectionCore<Data> {
         &mut self,
         state: Option<&dyn State<Data>>,
         deframer_buffer: &mut DeframerSliceBuffer<'b>,
-        app_buffers: &mut RecvBufMap,
+        app_buffers: Option<&'b mut RecvBufMap>,
     ) -> Result<Option<InboundPlainMessage<'b>>, Error> {
         match self.message_deframer.pop(
             &mut self.common_state.record_layer,
             self.common_state.negotiated_version,
             deframer_buffer,
-            app_buffers,
+            app_buffers.unwrap(),
         ) {
             Ok(Some(Deframed {
                 want_close_before_decrypt,

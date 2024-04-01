@@ -51,7 +51,7 @@ impl MessageDeframer {
         record_layer: &mut RecordLayer,
         negotiated_version: Option<ProtocolVersion>,
         buffer: &mut DeframerSliceBuffer<'b>,
-        app_buffers: &mut RecvBufMap,
+        app_buffers: &'b mut RecvBufMap,
     ) -> Result<Option<Deframed<'b>>, Error> {
         if let Some(last_err) = self.last_error.clone() {
             return Err(last_err);
@@ -61,9 +61,9 @@ impl MessageDeframer {
 
         let mut start = 0;
         let tag_len = record_layer.get_tag_length();
-        let mut header_decoded = TcplsHeader::default();
+        let mut hdr_decoded = TcplsHeader::default();
         let mut end = 0;
-        let mut recv_buf = &mut RecvBuf::default();
+        /*let mut recv_buf = &mut RecvBuf::default();*/
 
 
         // We loop over records we've received but not processed yet.
@@ -127,7 +127,7 @@ impl MessageDeframer {
             // Return CCS messages and early plaintext alerts immediately without decrypting.
             end = start + rd.used();
             //Create an info object for the received record
-            self.record_info.insert(start as u64, RangeBufInfo::from(header_decoded.chunk_num, header_decoded.stream_id, end - start));
+            self.record_info.insert(start as u64, RangeBufInfo::from(hdr_decoded.chunk_num, hdr_decoded.stream_id, end - start));
 
             let version_is_tls13 = matches!(negotiated_version, Some(ProtocolVersion::TLSv1_3));
             let allowed_plaintext = match m.typ {
@@ -179,24 +179,25 @@ impl MessageDeframer {
                 // Take the LSBs of calculated tag as input sample for hash function
                 let sample = m.payload.rchunks(tag_len).next().unwrap();
                 // Decode tcpls header and choose recv_buf accordingly
-                header_decoded =
+                hdr_decoded =
                     TcplsHeader::decode_tcpls_header_from_slice(
                         &record_layer.decrypt_header(sample, &m.payload[..TCPLS_HEADER_SIZE]).expect("decrypting header failed")
                     );
                 //Update record info if header is present
-                self.record_info.insert(start as u64, RangeBufInfo::from(header_decoded.chunk_num, header_decoded.stream_id, end - start));
+                self.record_info.insert(start as u64, RangeBufInfo::from(hdr_decoded.chunk_num, hdr_decoded.stream_id, end - start));
 
             }
 
 
-            recv_buf = app_buffers.get_or_create_recv_buffer(header_decoded.stream_id as u64, None);
+            /*recv_buf = app_buffers.get_or_create(hdr_decoded.stream_id as u64, None);*/
 
-            if recv_buf.next_recv_pkt_num != header_decoded.chunk_num {
+            if app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).next_recv_pkt_num != hdr_decoded.chunk_num {
                 continue
             }
 
             // Decrypt the encrypted message (if necessary).
-            let (typ, version, plain_payload_slice) = match record_layer.decrypt_incoming_tcpls(m, recv_buf, &header_decoded) {
+            let (typ, version, plain_payload_slice) =
+                match record_layer.decrypt_incoming_tcpls(m, app_buffers.get_or_create(hdr_decoded.stream_id as u64, None), &hdr_decoded) {
                 Ok(Some(decrypted)) => {
                     self.record_info
                         .get_mut(&(start as u64))
@@ -248,7 +249,10 @@ impl MessageDeframer {
                 let message = InboundPlainMessage {
                     typ,
                     version,
-                    payload: buffer.take(plain_payload_slice),
+                    payload: match record_layer.has_decrypted() {
+                        true => core::mem::take(&mut &*app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).get_mut_consumed()),
+                        false => buffer.take(plain_payload_slice),
+                    },
                 };
 
                 return Ok(Some(Deframed {
@@ -265,8 +269,9 @@ impl MessageDeframer {
             // than the currently buffered payload, we need to wait for more data.
 
             let src = buffer.raw_slice_to_filled_range(plain_payload_slice);
-            match self.append_hs(version, InternalPayload(src), end, buffer, match recv_buf.last_recv_len > 0 {
-                true => Some(recv_buf),
+            match self.append_hs(version, InternalPayload(src), end, buffer, match app_buffers.get_or_create(hdr_decoded.stream_id as u64, None)
+                .last_recv_len > 0 {
+                true => Some(app_buffers.get_or_create(hdr_decoded.stream_id as u64, None)),
                 false => None,
             }
             )? {
@@ -309,11 +314,12 @@ impl MessageDeframer {
         let message = InboundPlainMessage {
             typ,
             version,
-            payload: buffer.take(raw_payload),
+            payload: match record_layer.has_decrypted() {
+                true => core::mem::take(&mut &*app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).get_mut_consumed()),
+                false => buffer.take(raw_payload),
+            },
         };
 
-        //Reset offset of recv buffer in case type != ApplicationType
-        recv_buf.truncate_processed(recv_buf.last_recv_len);
         Ok(Some(Deframed {
             want_close_before_decrypt: false,
             aligned: self.joining_hs.is_none(),
@@ -502,8 +508,7 @@ impl<'a> AppendPayload<'a> for InternalPayload {
         &self,
         internal_buffer: &B,
     ) -> Result<Option<usize>, Error> {
-        let temp = internal_buffer.filled_get(self.0.clone());
-        payload_size(temp)
+        payload_size(internal_buffer.filled_get(self.0.clone()))
     }
 }
 
@@ -910,9 +915,10 @@ mod tests {
     use std::prelude::v1::*;
     use std::vec;
 
-    use super::*;
     use crate::crypto::cipher::PlainMessage;
     use crate::msgs::message::Message;
+
+    use super::*;
 
     #[test]
     fn check_incremental() {
