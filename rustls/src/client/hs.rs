@@ -374,14 +374,14 @@ fn emit_client_hello_for_retry(
         )));
     }
 
-    /*if config.enable_tcpls {
+    if config.enable_tcpls {
         if !config.supports_version(ProtocolVersion::TLSv1_3) {
             panic!("TLS 1.3 support is required for TCPLS");
         }
         exts.push(ClientExtension::TCPLS);
         exts.push(ClientExtension::TcplsTokens(Vec::new()));
         cx.common.protocol = Tcpls;
-    }*/
+    }
 
     // Extra extensions must be placed before the PSK extension
     exts.extend(extra_exts.iter().cloned());

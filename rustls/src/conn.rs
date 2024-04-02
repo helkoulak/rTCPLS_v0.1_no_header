@@ -655,7 +655,7 @@ impl<Data> ConnectionCommon<Data> {
             .deframe(None, &mut deframer_buffer, Some(recv_buf))
             .map(|opt| opt.map(|pm| Message::try_from(pm).map(|m| m.into_owned())));
         let discard = deframer_buffer.pending_discard();
-        self.deframers_map.get_or_create_def_vec_buff(DEFAULT_STREAM_ID as u64).discard(discard);
+        self.deframers_map.get_or_create_def_vec_buff(DEFAULT_STREAM_ID as u64).discard(0, discard);
 
         match res? {
             Some(Ok(msg)) => Ok(Some(msg)),
@@ -817,7 +817,11 @@ impl<Data> ConnectionCore<Data> {
                 Ok(opt_msg) => opt_msg,
                 Err(e) => {
                     self.state = Err(e.clone());
-                    deframer_buffer.discard(discard);
+                    self.message_deframer.calculate_discard_range();
+                    deframer_buffer
+                        .discard(self.message_deframer.processed_range.start as usize,
+                                 (self.message_deframer.processed_range.end - self.message_deframer.processed_range.start) as usize);
+                    self.message_deframer.rearrange_record_info();
                     return Err(e);
                 }
             };
@@ -836,14 +840,21 @@ impl<Data> ConnectionCore<Data> {
                 Ok(new) => state = new,
                 Err(e) => {
                     self.state = Err(e.clone());
-                    deframer_buffer.discard(discard);
+                    self.message_deframer.calculate_discard_range();
+                    deframer_buffer
+                        .discard(self.message_deframer.processed_range.start as usize,
+                                 (self.message_deframer.processed_range.end - self.message_deframer.processed_range.start) as usize);
+                    self.message_deframer.rearrange_record_info();
                     return Err(e);
                 }
             }
         }
 
-
-        deframer_buffer.discard(discard);
+        self.message_deframer.calculate_discard_range();
+        deframer_buffer
+            .discard(self.message_deframer.processed_range.start as usize,
+                     (self.message_deframer.processed_range.end - self.message_deframer.processed_range.start) as usize);
+        self.message_deframer.rearrange_record_info();
         self.state = Ok(state);
         Ok(self.common_state.current_io_state(Some(app_buffers)))
     }

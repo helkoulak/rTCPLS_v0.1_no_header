@@ -37,6 +37,9 @@ pub struct MessageDeframer {
 
     /// Info of records delivered
     pub(crate) record_info: BTreeMap<u64, RangeBufInfo>,
+
+    /// Range of offsets of processed data in deframer buffer.
+    pub(crate) processed_range: Range<u64>,
 }
 
 impl MessageDeframer {
@@ -268,7 +271,11 @@ impl MessageDeframer {
             // If we don't know the payload size yet or if the payload size is larger
             // than the currently buffered payload, we need to wait for more data.
 
-            let src = buffer.raw_slice_to_filled_range(plain_payload_slice);
+            let src = match app_buffers.get_or_create(hdr_decoded.stream_id as u64, None)
+                .last_recv_len > 0 {
+                true => 0..0,
+                false => buffer.raw_slice_to_filled_range(plain_payload_slice),
+            };
             match self.append_hs(version, InternalPayload(src), end, buffer, match app_buffers.get_or_create(hdr_decoded.stream_id as u64, None)
                 .last_recv_len > 0 {
                 true => Some(app_buffers.get_or_create(hdr_decoded.stream_id as u64, None)),
@@ -423,6 +430,75 @@ impl MessageDeframer {
         })
     }
 
+    /// Calculate range where data was processed and can be discarded.
+    /// Contiguous data range grows to the left or right depending on adjacent processed records.
+    /// Range will only be saved in self.processed_range if range >= DISCARD_THRESHOLD.
+    pub fn calculate_discard_range(&mut self) {
+        let mut contiguous = true;
+        while contiguous {
+            for (offset, info) in self.record_info.iter() {
+                let entry_start = *offset;
+                let entry_end = *offset + info.len as u64;
+                if info.processed {
+                    // Initiate range with first processed entry found and build upon
+                    if self.processed_range.start == 0 && self.processed_range.end == 0 {
+                        self.processed_range.start = entry_start;
+                        self.processed_range.end = entry_end;
+                    }
+                    // expand to the right
+                    if entry_start == self.processed_range.end  {
+                        self.processed_range.end = entry_end;
+                    }
+                    // expand to the left
+                    if (entry_end == self.processed_range.start) {
+                        self.processed_range.start = entry_start;
+                    }
+                }
+            }
+            contiguous = false;
+        }
+
+    }
+
+    pub fn rearrange_record_info(&mut self) {
+        let mut new_record_info: BTreeMap<u64, RangeBufInfo > = BTreeMap::new();
+        let mut next_start = 0;
+
+        // Build a new record_info BTreeMap excluding the discarded range
+        for entry in self.record_info.iter()
+            .filter(|&(key, info)| *key < self.processed_range.start || *key >= self.processed_range.end) {
+            if *entry.0 == self.processed_range.end {
+                new_record_info.insert(self.processed_range.start, RangeBufInfo{
+                    chunk_num: entry.1.chunk_num,
+                    len: entry.1.len,
+                    id: entry.1.id,
+                    processed: entry.1.processed,
+                });
+                next_start = self.processed_range.start + entry.1.len as u64;
+                continue
+            }
+
+            if *entry.0 > self.processed_range.end {
+                new_record_info.insert(next_start, RangeBufInfo{
+                    chunk_num: entry.1.chunk_num,
+                    len: entry.1.len,
+                    id: entry.1.id,
+                    processed: entry.1.processed,
+                });
+                next_start += entry.1.len as u64;
+                continue
+            }
+            new_record_info.insert(*entry.0, RangeBufInfo{
+                chunk_num: entry.1.chunk_num,
+                len: entry.1.len,
+                id: entry.1.id,
+                processed: entry.1.processed,
+            });
+        }
+        self.record_info = new_record_info;
+        self.processed_range.start = 0;
+        self.processed_range.end   = 0;
+    }
 }
 
 #[cfg(feature = "std")]
@@ -539,7 +615,7 @@ impl DeframerVecBuffer {
     }
 
     /// Discard `taken` bytes from the start of our buffer.
-    pub fn discard(&mut self, taken: usize) {
+    pub fn discard(&mut self, start: usize, taken: usize) {
 
         #[allow(clippy::comparison_chain)]
         if taken < self.used {
@@ -556,8 +632,12 @@ impl DeframerVecBuffer {
              * 0          ^ self.used
              */
 
+            //If last record stored in buffer was processed
+            if (start + taken) == self.used {
+                self.used = start;
+            }
             self.buf
-                .copy_within(taken..self.used, 0);
+                .copy_within(start + taken..self.used, start);
             self.used -= taken;
         } else if taken == self.used {
             self.used = 0;
