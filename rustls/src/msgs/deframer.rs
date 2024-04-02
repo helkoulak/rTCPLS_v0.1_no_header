@@ -5,6 +5,7 @@ use core::slice::SliceIndex;
 use std::collections::{BTreeMap, hash_map};
 #[cfg(feature = "std")]
 use std::io;
+use std::vec;
 
 use super::codec::Codec;
 use crate::enums::{ContentType, ProtocolVersion};
@@ -248,6 +249,9 @@ impl MessageDeframer {
             // If it's not a handshake message, just return it -- no joining necessary.
 
             if typ != ContentType::Handshake {
+                if typ == ContentType::ApplicationData {
+                    app_buffers.insert_readable(record_layer.get_stream_id() as u64);
+                }
                 buffer.queue_discard(end);
                 let message = InboundPlainMessage {
                     typ,
@@ -295,9 +299,10 @@ impl MessageDeframer {
 
         let typ = ContentType::Handshake;
         let version = meta.version;
-        let raw_payload = RawSlice::from(
-            buffer.filled_get(meta.payload.start..meta.payload.start + expected_len),
-        );
+        let raw_payload = match record_layer.has_decrypted() {
+            true => RawSlice::from(Vec::new().as_slice()),
+            false => RawSlice::from(buffer.filled_get(meta.payload.start..meta.payload.start + expected_len)),
+        };
 
 
         // But before we return, update the `joining_hs` state to skip past this payload.

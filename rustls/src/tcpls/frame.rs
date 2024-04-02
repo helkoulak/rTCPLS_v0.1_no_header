@@ -13,7 +13,7 @@ pub const STREAM_FRAME_HEADER_SIZE: usize = 3;
 
 pub const MAX_TCPLS_FRAGMENT_LEN: usize = MAX_FRAGMENT_LEN - TCPLS_HEADER_SIZE - STREAM_FRAME_HEADER_SIZE;
 
-
+pub const TCPLS_PAYLOAD_OFFSET: usize = 13;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Frame {

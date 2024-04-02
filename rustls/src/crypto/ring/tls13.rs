@@ -1,4 +1,5 @@
 use alloc::boxed::Box;
+use std::vec;
 use ring::rand::SecureRandom;
 use super::ring_like::hkdf::KeyType;
 use super::ring_like::{aead, hkdf, hmac};
@@ -11,10 +12,10 @@ use crate::enums::{CipherSuite, ContentType, ProtocolVersion};
 use crate::error::Error;
 use crate::msgs::codec::Codec;
 use crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
-use crate::msgs::message::{BorrowedPayload, InboundPlainMessage, OutboundOpaqueMessage, OutboundPlainMessage, PrefixedPayload};
+use crate::msgs::message::{BorrowedPayload, HEADER_SIZE, InboundPlainMessage, OutboundChunks, OutboundOpaqueMessage, OutboundPlainMessage, PrefixedPayload};
 use crate::recvbuf::RecvBuf;
 use crate::suites::{CipherSuiteCommon, ConnectionTrafficSecrets, SupportedCipherSuite};
-use crate::tcpls::frame::{Frame, STREAM_FRAME_HEADER_SIZE, TCPLS_HEADER_SIZE, TcplsHeader};
+use crate::tcpls::frame::{Frame, STREAM_FRAME_HEADER_SIZE, TCPLS_HEADER_SIZE, TCPLS_PAYLOAD_OFFSET, TcplsHeader};
 use crate::tls13::Tls13CipherSuite;
 
 /// The TLS1.3 ciphersuite TLS_CHACHA20_POLY1305_SHA256
@@ -252,11 +253,12 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         tcpls_header: &TcplsHeader,
         frame_header: Option<Frame>
     ) -> Result<OutboundOpaqueMessage, Error> {
+        let plain_len = msg.payload.len();
         let hdr_len =  match frame_header.as_ref() {
             Some(_header) => STREAM_FRAME_HEADER_SIZE,
             None => 0,
         };
-        let (enc_payload_len, tag_len) = self.encrypted_payload_len_tcpls(msg.payload.len(), hdr_len);
+        let (enc_payload_len, tag_len) = self.encrypted_payload_len_tcpls(plain_len, hdr_len);
         let mut payload = PrefixedPayload::with_capacity_tcpls(enc_payload_len);
         let total_len = TCPLS_HEADER_SIZE + enc_payload_len;
 
@@ -266,16 +268,22 @@ impl MessageEncrypter for Tls13MessageEncrypter {
 
         //Write payload in output buffer
         payload.extend_from_chunks(&msg.payload);
-        let mut b = octets::OctetsMut::with_slice(payload.as_mut());
         //Write TCPLS header
-        b.put_u32(tcpls_header.chunk_num).unwrap();
-        b.put_u16(tcpls_header.offset_step).unwrap();
-        b.put_u16(tcpls_header.stream_id).unwrap();
+        payload.as_mut()[0] = (tcpls_header.chunk_num >> 24) as u8;
+        payload.as_mut()[1] = (tcpls_header.chunk_num >> 16) as u8;
+        payload.as_mut()[2] = (tcpls_header.chunk_num >> 8) as u8;
+        payload.as_mut()[3] = (tcpls_header.chunk_num & 0xff) as u8;
+        payload.as_mut()[4] = (tcpls_header.offset_step >> 8) as u8;
+        payload.as_mut()[5] = (tcpls_header.offset_step & 0xff) as u8;
+        payload.as_mut()[6] = (tcpls_header.stream_id >> 8) as u8;
+        payload.as_mut()[7] = (tcpls_header.stream_id & 0xff) as u8;
 
-        b.skip(msg.payload.len()).unwrap();
         // Write frame header and type
         match frame_header {
             Some(ref header) => {
+                payload.extend_from_slice(vec![0u8; 4].as_slice());
+                let mut b =
+                    octets::OctetsMut::with_slice_at_offset(payload.as_mut(), plain_len + TCPLS_HEADER_SIZE);
                 header.encode(&mut b).unwrap();
                 b.put_bytes(&msg.typ.to_array()).unwrap();
                 ()

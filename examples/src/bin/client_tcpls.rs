@@ -49,9 +49,9 @@ impl TlsClient {
                 //Send three byte arrays on three streams
                 let mut id_set = SimpleIdHashSet::default();
 
-                self.send_data(vec![0u8; 64000].as_slice(), 0).expect("");
-                self.send_data(vec![1u8; 64000].as_slice(), 1).expect("");
-                self.send_data(vec![2u8; 64000].as_slice(), 2).expect("");
+                self.send_data(vec![0u8; 20].as_slice(), 0).expect("");
+                self.send_data(vec![1u8; 20].as_slice(), 1).expect("");
+                self.send_data(vec![2u8; 20].as_slice(), 2).expect("");
 
                 id_set.insert(0);
                 id_set.insert(1);

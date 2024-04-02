@@ -73,8 +73,8 @@ impl MessageFragmenter {
     pub fn set_max_fragment_size(&mut self, max_fragment_size: Option<usize>) -> Result<(), Error> {
         self.max_frag = match max_fragment_size {
 
-            Some(sz @ 32..=MAX_FRAGMENT_SIZE) => sz - PACKET_OVERHEAD,
-            None => MAX_FRAGMENT_LEN,
+            Some(sz @ 32..=MAX_TCPLS_FRAGMENT_LEN) => sz - PACKET_OVERHEAD,
+            None => MAX_TCPLS_FRAGMENT_LEN,
             _ => return Err(Error::BadMaxFragmentSize),
         };
         Ok(())
