@@ -392,11 +392,17 @@ impl MessageDecrypter for Tls13MessageDecrypter {
         }
 
         recv_buf.last_recv_len = payload_len_no_type;
-        Ok(InboundOpaqueMessage::new(msg.typ, ProtocolVersion::TLSv1_3, {
-                recv_buf.next_recv_pkt_num += 1;
+        recv_buf.next_recv_pkt_num += 1;
+        Ok(InboundOpaqueMessage::new(msg.typ, ProtocolVersion::TLSv1_3, match msg.typ {
+            ContentType::ApplicationData => {
                 recv_buf.offset += payload_len_no_type as u64;
-                core::mem::take(&mut &mut recv_buf.get_mut()[..type_pos])}
-        ).into_plain_message())
+                // It does not matter what ref to return as it is upto the application to manipulate decrypted data
+                recv_buf.get_mut_consumed()
+            },
+            _ => {
+                recv_buf.get_mut_last_written()
+            },
+        }).into_plain_message())
 
     }
     fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error> {

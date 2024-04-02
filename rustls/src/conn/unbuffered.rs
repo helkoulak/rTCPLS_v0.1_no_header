@@ -47,8 +47,7 @@ impl<Data> UnbufferedConnectionCommon<Data> {
         mut check: impl FnMut(&mut Self) -> Option<T>,
         execute: impl FnOnce(&'c mut Self, &'i mut [u8], T) -> ConnectionState<'c, 'i, Data>,
     ) -> UnbufferedStatus<'c, 'i, Data> {
-        let mut app_bufs = RecvBufMap::new();
-        let mut buffer = DeframerSliceBuffer::new(incoming_tls);
+        let mut buffer = DeframerSliceBuffer::new(incoming_tls, 0);
 
         let (discard, state) = loop {
             if let Some(value) = check(self) {

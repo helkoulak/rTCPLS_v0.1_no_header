@@ -330,6 +330,8 @@ https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
         }
 
         fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
+            let stream_id = self.write_to;
+            let fin = self.fin;
             let payload_owner: Vec<&[u8]>;
             let payload = match bufs.len() {
                 0 => return Ok(0),
@@ -346,7 +348,7 @@ https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
             Ok(self
                 .core
                 .common_state
-                .buffer_plaintext(payload, &mut self.sendable_plaintext, DEFAULT_STREAM_ID, false))
+                .buffer_plaintext(payload, &mut self.sendable_plaintext, stream_id, fin))
         }
 
         fn flush(&mut self) -> io::Result<()> {
@@ -862,7 +864,7 @@ impl<Data> ConnectionCore<Data> {
                     length,
                     fin,
                 } => {
-                    output.truncate_processed(STREAM_FRAME_HEADER_SIZE);
+                    output.subtract_offset(STREAM_FRAME_HEADER_SIZE as u64);
                     break
                 },
 

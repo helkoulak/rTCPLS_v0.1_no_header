@@ -62,6 +62,16 @@ impl RecvBuf {
     pub fn get_mut_consumed(&mut self) -> &mut [u8] {
         &mut self.data[self.consumed..self.offset as usize]
     }
+    ///Gives mutable reference to slice of last written chunk of bytes. Mainly used in case of handshake
+    /// messages because they are always written at offset zero
+    pub fn get_mut_last_written(&mut self) -> &mut [u8] {
+        &mut self.data[..self.last_recv_len]
+    }
+    ///Gives immutable reference to slice of last written chunk of bytes. Mainly used in case of handshake
+    /// messages because they are always written at offset zero
+    pub fn get_last_written(& self) -> & [u8] {
+        & self.data[..self.last_recv_len]
+    }
 
     pub  fn get_offset(&self) -> u64 {
         self.offset
@@ -101,7 +111,11 @@ impl RecvBuf {
         self.consumed as u64 == self.offset
     }
 
-    pub fn truncate_processed(&mut self, processed: usize) { self.offset -= processed as u64; }
+    pub fn truncate_processed(&mut self) { self.offset -= self.last_recv_len as u64; }
+
+    pub fn subtract_offset(&mut self, sub: u64) {
+        self.offset -= sub;
+    }
 
 
     pub fn data_length(&self) -> u64 {

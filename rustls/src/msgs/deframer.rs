@@ -55,7 +55,7 @@ impl MessageDeframer {
     ) -> Result<Option<Deframed<'b>>, Error> {
         if let Some(last_err) = self.last_error.clone() {
             return Err(last_err);
-        } else if buffer.is_empty() {
+        } else if buffer.used == 0{
             return Ok(None);
         }
 
@@ -315,7 +315,7 @@ impl MessageDeframer {
             typ,
             version,
             payload: match record_layer.has_decrypted() {
-                true => core::mem::take(&mut &*app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).get_mut_consumed()),
+                true => core::mem::take(&mut &*app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).get_mut_last_written()),
                 false => buffer.take(raw_payload),
             },
         };
@@ -348,7 +348,7 @@ impl MessageDeframer {
         payload: P,
         end: usize,
         buffer: &mut B,
-        recv_buf: Option<&mut RecvBuf>,
+        recv_buf: Option<& RecvBuf>,
     ) -> Result<HandshakePayloadState, Error> {
         let meta = match &mut self.joining_hs {
             Some(meta) => {
@@ -377,7 +377,7 @@ impl MessageDeframer {
                 // Write it into the buffer and create the metadata.
 
                 let expected_len = match recv_buf {
-                    Some(ref buf) => payload_size(buf.as_ref_consumed())?,
+                    Some(ref buf) => payload_size(buf.get_last_written())?,
                     None => payload.size(buffer)?,
                 };
 
@@ -535,7 +535,7 @@ impl DeframerVecBuffer {
     /// Borrows the initialized contents of this buffer and tracks pending discard operations via
     /// the `discard` reference
     pub fn borrow(&mut self) -> DeframerSliceBuffer {
-        DeframerSliceBuffer::new(&mut self.buf[..self.used])
+        DeframerSliceBuffer::new(&mut self.buf[..self.used], self.used)
     }
 
     /// Discard `taken` bytes from the start of our buffer.
@@ -658,14 +658,16 @@ pub struct DeframerSliceBuffer<'a> {
     // number of bytes to discard from the front of `buf` at a later time
     discard: usize,
     taken: usize,
+    used: usize,
 }
 
 impl<'a> DeframerSliceBuffer<'a> {
-    pub fn new(buf: &'a mut [u8]) -> Self {
+    pub fn new(buf: &'a mut [u8], used: usize) -> Self {
         Self {
             buf,
             discard: 0,
             taken: 0,
+            used,
         }
     }
 
