@@ -343,13 +343,6 @@ fn try_read(r: io::Result<usize>) -> io::Result<Option<usize>> {
 const USAGE: &str = "
 Runs a TLS server on :PORT.  The default PORT is 443.
 
-`echo' mode means the server echoes received data on each connection.
-
-`http' mode means the server blindly sends a HTTP response on each
-connection.
-
-`forward' means the server forwards plaintext to a connection made to
-localhost:fport.
 
 `--certs' names the full certificate chain, `--key' provides the
 RSA private key.

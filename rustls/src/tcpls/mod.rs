@@ -321,7 +321,7 @@ impl TcplsSession {
         assert!(!self.tls_conn.as_ref().unwrap().is_handshaking());
         let bytes_to_process = self.tls_conn.as_mut().unwrap().outstanding_tcp_conns.as_mut_ref().get_mut(&id).unwrap().used;
 
-        let mut bytes: Vec<u8> = Vec::with_capacity(bytes_to_process);
+        let mut bytes: Vec<u8> = vec![0u8; bytes_to_process];
             bytes.clone_from_slice(&mut self.tls_conn.as_mut()
                 .unwrap()
                 .outstanding_tcp_conns

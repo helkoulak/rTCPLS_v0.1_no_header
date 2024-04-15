@@ -1,29 +1,29 @@
-use std::sync::Arc;
-
-use mio::net::{TcpListener, TcpStream};
-
 #[macro_use]
 extern crate log;
 
-use std::collections::HashMap;
-
-use std::io;
-use std::io::{Read, Write};
+use std::{fs, io};
+use std::io::{BufReader, Read, Write};
 use std::net;
+use std::sync::Arc;
+use std::time::Duration;
 
 #[macro_use]
 extern crate serde_derive;
 extern crate core;
 
 use docopt::Docopt;
+use mio::net::{TcpListener, TcpStream};
 use mio::Token;
+use pki_types::{CertificateDer, CertificateRevocationListDer, PrivateKeyDer};
 
 use ring::digest;
 
+use rustls::crypto::{ring as provider, CryptoProvider};
 
+use rustls::{self, RootCertStore, tcpls};
 
-use rustls::{self, tcpls};
 use rustls::recvbuf::RecvBufMap;
+use rustls::server::WebPkiClientVerifier;
 use rustls::tcpls::{server_create_listener, TcplsSession};
 use rustls::tcpls::stream::SimpleIdHashMap;
 
@@ -33,18 +33,7 @@ const LISTENER2: mio::Token = mio::Token(101);
 const LISTENER3: mio::Token = mio::Token(102);
 
 // Which mode the server operates in.
-#[derive(Clone)]
-enum ServerMode {
-    /// Write back received bytes
-    Echo,
 
-    /// Do one read, then write a bodged HTTP response and
-    /// cleanly close the connection.
-    Http,
-
-    /// Forward traffic to/from given port on localhost.
-    Forward(u16),
-}
 
 /// This binds together a TCP listening socket, some outstanding
 /// connections, and a TLS server configuration.
@@ -55,7 +44,7 @@ struct TlsServer {
 
     closing: bool,
     closed: bool,
-    mode: ServerMode,
+
     back: Option<TcpStream>,
     sent_http_response: bool,
     tcpls_session: TcplsSession,
@@ -64,13 +53,12 @@ struct TlsServer {
 }
 
 impl TlsServer {
-    fn new(listeners: SimpleIdHashMap<TcpListener>, mode: ServerMode, cfg: Arc<rustls::ServerConfig>) -> Self {
+    fn new(listeners: SimpleIdHashMap<TcpListener>, cfg: Arc<rustls::ServerConfig>) -> Self {
         Self {
             listeners,
 
             next_id: 0,
             tls_config: cfg,
-            mode,
             back: None,
             sent_http_response: false,
 
@@ -271,50 +259,9 @@ impl TlsServer {
         };
     }
 
-    /// Process some amount of received plaintext.
-    fn incoming_plaintext(&mut self, buf: &[u8]) {
-        match self.mode {
-            ServerMode::Echo => {
-                self.tcpls_session
-                    .tls_conn
-                    .as_mut()
-                    .unwrap()
-                    .writer()
-                    .write_all(buf)
-                    .unwrap();
-            }
-            ServerMode::Http => {
-                self.send_http_response_once();
-            }
-            ServerMode::Forward(_) => {
-                self.back
-                    .as_mut()
-                    .unwrap()
-                    .write_all(buf)
-                    .unwrap();
-            }
-        }
-    }
 
-    fn send_http_response_once(&mut self) {
-        let response =
-            b"HTTP/1.0 200 OK\r\nConnection: close\r\n\r\nHello world from rustls tlsserver\r\n";
-        if !self.sent_http_response {
-            self.tcpls_session
-                .tls_conn
-                .as_mut()
-                .unwrap()
-                .writer()
-                .write_all(response)
-                .unwrap();
-            self.sent_http_response = true;
-            self.tcpls_session
-                .tls_conn
-                .as_mut()
-                .unwrap()
-                .send_close_notify();
-        }
-    }
+
+
 
     fn tls_write(&mut self) -> io::Result<usize> {
         self.tcpls_session.tls_conn.as_mut().unwrap()
@@ -431,17 +378,7 @@ pub fn find_pattern(data: &[u8], pattern: &[u8]) -> Option<usize> {
     }
     None
 }
-/// Open a plaintext TCP-level connection for forwarded connections.
-fn open_back(mode: &ServerMode) -> Option<TcpStream> {
-    match *mode {
-        ServerMode::Forward(ref port) => {
-            let addr = net::SocketAddrV4::new(net::Ipv4Addr::new(127, 0, 0, 1), *port);
-            let conn = TcpStream::connect(net::SocketAddr::V4(addr)).unwrap();
-            Some(conn)
-        }
-        _ => None,
-    }
-}
+
 
 /// This used to be conveniently exposed by mio: map EWOULDBLOCK
 /// errors to something less-errory.
@@ -463,24 +400,14 @@ pub fn try_read(r: io::Result<usize>) -> io::Result<Option<usize>> {
 const USAGE: &str = "
 Runs a TLS server on :PORT.  The default PORT is 443.
 
-`echo' mode means the server echoes received data on each connection.
-
-`http' mode means the server blindly sends a HTTP response on each
-connection.
-
-`forward' means the server forwards plaintext to a connection made to
-localhost:fport.
 
 `--certs' names the full certificate chain, `--key' provides the
 RSA private key.
 
 Usage:
+
   tlsserver-mio --certs CERTFILE --key KEYFILE [--suite SUITE ...] \
-     [--proto PROTO ...] [--protover PROTOVER ...] [options] echo
-  tlsserver-mio --certs CERTFILE --key KEYFILE [--suite SUITE ...] \
-     [--proto PROTO ...] [--protover PROTOVER ...] [options] http
-  tlsserver-mio --certs CERTFILE --key KEYFILE [--suite SUITE ...] \
-     [--proto PROTO ...] [--protover PROTOVER ...] [options] forward <fport>
+     [--proto PROTO ...] [--protover PROTOVER ...] [options]
   tlsserver-mio (--version | -v)
   tlsserver-mio (--help | -h)
 
@@ -513,8 +440,6 @@ Options:
 
 #[derive(Debug, Deserialize)]
 pub struct Args {
-    cmd_echo: bool,
-    cmd_http: bool,
     flag_port: Option<u16>,
     flag_verbose: bool,
     flag_protover: Vec<String>,
@@ -528,14 +453,193 @@ pub struct Args {
     flag_resumption: bool,
     flag_tickets: bool,
     arg_fport: Option<u16>,
+    flag_crl: Vec<String>,
+}
+
+fn find_suite(name: &str) -> Option<rustls::SupportedCipherSuite> {
+    for suite in provider::ALL_CIPHER_SUITES {
+        let sname = format!("{:?}", suite.suite()).to_lowercase();
+
+        if sname == name.to_string().to_lowercase() {
+            return Some(*suite);
+        }
+    }
+
+    None
+}
+
+fn lookup_suites(suites: &[String]) -> Vec<rustls::SupportedCipherSuite> {
+    let mut out = Vec::new();
+
+    for csname in suites {
+        let scs = find_suite(csname);
+        match scs {
+            Some(s) => out.push(s),
+            None => panic!("cannot look up ciphersuite '{}'", csname),
+        }
+    }
+
+    out
+}
+
+/// Make a vector of protocol versions named in `versions`
+fn lookup_versions(versions: &[String]) -> Vec<&'static rustls::SupportedProtocolVersion> {
+    let mut out = Vec::new();
+
+    for vname in versions {
+        let version = match vname.as_ref() {
+            "1.2" => &rustls::version::TLS12,
+            "1.3" => &rustls::version::TLS13,
+            _ => panic!(
+                "cannot look up version '{}', valid are '1.2' and '1.3'",
+                vname
+            ),
+        };
+        out.push(version);
+    }
+
+    out
+}
+
+fn load_certs(filename: &str) -> Vec<CertificateDer<'static>> {
+    let certfile = fs::File::open(filename).expect("cannot open certificate file");
+    let mut reader = BufReader::new(certfile);
+    rustls_pemfile::certs(&mut reader)
+        .map(|result| result.unwrap())
+        .collect()
+}
+
+fn load_private_key(filename: &str) -> PrivateKeyDer<'static> {
+    let keyfile = fs::File::open(filename).expect("cannot open private key file");
+    let mut reader = BufReader::new(keyfile);
+
+    loop {
+        match rustls_pemfile::read_one(&mut reader).expect("cannot parse private key .pem file") {
+            Some(rustls_pemfile::Item::Pkcs1Key(key)) => return key.into(),
+            Some(rustls_pemfile::Item::Pkcs8Key(key)) => return key.into(),
+            Some(rustls_pemfile::Item::Sec1Key(key)) => return key.into(),
+            None => break,
+            _ => {}
+        }
+    }
+
+    panic!(
+        "no keys found in {:?} (encrypted keys not supported)",
+        filename
+    );
+}
+
+fn load_ocsp(filename: &Option<String>) -> Vec<u8> {
+    let mut ret = Vec::new();
+
+    if let Some(name) = filename {
+        fs::File::open(name)
+            .expect("cannot open ocsp file")
+            .read_to_end(&mut ret)
+            .unwrap();
+    }
+
+    ret
+}
+
+fn load_crls(filenames: &[String]) -> Vec<CertificateRevocationListDer<'static>> {
+    filenames
+        .iter()
+        .map(|filename| {
+            let mut der = Vec::new();
+            fs::File::open(filename)
+                .expect("cannot open CRL file")
+                .read_to_end(&mut der)
+                .unwrap();
+            CertificateRevocationListDer::from(der)
+        })
+        .collect()
+}
+
+fn make_config(args: &Args, num_of_tokens: usize) -> Arc<rustls::ServerConfig> {
+    let client_auth = if args.flag_auth.is_some() {
+        let roots = load_certs(args.flag_auth.as_ref().unwrap());
+        let mut client_auth_roots = RootCertStore::empty();
+        for root in roots {
+            client_auth_roots.add(root).unwrap();
+        }
+        let crls = load_crls(&args.flag_crl);
+        if args.flag_require_auth {
+            WebPkiClientVerifier::builder(client_auth_roots.into())
+                .with_crls(crls)
+                .build()
+                .unwrap()
+        } else {
+            WebPkiClientVerifier::builder(client_auth_roots.into())
+                .with_crls(crls)
+                .allow_unauthenticated()
+                .build()
+                .unwrap()
+        }
+    } else {
+        WebPkiClientVerifier::no_client_auth()
+    };
+
+    let suites = if !args.flag_suite.is_empty() {
+        lookup_suites(&args.flag_suite)
+    } else {
+        provider::ALL_CIPHER_SUITES.to_vec()
+    };
+
+    let versions = if !args.flag_protover.is_empty() {
+        lookup_versions(&args.flag_protover)
+    } else {
+        rustls::ALL_VERSIONS.to_vec()
+    };
+
+    let certs = load_certs(
+        args.flag_certs
+            .as_ref()
+            .expect("--certs option missing"),
+    );
+    let privkey = load_private_key(
+        args.flag_key
+            .as_ref()
+            .expect("--key option missing"),
+    );
+    let ocsp = load_ocsp(&args.flag_ocsp);
+
+    let mut config = rustls::ServerConfig::builder_with_provider(
+        CryptoProvider {
+            cipher_suites: suites,
+            ..provider::default_provider()
+        }
+            .into(),
+    )
+        .with_protocol_versions(&versions)
+        .expect("inconsistent cipher-suites/versions specified")
+        .with_client_cert_verifier(client_auth)
+        .with_single_cert_with_ocsp(certs, privkey, ocsp)
+        .expect("bad certificates/private key");
+
+    config.key_log = Arc::new(rustls::KeyLogFile::new());
+
+    config.max_tcpls_tokens_cap = num_of_tokens;
+
+    if args.flag_resumption {
+        config.session_storage = rustls::server::ServerSessionMemoryCache::new(256);
+    }
+
+    if args.flag_tickets {
+        config.ticketer = provider::Ticketer::new().unwrap();
+    }
+
+    config.alpn_protocols = args
+        .flag_proto
+        .iter()
+        .map(|proto| proto.as_bytes().to_vec())
+        .collect::<Vec<_>>();
+
+    Arc::new(config)
 }
 
 
-pub fn build_tls_server_config_args(args: &Args) -> Arc<rustls::ServerConfig> {
-    tcpls::build_tls_server_config(args.flag_auth.clone(), args.flag_require_auth, args.flag_suite.clone(),
-                                   args.flag_protover.clone(), args.flag_certs.clone(), args.flag_key.clone(),
-                                   args.flag_ocsp.clone(), args.flag_resumption, args.flag_tickets, args.flag_proto.clone(), 5)
-}
+
 
 fn main() {
     let version = env!("CARGO_PKG_NAME").to_string() + ", version: " + env!("CARGO_PKG_VERSION");
@@ -555,7 +659,7 @@ fn main() {
     //Map of application controlled receive buffers
     let mut recv_map = RecvBufMap::new();
 
-    let config = build_tls_server_config_args(&args);
+    let config = make_config(&args, 5);
 
     let mut listener1 = server_create_listener("0.0.0.0:8443", None);
     let mut listener2 = server_create_listener("0.0.0.0:8444", None);
@@ -580,19 +684,20 @@ fn main() {
     listneres.insert(LISTENER2.0 as u64, listener2);
     listneres.insert(LISTENER3.0 as u64, listener3);
 
-    let mode = if args.cmd_echo {
-        ServerMode::Echo
-    } else if args.cmd_http {
-        ServerMode::Http
-    } else {
-        ServerMode::Forward(args.arg_fport.expect("fport required"))
-    };
 
-    let mut tcpls_server = TlsServer::new(listneres, mode, config);
+
+    let mut tcpls_server = TlsServer::new(listneres, config);
 
     let mut events = mio::Events::with_capacity(256);
     loop {
-        poll.poll(&mut events, None).unwrap(); //Some(Duration::new(5, 0))
+        match poll.poll(&mut events, None){
+            Ok(_) => {}
+            // Polling can be interrupted (e.g. by a debugger) - retry if so.
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => {
+                panic!("poll failed: {:?}", e)
+            }
+        }
 
         for event in events.iter() {
             match event.token() {
