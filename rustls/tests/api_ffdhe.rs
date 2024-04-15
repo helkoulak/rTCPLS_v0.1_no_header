@@ -102,10 +102,10 @@ fn server_picks_ffdhe_group_when_clienthello_has_no_ffdhe_group_in_groups_ext() 
             .unwrap(),
     );
 
-    let (client, server) = make_pair_for_configs(client_config, server_config);
+    let (client, server, mut recv_svr, mut recv_clnt) = make_pair_for_configs(client_config, server_config);
     let (mut client, mut server) = (client.into(), server.into());
     transfer_altered(&mut client, clear_named_groups_ext, &mut server);
-    assert!(server.process_new_packets().is_ok());
+    assert!(server.process_new_packets(&mut recv_svr).is_ok());
 }
 
 #[test]
@@ -134,10 +134,10 @@ fn server_picks_ffdhe_group_when_clienthello_has_no_groups_ext() {
             .unwrap(),
     );
 
-    let (client, server) = make_pair_for_configs(client_config, server_config);
+    let (client, server, mut recv_svr, mut recv_clnt) = make_pair_for_configs(client_config, server_config);
     let (mut client, mut server) = (client.into(), server.into());
     transfer_altered(&mut client, remove_named_groups_ext, &mut server);
-    assert!(server.process_new_packets().is_ok());
+    assert!(server.process_new_packets(&mut recv_svr).is_ok());
 }
 
 #[test]
@@ -181,9 +181,9 @@ fn server_avoids_dhe_cipher_suites_when_client_has_no_known_dhe_in_groups_ext() 
         .unwrap(),
     );
 
-    let (mut client, mut server) = make_pair_for_configs(client_config, server_config);
-    transfer(&mut client, &mut server);
-    assert!(server.process_new_packets().is_ok());
+    let (mut client, mut server, mut recv_svr, mut recv_clnt) = make_pair_for_configs(client_config, server_config);
+    transfer(&mut client, &mut server, None);
+    assert!(server.process_new_packets(&mut recv_svr).is_ok());
     assert_eq!(
         server
             .negotiated_cipher_suite()
@@ -219,10 +219,10 @@ fn server_accepts_client_with_no_ecpoints_extension_and_only_ffdhe_cipher_suites
             .unwrap(),
     );
 
-    let (client, server) = make_pair_for_configs(client_config, server_config);
+    let (client, server, mut recv_svr, mut recv_clnt) = make_pair_for_configs(client_config, server_config);
     let (mut client, mut server) = (client.into(), server.into());
     transfer_altered(&mut client, remove_ecpoints_ext, &mut server);
-    assert!(server.process_new_packets().is_ok());
+    assert!(server.process_new_packets(&mut recv_svr).is_ok());
 }
 
 #[test]
@@ -305,9 +305,9 @@ fn server_avoids_cipher_suite_with_no_common_kx_groups() {
         )
         .into();
 
-        let (mut client, mut server) = make_pair_for_arc_configs(&client_config, &server_config);
-        transfer(&mut client, &mut server);
-        assert!(dbg!(server.process_new_packets()).is_ok());
+        let (mut client, mut server, mut recv_svr, mut recv_clnt) = make_pair_for_arc_configs(&client_config, &server_config);
+        transfer(&mut client, &mut server, None);
+        assert!(dbg!(server.process_new_packets(&mut recv_svr)).is_ok());
         assert_eq!(
             server
                 .negotiated_cipher_suite()

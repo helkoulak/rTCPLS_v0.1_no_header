@@ -18,6 +18,8 @@ use rustls::{
     RootCertStore, ServerConfig, ServerConnection, SideData, SupportedCipherSuite,
 };
 use webpki::anchor_from_trusted_cert;
+use rustls::recvbuf::RecvBufMap;
+use rustls::tcpls::stream::DEFAULT_STREAM_ID;
 
 use super::provider;
 
@@ -153,6 +155,7 @@ embed_files! {
 pub fn transfer(
     left: &mut (impl DerefMut + Deref<Target = ConnectionCommon<impl SideData>>),
     right: &mut (impl DerefMut + Deref<Target = ConnectionCommon<impl SideData>>),
+    id: Option<u16>,
 
 ) -> usize {
     let mut buf = [0u8; 262144];
@@ -162,7 +165,7 @@ pub fn transfer(
         let sz = {
             let into_buf: &mut dyn io::Write = &mut &mut buf[..];
 
-            left.write_tls(into_buf).unwrap()
+            left.write_tls(into_buf, id.unwrap_or_else(|| DEFAULT_STREAM_ID)).unwrap()
         };
         total += sz;
         if sz == 0 {
@@ -207,7 +210,7 @@ where
         let sz = {
             let into_buf: &mut dyn io::Write = &mut &mut buf[..];
 
-            left.write_tls(into_buf).unwrap()
+            left.write_tls(into_buf, 0).unwrap()
         };
         total += sz;
         if sz == 0 {
@@ -587,7 +590,7 @@ pub fn webpki_server_verifier_builder(roots: Arc<RootCertStore>) -> ServerCertVe
     }
 }
 
-pub fn make_pair(kt: KeyType) -> (ClientConnection, ServerConnection) {
+pub fn make_pair(kt: KeyType) -> (ClientConnection, ServerConnection, RecvBufMap, RecvBufMap) {
     make_pair_for_configs(make_client_config(kt), make_server_config(kt))
 }
 
@@ -595,7 +598,7 @@ pub fn make_pair_for_configs(
     client_config: ClientConfig,
     server_config: ServerConfig,
 
-) -> (ClientConnection, ServerConnection) {
+) -> (ClientConnection, ServerConnection, RecvBufMap, RecvBufMap) {
     make_pair_for_arc_configs(&Arc::new(client_config), &Arc::new(server_config))
 }
 
@@ -603,24 +606,28 @@ pub fn make_pair_for_arc_configs(
     client_config: &Arc<ClientConfig>,
     server_config: &Arc<ServerConfig>,
 
-) -> (ClientConnection, ServerConnection) {
+) -> (ClientConnection, ServerConnection, RecvBufMap, RecvBufMap) {
     (
         ClientConnection::new(Arc::clone(client_config), server_name("localhost")).unwrap(),
         ServerConnection::new(Arc::clone(server_config)).unwrap(),
+        RecvBufMap::new(),
+        RecvBufMap::new(),
     )
 }
 
 pub fn do_handshake(
     client: &mut (impl DerefMut + Deref<Target = ConnectionCommon<impl SideData>>),
     server: &mut (impl DerefMut + Deref<Target = ConnectionCommon<impl SideData>>),
+    serv: &mut RecvBufMap,
+    clnt: &mut RecvBufMap,
 
 ) -> (usize, usize) {
     let (mut to_client, mut to_server) = (0, 0);
     while server.is_handshaking() || client.is_handshaking() {
-        to_server += transfer(client, server);
-        server.process_new_packets().unwrap();
-        to_client += transfer(server, client);
-        client.process_new_packets().unwrap();
+        to_server += transfer(client, server, None);
+        server.process_new_packets(serv).unwrap();
+        to_client += transfer(server, client, None);
+        client.process_new_packets(clnt).unwrap();
     }
     (to_server, to_client)
 }
@@ -634,16 +641,18 @@ pub enum ErrorFromPeer {
 pub fn do_handshake_until_error(
     client: &mut ClientConnection,
     server: &mut ServerConnection,
+    serv: &mut RecvBufMap,
+    clnt: &mut RecvBufMap,
 
 ) -> Result<(), ErrorFromPeer> {
     while server.is_handshaking() || client.is_handshaking() {
-        transfer(client, server);
+        transfer(client, server, None);
         server
-            .process_new_packets()
+            .process_new_packets(serv)
             .map_err(ErrorFromPeer::Server)?;
-        transfer(server, client);
+        transfer(server, client, None);
         client
-            .process_new_packets()
+            .process_new_packets(clnt)
             .map_err(ErrorFromPeer::Client)?;
     }
 
@@ -653,14 +662,16 @@ pub fn do_handshake_until_error(
 pub fn do_handshake_until_both_error(
     client: &mut ClientConnection,
     server: &mut ServerConnection,
+    serv: &mut RecvBufMap,
+    clnt: &mut RecvBufMap,
 
 ) -> Result<(), Vec<ErrorFromPeer>> {
-    match do_handshake_until_error(client, server) {
+    match do_handshake_until_error(client, server, serv, clnt) {
         Err(server_err @ ErrorFromPeer::Server(_)) => {
             let mut errors = vec![server_err];
-            transfer(server, client);
+            transfer(server, client, None);
             let client_err = client
-                .process_new_packets()
+                .process_new_packets(clnt)
                 .map_err(ErrorFromPeer::Client)
                 .expect_err("client didn't produce error after server error");
             errors.push(client_err);
@@ -670,9 +681,9 @@ pub fn do_handshake_until_both_error(
         Err(client_err @ ErrorFromPeer::Client(_)) => {
             let mut errors = vec![client_err];
 
-            transfer(client, server);
+            transfer(client, server, None);
             let server_err = server
-                .process_new_packets()
+                .process_new_packets(serv)
                 .map_err(ErrorFromPeer::Server)
                 .expect_err("server didn't produce error after client error");
             errors.push(server_err);
@@ -716,7 +727,7 @@ pub fn do_suite_test(
         expect_version,
         expect_suite.suite()
     );
-    let (mut client, mut server) = make_pair_for_configs(client_config, server_config);
+    let (mut client, mut server, mut recv_svr, mut recv_clnt) = make_pair_for_configs(client_config, server_config);
 
     assert_eq!(None, client.negotiated_cipher_suite());
     assert_eq!(None, server.negotiated_cipher_suite());
@@ -725,8 +736,8 @@ pub fn do_suite_test(
     assert!(client.is_handshaking());
     assert!(server.is_handshaking());
 
-    transfer(&mut client, &mut server);
-    server.process_new_packets().unwrap();
+    transfer(&mut client, &mut server, None);
+    server.process_new_packets(&mut recv_svr).unwrap();
 
     assert!(client.is_handshaking());
     assert!(server.is_handshaking());
@@ -735,16 +746,16 @@ pub fn do_suite_test(
     assert_eq!(None, client.negotiated_cipher_suite());
     assert_eq!(Some(expect_suite), server.negotiated_cipher_suite());
 
-    transfer(&mut server, &mut client);
-    client.process_new_packets().unwrap();
+    transfer(&mut server, &mut client, None);
+    client.process_new_packets(&mut recv_clnt).unwrap();
 
     assert_eq!(Some(expect_suite), client.negotiated_cipher_suite());
     assert_eq!(Some(expect_suite), server.negotiated_cipher_suite());
 
-    transfer(&mut client, &mut server);
-    server.process_new_packets().unwrap();
-    transfer(&mut server, &mut client);
-    client.process_new_packets().unwrap();
+    transfer(&mut client, &mut server, None);
+    server.process_new_packets(&mut recv_svr).unwrap();
+    transfer(&mut server, &mut client, None);
+    client.process_new_packets(&mut recv_clnt).unwrap();
 
     assert!(!client.is_handshaking());
     assert!(!server.is_handshaking());

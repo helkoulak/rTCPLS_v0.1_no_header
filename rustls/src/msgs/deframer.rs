@@ -1271,7 +1271,7 @@ mod tests {
                 .pop(record_layer, negotiated_version, &mut deframer_buffer, &mut binding)
                 .unwrap_err();
             let discard = deframer_buffer.pending_discard();
-            self.buffer.discard(discard);
+            self.buffer.discard(0, discard);
             err
         }
 
@@ -1290,7 +1290,7 @@ mod tests {
                 .message
                 .into_owned();
             let discard = deframer_buffer.pending_discard();
-            self.buffer.discard(discard);
+            self.buffer.discard(0, discard);
             m
         }
 

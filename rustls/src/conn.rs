@@ -359,7 +359,7 @@ https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
 
 #[cfg(feature = "std")]
 pub use connection::{Connection, Reader, Writer};
-use crate::recvbuf::RecvBufMap;
+use crate::recvbuf::{ReaderAppBufs, RecvBufMap};
 use crate::tcpls::frame::{Frame, STREAM_FRAME_HEADER_SIZE};
 use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
@@ -523,6 +523,18 @@ impl<Data> ConnectionCommon<Data> {
             // close_notify to indicate that no new messages will arrive?
             peer_cleanly_closed: common.has_received_close_notify
 
+                && !self.deframers_map.get_or_create_def_vec_buff(active_conn as u64).has_pending(),
+            has_seen_eof: common.has_seen_eof,
+        }
+    }
+
+    pub fn reader_app_bufs(&mut self) -> ReaderAppBufs {
+        let common = &mut self.core.common_state;
+        let active_conn = common.conn_in_use;
+        ReaderAppBufs {
+            // Are we done? i.e., have we processed all received messages, and received a
+            // close_notify to indicate that no new messages will arrive?
+            peer_cleanly_closed: common.has_received_close_notify
                 && !self.deframers_map.get_or_create_def_vec_buff(active_conn as u64).has_pending(),
             has_seen_eof: common.has_seen_eof,
         }

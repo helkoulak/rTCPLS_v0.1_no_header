@@ -28,6 +28,7 @@ use rustls::{
     PeerMisbehaved, ProtocolVersion, RootCertStore, Side, SignatureAlgorithm, SignatureScheme,
     SupportedProtocolVersion,
 };
+use rustls::recvbuf::RecvBufMap;
 
 static BOGO_NACK: i32 = 89;
 
@@ -787,7 +788,7 @@ fn handle_err(err: Error) -> ! {
 
 fn flush(sess: &mut Connection, conn: &mut net::TcpStream) {
     while sess.wants_write() {
-        if let Err(err) = sess.write_tls(conn) {
+        if let Err(err) = sess.write_tls(conn, 0) {
             println!("IO error: {:?}", err);
             process::exit(0);
         }
@@ -809,7 +810,8 @@ fn server(conn: &mut Connection) -> &mut ServerConnection {
 const MAX_MESSAGE_SIZE: usize = 0xffff + 5;
 
 fn after_read(sess: &mut Connection, conn: &mut net::TcpStream) {
-    if let Err(err) = sess.process_new_packets() {
+    let mut app_bufs = RecvBufMap::new();
+    if let Err(err) = sess.process_new_packets(&mut app_bufs) {
         flush(sess, conn); /* send any alerts before exiting */
         handle_err(err);
     }
@@ -841,6 +843,7 @@ fn read_all_bytes(sess: &mut Connection, conn: &mut net::TcpStream) {
 }
 
 fn exec(opts: &Options, mut sess: Connection, count: usize) {
+    let mut app_bufs = RecvBufMap::new();
     let mut sent_message = false;
 
     let addrs = [
@@ -888,7 +891,7 @@ fn exec(opts: &Options, mut sess: Connection, count: usize) {
             flush(&mut sess, &mut conn);
         }
 
-        if sess.wants_read() {
+        if sess.wants_read(&app_bufs) {
             read_all_bytes(&mut sess, &mut conn);
         }
 
@@ -942,7 +945,7 @@ fn exec(opts: &Options, mut sess: Connection, count: usize) {
 
             let mut one_byte = [0u8];
             let mut cursor = io::Cursor::new(&mut one_byte[..]);
-            sess.write_tls(&mut cursor).unwrap();
+            sess.write_tls(&mut cursor, 0).unwrap();
             conn.write_all(&one_byte)
                 .expect("IO error");
 

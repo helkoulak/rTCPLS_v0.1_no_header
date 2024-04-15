@@ -32,9 +32,9 @@ fn client_can_override_certificate_verification() {
                 .dangerous()
                 .set_certificate_verifier(verifier.clone());
 
-            let (mut client, mut server) =
+            let (mut client, mut server, mut recv_svr, mut recv_clnt) =
                 make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
-            do_handshake(&mut client, &mut server);
+            do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
         }
     }
 }
@@ -54,9 +54,9 @@ fn client_can_override_certificate_verification_and_reject_certificate() {
                 .dangerous()
                 .set_certificate_verifier(verifier.clone());
 
-            let (mut client, mut server) =
+            let (mut client, mut server, mut recv_svr, mut recv_clnt) =
                 make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
-            let errs = do_handshake_until_both_error(&mut client, &mut server);
+            let errs = do_handshake_until_both_error(&mut client, &mut server,  &mut recv_svr, &mut recv_clnt);
             assert_eq!(
                 errs,
                 Err(vec![
@@ -85,9 +85,9 @@ fn client_can_override_certificate_verification_and_reject_tls12_signatures() {
 
         let server_config = Arc::new(make_server_config(*kt));
 
-        let (mut client, mut server) =
+        let (mut client, mut server, mut recv_svr, mut recv_clnt) =
             make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
-        let errs = do_handshake_until_both_error(&mut client, &mut server);
+        let errs = do_handshake_until_both_error(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
         assert_eq!(
             errs,
             Err(vec![
@@ -114,9 +114,9 @@ fn client_can_override_certificate_verification_and_reject_tls13_signatures() {
 
         let server_config = Arc::new(make_server_config(*kt));
 
-        let (mut client, mut server) =
+        let (mut client, mut server, mut recv_svr, mut recv_clnt) =
             make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
-        let errs = do_handshake_until_both_error(&mut client, &mut server);
+        let errs = do_handshake_until_both_error(&mut client, &mut server,  &mut recv_svr, &mut recv_clnt);
         assert_eq!(
             errs,
             Err(vec![
@@ -142,9 +142,9 @@ fn client_can_override_certificate_verification_and_offer_no_signature_schemes()
                 .dangerous()
                 .set_certificate_verifier(verifier.clone());
 
-            let (mut client, mut server) =
+            let (mut client, mut server,  mut recv_svr, mut recv_clnt) =
                 make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
-            let errs = do_handshake_until_both_error(&mut client, &mut server);
+            let errs = do_handshake_until_both_error(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
             assert_eq!(
                 errs,
                 Err(vec![

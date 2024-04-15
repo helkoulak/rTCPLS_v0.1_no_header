@@ -25,6 +25,7 @@ use rustls::{
     ClientConfig, ClientConnection, ConnectionCommon, RootCertStore, ServerConfig,
     ServerConnection, SideData,
 };
+use rustls::recvbuf::RecvBufMap;
 
 pub fn main() {
     let mut args = std::env::args();
@@ -61,13 +62,14 @@ where
     let mut read_time = 0f64;
     let mut data_left = expect_data;
     let mut data_buf = [0u8; 8192];
+    let mut app_bufs = RecvBufMap::new();
 
     loop {
         let mut sz = 0;
 
         while left.wants_write() {
             let written = left
-                .write_tls(&mut tls_buf[sz..].as_mut())
+                .write_tls(&mut tls_buf[sz..].as_mut(), 0)
                 .unwrap();
             if written == 0 {
                 break;
@@ -85,7 +87,7 @@ where
             let start = Instant::now();
             match right.read_tls(&mut tls_buf[offs..sz].as_ref()) {
                 Ok(read) => {
-                    right.process_new_packets().unwrap();
+                    right.process_new_packets(&mut app_bufs).unwrap();
                     offs += read;
                 }
                 Err(err) => {
@@ -464,9 +466,9 @@ fn bench_bulk(params: &BenchmarkParam, plaintext_size: u64, max_fragment_size: O
 
     let server_name = "localhost".try_into().unwrap();
     let mut client = ClientConnection::new(client_config, server_name).unwrap();
-    client.set_buffer_limit(None);
+    client.set_buffer_limit(None, 0);
     let mut server = ServerConnection::new(Arc::clone(&server_config)).unwrap();
-    server.set_buffer_limit(None);
+    server.set_buffer_limit(None, 0);
 
     do_handshake(&mut client, &mut server);
 

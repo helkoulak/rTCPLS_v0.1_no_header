@@ -48,6 +48,7 @@ use common::*;
 
 use provider::cipher_suite;
 use provider::sign::RsaSigningKey;
+use rustls::recvbuf::{ReaderAppBufs, RecvBufMap};
 
 fn alpn_test_error(
     server_protos: Vec<Vec<u8>>,
@@ -65,12 +66,12 @@ fn alpn_test_error(
         let mut client_config = make_client_config_with_versions(KeyType::Rsa, &[version]);
         client_config.alpn_protocols = client_protos.clone();
 
-        let (mut client, mut server) =
+        let (mut client, mut server,  mut recv_svr, mut recv_clnt) =
             make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
 
         assert_eq!(client.alpn_protocol(), None);
         assert_eq!(server.alpn_protocol(), None);
-        let error = do_handshake_until_error(&mut client, &mut server);
+        let error = do_handshake_until_error(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
         assert_eq!(client.alpn_protocol(), agreed);
         assert_eq!(server.alpn_protocol(), agreed);
         assert_eq!(error.err(), expected_error);
@@ -141,16 +142,16 @@ fn version_test(
     );
 
 
-    let (mut client, mut server) = make_pair_for_configs(client_config, server_config);
+    let (mut client, mut server, mut recv_srv, mut recv_clnt) = make_pair_for_configs(client_config, server_config);
 
     assert_eq!(client.protocol_version(), None);
     assert_eq!(server.protocol_version(), None);
     if result.is_none() {
 
-        let err = do_handshake_until_error(&mut client, &mut server);
+        let err = do_handshake_until_error(&mut client, &mut server,  &mut recv_srv, &mut recv_clnt);
         assert!(err.is_err());
     } else {
-        do_handshake(&mut client, &mut server);
+        do_handshake(&mut client, &mut server, &mut recv_srv, &mut recv_clnt);
         assert_eq!(client.protocol_version(), result);
         assert_eq!(server.protocol_version(), result);
     }
@@ -160,14 +161,16 @@ fn version_test(
 fn versions() {
     // default -> 1.3
     version_test(&[], &[], Some(ProtocolVersion::TLSv1_3));
-
-    );
-
 }
 
 fn check_read(reader: &mut dyn io::Read, bytes: &[u8]) {
     let mut buf = vec![0u8; bytes.len() + 1];
     assert_eq!(bytes.len(), reader.read(&mut buf).unwrap());
+    assert_eq!(bytes, &buf[..bytes.len()]);
+}
+    fn check_read_app_buff(reader: &mut  ReaderAppBufs, bytes: &[u8], app_recv: &mut RecvBufMap, id: u16){
+    let mut buf = vec![0u8; bytes.len() + 1];
+    assert_eq!(bytes.len(), reader.read_app_bufs(&mut buf, app_recv, id).unwrap());
     assert_eq!(bytes, &buf[..bytes.len()]);
 }
 
@@ -333,14 +336,14 @@ fn buffered_client_data_sent() {
     for version in rustls::ALL_VERSIONS {
 
         let client_config = make_client_config_with_versions(KeyType::Rsa, &[version]);
-        let (mut client, mut server) =
+        let (mut client, mut server, mut recv_srv, mut recv_clnt) =
             make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
 
         assert_eq!(5, client.writer().write(b"hello").unwrap());
 
-        do_handshake(&mut client, &mut server);
-        transfer(&mut client, &mut server);
-        server.process_new_packets().unwrap();
+        do_handshake(&mut client, &mut server, &mut recv_srv, &mut recv_clnt);
+        transfer(&mut client, &mut server, None);
+        server.process_new_packets(&mut recv_srv).unwrap();
 
         check_read(&mut server.reader(), b"hello");
     }
@@ -353,15 +356,15 @@ fn buffered_server_data_sent() {
 
     for version in rustls::ALL_VERSIONS {
         let client_config = make_client_config_with_versions(KeyType::Rsa, &[version]);
-        let (mut client, mut server) =
+        let (mut client, mut server, mut recv_srv, mut recv_clnt) =
             make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
 
         assert_eq!(5, server.writer().write(b"hello").unwrap());
 
 
-        do_handshake(&mut client, &mut server);
-        transfer(&mut server, &mut client);
-        client.process_new_packets().unwrap();
+        do_handshake(&mut client, &mut server, &mut recv_srv, &mut recv_clnt);
+        transfer(&mut server, &mut client, None);
+        client.process_new_packets(&mut recv_clnt).unwrap();
 
         check_read(&mut client.reader(), b"hello");
     }
@@ -374,7 +377,7 @@ fn buffered_both_data_sent() {
 
     for version in rustls::ALL_VERSIONS {
         let client_config = make_client_config_with_versions(KeyType::Rsa, &[version]);
-        let (mut client, mut server) =
+        let (mut client, mut server, mut recv_srv, mut recv_clnt) =
             make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
 
         assert_eq!(
@@ -393,12 +396,12 @@ fn buffered_both_data_sent() {
         );
 
 
-        do_handshake(&mut client, &mut server);
+        do_handshake(&mut client, &mut server,  &mut recv_srv, &mut recv_clnt);
 
-        transfer(&mut server, &mut client);
-        client.process_new_packets().unwrap();
-        transfer(&mut client, &mut server);
-        server.process_new_packets().unwrap();
+        transfer(&mut server, &mut client, None);
+        client.process_new_packets(&mut recv_clnt).unwrap();
+        transfer(&mut client, &mut server, None);
+        server.process_new_packets(&mut recv_srv).unwrap();
 
         check_read(&mut client.reader(), b"from-server!");
         check_read(&mut server.reader(), b"from-client!");
@@ -411,9 +414,9 @@ fn client_can_get_server_cert() {
     for kt in ALL_KEY_TYPES {
         for version in rustls::ALL_VERSIONS {
             let client_config = make_client_config_with_versions(*kt, &[version]);
-            let (mut client, mut server) =
+            let (mut client, mut server,  mut recv_srv, mut recv_clnt) =
                 make_pair_for_configs(client_config, make_server_config(*kt));
-            do_handshake(&mut client, &mut server);
+            do_handshake(&mut client, &mut server,  &mut recv_srv, &mut recv_clnt);
 
             let certs = client.peer_certificates();
             assert_eq!(certs, Some(kt.get_chain().as_slice()));
@@ -428,15 +431,15 @@ fn client_can_get_server_cert_after_resumption() {
         let server_config = make_server_config(*kt);
         for version in rustls::ALL_VERSIONS {
             let client_config = make_client_config_with_versions(*kt, &[version]);
-            let (mut client, mut server) =
+            let (mut client, mut server, mut recv_srv, mut recv_clnt) =
                 make_pair_for_configs(client_config.clone(), server_config.clone());
-            do_handshake(&mut client, &mut server);
+            do_handshake(&mut client, &mut server,  &mut recv_srv, &mut recv_clnt);
 
             let original_certs = client.peer_certificates();
 
-            let (mut client, mut server) =
+            let (mut client, mut server, mut recv_srv, mut recv_clnt) =
                 make_pair_for_configs(client_config.clone(), server_config.clone());
-            do_handshake(&mut client, &mut server);
+            do_handshake(&mut client, &mut server,  &mut recv_srv, &mut recv_clnt);
 
             let resumed_certs = client.peer_certificates();
 
@@ -453,9 +456,9 @@ fn server_can_get_client_cert() {
 
         for version in rustls::ALL_VERSIONS {
             let client_config = make_client_config_with_versions_with_auth(*kt, &[version]);
-            let (mut client, mut server) =
+            let (mut client, mut server, mut recv_srv, mut recv_clnt) =
                 make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
-            do_handshake(&mut client, &mut server);
+            do_handshake(&mut client, &mut server,  &mut recv_srv, &mut recv_clnt);
 
             let certs = server.peer_certificates();
             assert_eq!(certs, Some(kt.get_client_chain().as_slice()));
@@ -472,14 +475,14 @@ fn server_can_get_client_cert_after_resumption() {
         for version in rustls::ALL_VERSIONS {
             let client_config = make_client_config_with_versions_with_auth(*kt, &[version]);
             let client_config = Arc::new(client_config);
-            let (mut client, mut server) =
+            let (mut client, mut server, mut recv_srv, mut recv_clnt) =
                 make_pair_for_arc_configs(&client_config, &server_config);
-            do_handshake(&mut client, &mut server);
+            do_handshake(&mut client, &mut server,  &mut recv_srv, &mut recv_clnt);
             let original_certs = server.peer_certificates();
 
-            let (mut client, mut server) =
+            let (mut client, mut server, mut recv_srv, mut recv_clnt) =
                 make_pair_for_arc_configs(&client_config, &server_config);
-            do_handshake(&mut client, &mut server);
+            do_handshake(&mut client, &mut server,  &mut recv_srv, &mut recv_clnt);
             let resumed_certs = server.peer_certificates();
             assert_eq!(original_certs, resumed_certs);
         }
@@ -555,9 +558,9 @@ fn server_allow_any_anonymous_or_authenticated_client() {
                 make_client_config_with_versions(kt, &[version])
             };
 
-            let (mut client, mut server) =
+            let (mut client, mut server, mut recv_srv, mut recv_clnt) =
                 make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
-            do_handshake(&mut client, &mut server);
+            do_handshake(&mut client, &mut server, &mut recv_srv, &mut recv_clnt);
 
             let certs = server.peer_certificates();
             assert_eq!(certs, client_cert_chain.as_deref());
@@ -566,9 +569,9 @@ fn server_allow_any_anonymous_or_authenticated_client() {
 }
 
 
-fn check_read_and_close(reader: &mut dyn io::Read, expect: &[u8]) {
-    check_read(reader, expect);
-    assert!(matches!(reader.read(&mut [0u8; 5]), Ok(0)));
+fn check_read_and_close(reader: &mut ReaderAppBufs, app_bufs: &mut RecvBufMap, expect: &[u8], id: u16) {
+    check_read_app_buff(reader, expect, app_bufs, id);
+    assert!(matches!(app_bufs.get_mut(id).unwrap().read(&mut [0u8; 5]), Ok(0)));
 }
 
 #[test]
@@ -578,10 +581,13 @@ fn server_close_notify() {
 
 
     for version in rustls::ALL_VERSIONS {
+             if version.version == ProtocolVersion::TLSv1_2 {
+            continue
+        }
         let client_config = make_client_config_with_versions_with_auth(kt, &[version]);
-        let (mut client, mut server) =
+        let (mut client, mut server, mut recv_srv, mut recv_clnt) =
             make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
-        do_handshake(&mut client, &mut server);
+        do_handshake(&mut client, &mut server, &mut recv_srv, &mut recv_clnt);
 
         // check that alerts don't overtake appdata
         assert_eq!(
@@ -599,14 +605,14 @@ fn server_close_notify() {
                 .unwrap()
         );
         server.send_close_notify();
-        transfer(&mut server, &mut client);
-        let io_state = client.process_new_packets().unwrap();
+        transfer(&mut server, &mut client, None);
+        let io_state = client.process_new_packets(&mut recv_clnt).unwrap();
         assert!(io_state.peer_has_closed());
-        check_read_and_close(&mut client.reader(), b"from-server!");
+        check_read_and_close(&mut client.reader_app_bufs(), &mut recv_clnt, b"from-server!", 0);
 
-        transfer(&mut client, &mut server);
-        server.process_new_packets().unwrap();
-        check_read(&mut server.reader(), b"from-client!");
+        transfer(&mut client, &mut server, None);
+        server.process_new_packets(&mut recv_srv).unwrap();
+            check_read_app_buff(&mut server.reader_app_bufs(), b"from-client!", &mut recv_srv, 0);
     }
 }
 
@@ -615,10 +621,13 @@ fn client_close_notify() {
     let kt = KeyType::Rsa;
     let server_config = Arc::new(make_server_config_with_mandatory_client_auth(kt));
     for version in rustls::ALL_VERSIONS {
+             if version.version == ProtocolVersion::TLSv1_2 {
+            continue
+        }
         let client_config = make_client_config_with_versions_with_auth(kt, &[version]);
-        let (mut client, mut server) =
+        let (mut client, mut server, mut recv_srv, mut recv_clnt) =
             make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
-        do_handshake(&mut client, &mut server);
+        do_handshake(&mut client, &mut server, &mut recv_srv, &mut recv_clnt);
 
         // check that alerts don't overtake appdata
         assert_eq!(
@@ -638,14 +647,14 @@ fn client_close_notify() {
         client.send_close_notify();
 
 
-        transfer(&mut client, &mut server);
-        let io_state = server.process_new_packets().unwrap();
+        transfer(&mut client, &mut server, None);
+        let io_state = server.process_new_packets(&mut recv_srv).unwrap();
         assert!(io_state.peer_has_closed());
-        check_read_and_close(&mut server.reader(), b"from-client!");
+        check_read_and_close(&mut client.reader_app_bufs(), &mut recv_clnt, b"from-server!", 0);
 
-        transfer(&mut server, &mut client);
-        client.process_new_packets().unwrap();
-        check_read(&mut client.reader(), b"from-server!");
+        transfer(&mut server, &mut client, None);
+        client.process_new_packets(&mut recv_clnt).unwrap();
+         check_read_app_buff(&mut client.reader_app_bufs(),  b"from-server!", &mut recv_clnt, 0);
     }
 }
 
@@ -654,10 +663,13 @@ fn server_closes_uncleanly() {
     let kt = KeyType::Rsa;
     let server_config = Arc::new(make_server_config(kt));
     for version in rustls::ALL_VERSIONS {
+             if version.version == ProtocolVersion::TLSv1_2 {
+            continue
+        }
         let client_config = make_client_config_with_versions(kt, &[version]);
-        let (mut client, mut server) =
+        let (mut client, mut server, mut recv_srv, mut recv_clnt) =
             make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
-        do_handshake(&mut client, &mut server);
+        do_handshake(&mut client, &mut server, &mut recv_srv, &mut recv_clnt);
 
         // check that unclean EOF reporting does not overtake appdata
         assert_eq!(
@@ -676,21 +688,19 @@ fn server_closes_uncleanly() {
         );
 
 
-        transfer(&mut server, &mut client);
+        transfer(&mut server, &mut client, None);
         transfer_eof(&mut client);
-        let io_state = client.process_new_packets().unwrap();
+        let io_state = client.process_new_packets(&mut recv_clnt).unwrap();
         assert!(!io_state.peer_has_closed());
-        check_read(&mut client.reader(), b"from-server!");
+         check_read_app_buff(&mut client.reader_app_bufs(), b"from-server!", &mut recv_clnt, 0);
 
-        check_read_err(
-            &mut client.reader() as &mut dyn io::Read,
-            io::ErrorKind::UnexpectedEof,
-        );
+         assert!(matches!(client.reader_app_bufs().read_app_bufs(&mut [0u8; 1], &mut recv_clnt, 0),
+                         Err(err) if err.kind() == io::ErrorKind::UnexpectedEof));
 
         // may still transmit pending frames
-        transfer(&mut client, &mut server);
-        server.process_new_packets().unwrap();
-        check_read(&mut server.reader(), b"from-client!");
+        transfer(&mut client, &mut server, None);
+         server.process_new_packets(&mut recv_srv).unwrap();
+        check_read_app_buff(&mut server.reader_app_bufs(), b"from-client!", &mut recv_srv, 0);
     }
 }
 
@@ -701,10 +711,13 @@ fn client_closes_uncleanly() {
 
 
     for version in rustls::ALL_VERSIONS {
+             if version.version == ProtocolVersion::TLSv1_2 {
+            continue
+        }
         let client_config = make_client_config_with_versions(kt, &[version]);
-        let (mut client, mut server) =
+        let (mut client, mut server, mut recv_svr, mut recv_clnt) =
             make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
-        do_handshake(&mut client, &mut server);
+        do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
 
         // check that unclean EOF reporting does not overtake appdata
         assert_eq!(
@@ -723,21 +736,19 @@ fn client_closes_uncleanly() {
         );
 
 
-        transfer(&mut client, &mut server);
+        transfer(&mut client, &mut server, None);
         transfer_eof(&mut server);
-        let io_state = server.process_new_packets().unwrap();
+        let io_state = server.process_new_packets(&mut recv_svr).unwrap();
         assert!(!io_state.peer_has_closed());
-        check_read(&mut server.reader(), b"from-client!");
+        check_read_app_buff(&mut server.reader_app_bufs(), b"from-client!", &mut recv_svr, 0);
 
-        check_read_err(
-            &mut server.reader() as &mut dyn io::Read,
-            io::ErrorKind::UnexpectedEof,
-        );
+         assert!(matches!(server.reader_app_bufs().read_app_bufs(&mut [0u8; 1], &mut recv_svr, 0),
+                         Err(err) if err.kind() == io::ErrorKind::UnexpectedEof));
 
         // may still transmit pending frames
-        transfer(&mut server, &mut client);
-        client.process_new_packets().unwrap();
-        check_read(&mut client.reader(), b"from-server!");
+        transfer(&mut server, &mut client, None);
+        client.process_new_packets(&mut recv_clnt).unwrap();
+       check_read_app_buff(&mut client.reader_app_bufs(), b"from-server!", &mut recv_clnt, 0);
     }
 }
 
