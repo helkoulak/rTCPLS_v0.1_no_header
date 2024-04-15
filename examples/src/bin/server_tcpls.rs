@@ -31,19 +31,7 @@ use rustls::tcpls::{server_create_listener, TcplsSession};
 // Token for our listening socket.
 const LISTENER: Token = Token(100);
 
-// Which mode the server operates in.
-#[derive(Clone)]
-enum ServerMode {
-    /// Write back received bytes
-    Echo,
 
-    /// Do one read, then write a bodged HTTP response and
-    /// cleanly close the connection.
-    Http,
-
-    /// Forward traffic to/from given port on localhost.
-    Forward(u16),
-}
 
 /// This binds together a TCP listening socket, some outstanding
 /// connections, and a TLS server configuration.
@@ -53,7 +41,6 @@ struct TlsServer {
 
     closing: bool,
     closed: bool,
-    mode: ServerMode,
     back: Option<TcpStream>,
     sent_http_response: bool,
     tcpls_session: TcplsSession,
@@ -61,11 +48,10 @@ struct TlsServer {
 }
 
 impl TlsServer {
-    fn new(listener: TcpListener, mode: ServerMode, cfg: Arc<rustls::ServerConfig>) -> Self {
+    fn new(listener: TcpListener, cfg: Arc<rustls::ServerConfig>) -> Self {
         Self {
             listener,
             tls_config: cfg,
-            mode,
             back: None,
             sent_http_response: false,
 
@@ -369,14 +355,11 @@ localhost:fport.
 RSA private key.
 
 Usage:
-  tlsserver-mio --certs CERTFILE --key KEYFILE [--suite SUITE ...] \
-     [--proto PROTO ...] [--protover PROTOVER ...] [options] echo
-  tlsserver-mio --certs CERTFILE --key KEYFILE [--suite SUITE ...] \
-     [--proto PROTO ...] [--protover PROTOVER ...] [options] http
-  tlsserver-mio --certs CERTFILE --key KEYFILE [--suite SUITE ...] \
-     [--proto PROTO ...] [--protover PROTOVER ...] [options] forward <fport>
-  tlsserver-mio (--version | -v)
-  tlsserver-mio (--help | -h)
+  server_tcpls --certs CERTFILE --key KEYFILE [--suite SUITE ...] \
+     [--proto PROTO ...] [--protover PROTOVER ...] [options]
+
+  server_tcpls (--version | -v)
+  server_tcpls (--help | -h)
 
 Options:
     -p, --port PORT     Listen on PORT [default: 443].
@@ -407,8 +390,6 @@ Options:
 
 #[derive(Debug, Deserialize)]
 struct Args {
-    cmd_echo: bool,
-    cmd_http: bool,
     flag_port: Option<u16>,
     flag_verbose: bool,
     flag_protover: Vec<String>,
@@ -636,15 +617,8 @@ fn main() {
         .register(&mut listener, LISTENER, mio::Interest::READABLE)
         .unwrap();
 
-    let mode = if args.cmd_echo {
-        ServerMode::Echo
-    } else if args.cmd_http {
-        ServerMode::Http
-    } else {
-        ServerMode::Forward(args.arg_fport.expect("fport required"))
-    };
 
-    let mut tcpls_server = TlsServer::new(listener, mode, config);
+    let mut tcpls_server = TlsServer::new(listener, config);
 
     let mut events = mio::Events::with_capacity(256);
     loop {
