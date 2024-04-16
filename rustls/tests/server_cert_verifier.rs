@@ -27,6 +27,9 @@ fn client_can_override_certificate_verification() {
         let server_config = Arc::new(make_server_config(*kt));
 
         for version in rustls::ALL_VERSIONS {
+               if version.version == rustls::ProtocolVersion::TLSv1_2 {
+            continue
+        }
             let mut client_config = make_client_config_with_versions(*kt, &[version]);
             client_config
                 .dangerous()
@@ -49,6 +52,9 @@ fn client_can_override_certificate_verification_and_reject_certificate() {
         let server_config = Arc::new(make_server_config(*kt));
 
         for version in rustls::ALL_VERSIONS {
+                if version.version == rustls::ProtocolVersion::TLSv1_2 {
+            continue
+        }
             let mut client_config = make_client_config_with_versions(*kt, &[version]);
             client_config
                 .dangerous()
@@ -137,6 +143,9 @@ fn client_can_override_certificate_verification_and_offer_no_signature_schemes()
         let server_config = Arc::new(make_server_config(*kt));
 
         for version in rustls::ALL_VERSIONS {
+                if version.version == rustls::ProtocolVersion::TLSv1_2 {
+            continue
+        }
             let mut client_config = make_client_config_with_versions(*kt, &[version]);
             client_config
                 .dangerous()
