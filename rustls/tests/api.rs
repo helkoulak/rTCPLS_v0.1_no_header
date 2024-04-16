@@ -1759,7 +1759,7 @@ fn client_is_send_and_sync() {
 #[test]
 fn server_respects_buffer_limit_pre_handshake() {
     let (mut client, mut server, mut recv_srv, mut recv_clnt) = make_pair(KeyType::Rsa);
-    server.set_buffer_limit(Some(32));
+    server.set_buffer_limit(Some(32), 0);
 
     assert_eq!(
         server
@@ -1787,7 +1787,7 @@ fn server_respects_buffer_limit_pre_handshake() {
 #[test]
 fn server_respects_buffer_limit_pre_handshake_with_vectored_write() {
     let (mut client, mut server, mut recv_srv, mut recv_clnt) = make_pair(KeyType::Rsa);
-    server.set_buffer_limit(Some(32));
+    server.set_buffer_limit(Some(32), 0);
 
     assert_eq!(
         server
@@ -1813,7 +1813,7 @@ fn server_respects_buffer_limit_post_handshake() {
 
     // this test will vary in behaviour depending on the default suites
     do_handshake(&mut client, &mut server, &mut recv_srv, &mut recv_clnt);
-    server.set_buffer_limit(Some(48));
+    server.set_buffer_limit(Some(48), 0);
 
     assert_eq!(
         server
@@ -1841,7 +1841,7 @@ fn client_respects_buffer_limit_pre_handshake() {
 
     let (mut client, mut server, mut recv_srv, mut recv_clnt) = make_pair(KeyType::Rsa);
 
-    client.set_buffer_limit(Some(32));
+    client.set_buffer_limit(Some(32), 0);
 
     assert_eq!(
         client
@@ -1860,7 +1860,7 @@ fn client_respects_buffer_limit_pre_handshake() {
 
     do_handshake(&mut client, &mut server, &mut recv_srv, &mut recv_clnt);
     transfer(&mut client, &mut server, None);
-    server.process_new_packets().unwrap();
+    server.process_new_packets(&mut recv_srv).unwrap();
 
     check_read(&mut server.reader(), b"01234567890123456789012345678901");
 }
@@ -1870,7 +1870,7 @@ fn client_respects_buffer_limit_pre_handshake_with_vectored_write() {
 
     let (mut client, mut server, mut recv_srv, mut recv_clnt) = make_pair(KeyType::Rsa);
 
-    client.set_buffer_limit(Some(32));
+    client.set_buffer_limit(Some(32), 0);
 
     assert_eq!(
         client
@@ -1886,7 +1886,7 @@ fn client_respects_buffer_limit_pre_handshake_with_vectored_write() {
 
     do_handshake(&mut client, &mut server, &mut recv_srv, &mut recv_clnt);
     transfer(&mut client, &mut server, None);
-    server.process_new_packets().unwrap();
+    server.process_new_packets(&mut recv_srv).unwrap();
 
     check_read(&mut server.reader(), b"01234567890123456789012345678901");
 }
@@ -1897,7 +1897,7 @@ fn client_respects_buffer_limit_post_handshake() {
     let (mut client, mut server, mut recv_srv, mut recv_clnt) = make_pair(KeyType::Rsa);
 
     do_handshake(&mut client, &mut server, &mut recv_srv, &mut recv_clnt);
-    client.set_buffer_limit(Some(48));
+    client.set_buffer_limit(Some(48), 0);
 
     assert_eq!(
         client
@@ -1916,7 +1916,7 @@ fn client_respects_buffer_limit_post_handshake() {
 
 
     transfer(&mut client, &mut server, None);
-    server.process_new_packets().unwrap();
+    server.process_new_packets(&mut recv_srv).unwrap();
 
     check_read(&mut server.reader(), b"01234567890123456789012345");
 }
@@ -1934,6 +1934,7 @@ where
     pub last_error: Option<rustls::Error>,
     pub buffered: bool,
     buffer: Vec<Vec<u8>>,
+    pub recv_map: RecvBufMap,
 }
 
 impl<'a, C, S> OtherSession<'a, C, S>
@@ -1951,6 +1952,7 @@ where
             last_error: None,
             buffered: false,
             buffer: vec![],
+            recv_map: RecvBufMap::new(),
         }
     }
 
@@ -1992,12 +1994,12 @@ where
         }
 
 
-        let rc = self.sess.process_new_packets();
+       /* let rc = self.sess.process_new_packets();
         if !self.fail_ok {
             rc.unwrap();
         } else if rc.is_err() {
             self.last_error = rc.err();
-        }
+        }*/
 
         self.writevs.push(lengths);
         Ok(total)
@@ -2011,7 +2013,7 @@ where
 {
     fn read(&mut self, mut b: &mut [u8]) -> io::Result<usize> {
         self.reads += 1;
-        self.sess.write_tls(b.by_ref())
+        self.sess.write_tls(b.by_ref(), 0)
     }
 }
 
@@ -2020,8 +2022,9 @@ where
     C: DerefMut + Deref<Target = ConnectionCommon<S>>,
     S: SideData,
 {
-    fn write(&mut self, _: &[u8]) -> io::Result<usize> {
-        unreachable!()
+    fn write(&mut self, input: &[u8]) -> io::Result<usize> {
+          let mut buf = input.clone();
+        self.sess.read_tls(&mut buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -2090,7 +2093,7 @@ fn client_complete_io_for_handshake() {
 
     assert!(client.is_handshaking());
     let (rdlen, wrlen) = client
-        .complete_io(&mut OtherSession::new(&mut server))
+        .complete_io(&mut OtherSession::new(&mut server), None)
         .unwrap();
     assert!(rdlen > 0 && wrlen > 0);
     assert!(!client.is_handshaking());
@@ -2103,7 +2106,7 @@ fn buffered_client_complete_io_for_handshake() {
 
     assert!(client.is_handshaking());
     let (rdlen, wrlen) = client
-        .complete_io(&mut OtherSession::new_buffered(&mut server))
+        .complete_io(&mut OtherSession::new_buffered(&mut server), None)
         .unwrap();
     assert!(rdlen > 0 && wrlen > 0);
     assert!(!client.is_handshaking());
@@ -2118,7 +2121,7 @@ fn client_complete_io_for_handshake_eof() {
 
     assert!(client.is_handshaking());
     let err = client
-        .complete_io(&mut input)
+        .complete_io(&mut input, None)
         .unwrap_err();
     assert_eq!(io::ErrorKind::UnexpectedEof, err.kind());
 }
@@ -2142,15 +2145,13 @@ fn client_complete_io_for_write() {
         {
             let mut pipe = OtherSession::new(&mut server);
 
-            let (rdlen, wrlen) = client.complete_io(&mut pipe).unwrap();
+            let (rdlen, wrlen) = client.complete_io(&mut pipe, Some(&mut recv_clnt)).unwrap();
             assert!(rdlen == 0 && wrlen > 0);
             println!("{:?}", pipe.writevs);
             assert_eq!(pipe.writevs, vec![vec![42, 42]]);
         }
-        check_read(
-            &mut server.reader(),
-            b"0123456789012345678901234567890123456789",
-        );
+            check_read_app_buff(&mut server.reader_app_bufs(), b"0123456789012345678901234567890123456789", &mut recv_srv, 0);
+
     }
 }
 
@@ -2171,15 +2172,13 @@ fn buffered_client_complete_io_for_write() {
             .unwrap();
         {
             let mut pipe = OtherSession::new_buffered(&mut server);
-            let (rdlen, wrlen) = client.complete_io(&mut pipe).unwrap();
+            let (rdlen, wrlen) = client.complete_io(&mut pipe, Some(&mut recv_clnt)).unwrap();
             assert!(rdlen == 0 && wrlen > 0);
             println!("{:?}", pipe.writevs);
             assert_eq!(pipe.writevs, vec![vec![42, 42]]);
         }
-        check_read(
-            &mut server.reader(),
-            b"0123456789012345678901234567890123456789",
-        );
+            check_read_app_buff(&mut server.reader_app_bufs(), b"0123456789012345678901234567890123456789", &mut recv_srv, 0);
+
     }
 }
 
@@ -2197,11 +2196,11 @@ fn client_complete_io_for_read() {
             .unwrap();
         {
             let mut pipe = OtherSession::new(&mut server);
-            let (rdlen, wrlen) = client.complete_io(&mut pipe).unwrap();
+            let (rdlen, wrlen) = client.complete_io(&mut pipe, Some(&mut recv_clnt)).unwrap();
             assert!(rdlen > 0 && wrlen == 0);
             assert_eq!(pipe.reads, 1);
         }
-        check_read(&mut client.reader(), b"01234567890123456789");
+        check_read_app_buff(&mut client.reader_app_bufs(), b"01234567890123456789", &mut recv_clnt, 0);
     }
 }
 
@@ -2213,7 +2212,7 @@ fn server_complete_io_for_handshake() {
 
         assert!(server.is_handshaking());
         let (rdlen, wrlen) = server
-            .complete_io(&mut OtherSession::new(&mut client))
+            .complete_io(&mut OtherSession::new(&mut client), None)
             .unwrap();
         assert!(rdlen > 0 && wrlen > 0);
         assert!(!server.is_handshaking());
@@ -2228,7 +2227,7 @@ fn server_complete_io_for_handshake_eof() {
 
     assert!(server.is_handshaking());
     let err = server
-        .complete_io(&mut input)
+        .complete_io(&mut input, None)
         .unwrap_err();
     assert_eq!(io::ErrorKind::UnexpectedEof, err.kind());
 }
@@ -2251,13 +2250,16 @@ fn server_complete_io_for_write() {
         {
             let mut pipe = OtherSession::new(&mut client);
 
-            let (rdlen, wrlen) = server.complete_io(&mut pipe).unwrap();
+            let (rdlen, wrlen) = server.complete_io(&mut pipe, Some(&mut recv_srv)).unwrap();
             assert!(rdlen == 0 && wrlen > 0);
-            assert_eq!(pipe.writevs, vec![vec![42, 42]]);
+            assert_eq!(pipe.writevs, vec![vec![53, 53]]);
+            recv_clnt = pipe.recv_map;
         }
-        check_read(
-            &mut client.reader(),
+        check_read_app_buff(
+            &mut client.reader_app_bufs(),
             b"0123456789012345678901234567890123456789",
+            &mut recv_clnt,
+            0
         );
     }
 }
@@ -2276,11 +2278,11 @@ fn server_complete_io_for_read() {
             .unwrap();
         {
             let mut pipe = OtherSession::new(&mut client);
-            let (rdlen, wrlen) = server.complete_io(&mut pipe).unwrap();
+            let (rdlen, wrlen) = server.complete_io(&mut pipe, Some(&mut recv_srv)).unwrap();
             assert!(rdlen > 0 && wrlen == 0);
             assert_eq!(pipe.reads, 1);
         }
-        check_read(&mut server.reader(), b"01234567890123456789");
+        check_read_app_buff(&mut server.reader_app_bufs(), b"01234567890123456789", &mut recv_srv, 0);
     }
 }
 
@@ -2310,12 +2312,12 @@ fn test_client_stream_write(stream_kind: StreamKind) {
         {
             let mut pipe = OtherSession::new(&mut server);
             let mut stream: Box<dyn Write> = match stream_kind {
-                StreamKind::Ref => Box::new(Stream::new(&mut client, &mut pipe)),
-                StreamKind::Owned => Box::new(StreamOwned::new(client, pipe)),
+                StreamKind::Ref => Box::new(Stream::new(&mut client, &mut pipe, &mut recv_clnt)),
+                StreamKind::Owned => Box::new(StreamOwned::new(client, pipe, recv_clnt)),
             };
             assert_eq!(stream.write(data).unwrap(), 5);
         }
-        check_read(&mut server.reader(), data);
+        check_read_app_buff(&mut server.reader_app_bufs(), data, &mut recv_srv, 0);
     }
 }
 
@@ -2326,12 +2328,13 @@ fn test_server_stream_write(stream_kind: StreamKind) {
         {
             let mut pipe = OtherSession::new(&mut client);
             let mut stream: Box<dyn Write> = match stream_kind {
-                StreamKind::Ref => Box::new(Stream::new(&mut server, &mut pipe)),
-                StreamKind::Owned => Box::new(StreamOwned::new(server, pipe)),
+                StreamKind::Ref => Box::new(Stream::new(&mut server, &mut pipe, &mut recv_srv)),
+                StreamKind::Owned => Box::new(StreamOwned::new(server, pipe, recv_srv)),
             };
             assert_eq!(stream.write(data).unwrap(), 5);
         }
-        check_read(&mut client.reader(), data);
+            check_read_app_buff(&mut client.reader_app_bufs(), data, &mut recv_clnt, 0);
+
     }
 }
 
@@ -2391,8 +2394,8 @@ fn test_client_stream_read(stream_kind: StreamKind, read_kind: ReadKind) {
             transfer_eof(&mut client);
 
             let stream: Box<dyn Read> = match stream_kind {
-                StreamKind::Ref => Box::new(Stream::new(&mut client, &mut pipe)),
-                StreamKind::Owned => Box::new(StreamOwned::new(client, pipe)),
+                StreamKind::Ref => Box::new(Stream::new(&mut client, &mut pipe, &mut recv_clnt)),
+                StreamKind::Owned => Box::new(StreamOwned::new(client, pipe, recv_clnt)),
             };
 
             test_stream_read(read_kind, stream, data)
@@ -2411,8 +2414,8 @@ fn test_server_stream_read(stream_kind: StreamKind, read_kind: ReadKind) {
             transfer_eof(&mut server);
 
             let stream: Box<dyn Read> = match stream_kind {
-                StreamKind::Ref => Box::new(Stream::new(&mut server, &mut pipe)),
-                StreamKind::Owned => Box::new(StreamOwned::new(server, pipe)),
+                StreamKind::Ref => Box::new(Stream::new(&mut server, &mut pipe, &mut recv_srv)),
+                StreamKind::Owned => Box::new(StreamOwned::new(server, pipe, recv_srv)),
             };
 
             test_stream_read(read_kind, stream, data)
@@ -2491,7 +2494,7 @@ fn stream_write_reports_underlying_io_error_before_plaintext_processed() {
         .write_all(b"hello")
         .unwrap();
 
-    let mut client_stream = Stream::new(&mut client, &mut pipe);
+    let mut client_stream = Stream::new(&mut client, &mut pipe, &mut recv_clnt);
     let rc = client_stream.write(b"world");
     assert!(rc.is_err());
     let err = rc.err().unwrap();
@@ -2513,7 +2516,7 @@ fn stream_write_swallows_underlying_io_error_after_plaintext_processed() {
         .write_all(b"hello")
         .unwrap();
 
-    let mut client_stream = Stream::new(&mut client, &mut pipe);
+    let mut client_stream = Stream::new(&mut client, &mut pipe, &mut recv_clnt);
     let rc = client_stream.write(b"world");
     assert_eq!(format!("{:?}", rc), "Ok(5)");
 }
@@ -2554,7 +2557,7 @@ fn client_stream_handshake_error() {
 
     {
         let mut pipe = OtherSession::new_fails(&mut server);
-        let mut client_stream = Stream::new(&mut client, &mut pipe);
+        let mut client_stream = Stream::new(&mut client, &mut pipe, &mut recv_clnt);
         let rc = client_stream.write(b"hello");
         assert!(rc.is_err());
         assert_eq!(
@@ -2577,7 +2580,7 @@ fn client_streamowned_handshake_error() {
     let (client, mut server, mut recv_srv, mut recv_clnt) = make_pair_for_configs(client_config, server_config);
 
     let pipe = OtherSession::new_fails(&mut server);
-    let mut client_stream = StreamOwned::new(client, pipe);
+    let mut client_stream = StreamOwned::new(client, pipe, recv_clnt);
     let rc = client_stream.write(b"hello");
     assert!(rc.is_err());
     assert_eq!(
@@ -2609,7 +2612,7 @@ fn server_stream_handshake_error() {
     {
         let mut pipe = OtherSession::new_fails(&mut client);
 
-        let mut server_stream = Stream::new(&mut server, &mut pipe);
+        let mut server_stream = Stream::new(&mut server, &mut pipe, &mut recv_srv);
         let mut bytes = [0u8; 5];
         let rc = server_stream.read(&mut bytes);
         assert!(rc.is_err());
@@ -2632,7 +2635,7 @@ fn server_streamowned_handshake_error() {
         .unwrap();
 
     let pipe = OtherSession::new_fails(&mut client);
-    let mut server_stream = StreamOwned::new(server, pipe);
+    let mut server_stream = StreamOwned::new(server, pipe, recv_srv);
     let mut bytes = [0u8; 5];
     let rc = server_stream.read(&mut bytes);
     assert!(rc.is_err());
@@ -2672,7 +2675,7 @@ fn server_complete_io_for_handshake_ending_with_alert() {
     let (mut client, mut server, mut recv_srv, mut recv_clnt) = make_pair_for_configs(client_config, server_config);
     assert!(server.is_handshaking());
     let mut pipe = OtherSession::new_fails(&mut client);
-    let rc = server.complete_io(&mut pipe);
+    let rc = server.complete_io(&mut pipe, None);
     assert!(rc.is_err(), "server io failed due to handshake failure");
     assert!(!server.wants_write(), "but server did send its alert");
     assert_eq!(
@@ -2689,6 +2692,8 @@ fn server_exposes_offered_sni() {
              if version.version == ProtocolVersion::TLSv1_2 {
                 continue
             }
+            let mut recv_svr = RecvBufMap::new();
+        let mut recv_clnt = RecvBufMap::new();
         let client_config = make_client_config_with_versions(kt, &[version]);
         let mut client = ClientConnection::new(
             Arc::new(client_config),
@@ -2698,7 +2703,7 @@ fn server_exposes_offered_sni() {
         let mut server = ServerConnection::new(Arc::new(make_server_config(kt))).unwrap();
 
         assert_eq!(None, server.server_name());
-        do_handshake(&mut client, &mut server, &mut recv_srv, &mut recv_clnt);
+        do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
         assert_eq!(Some("second.testserver.com"), server.server_name());
     }
 }
@@ -2711,6 +2716,8 @@ fn server_exposes_offered_sni_smashed_to_lowercase() {
              if version.version == ProtocolVersion::TLSv1_2 {
                 continue
             }
+            let mut recv_svr = RecvBufMap::new();
+        let mut recv_clnt = RecvBufMap::new();
         let client_config = make_client_config_with_versions(kt, &[version]);
         let mut client = ClientConnection::new(
             Arc::new(client_config),
@@ -2720,7 +2727,7 @@ fn server_exposes_offered_sni_smashed_to_lowercase() {
         let mut server = ServerConnection::new(Arc::new(make_server_config(kt))).unwrap();
 
         assert_eq!(None, server.server_name());
-        do_handshake(&mut client, &mut server, &mut recv_srv, &mut recv_clnt);
+        do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
         assert_eq!(Some("second.testserver.com"), server.server_name());
     }
 }
@@ -2729,6 +2736,7 @@ fn server_exposes_offered_sni_smashed_to_lowercase() {
 fn server_exposes_offered_sni_even_if_resolver_fails() {
     let kt = KeyType::Rsa;
     let resolver = rustls::server::ResolvesServerCertUsingSni::new();
+         let mut app_bufs = RecvBufMap::new();
         let mut server_config = make_server_config(kt);
     server_config.cert_resolver = Arc::new(resolver);
     let server_config = Arc::new(server_config);
@@ -2747,7 +2755,7 @@ fn server_exposes_offered_sni_even_if_resolver_fails() {
         assert_eq!(None, server.server_name());
         transfer(&mut client, &mut server, None);
         assert_eq!(
-            server.process_new_packets(),
+            server.process_new_packets(&mut app_bufs),
             Err(Error::General(
                 "no server certificate chain resolved".to_string()
             ))
@@ -3400,14 +3408,17 @@ fn vectored_write_for_server_appdata() {
         .unwrap();
     {
         let mut pipe = OtherSession::new(&mut client);
-
-        let wrlen = server.write_tls(&mut pipe).unwrap();
-        assert_eq!(84, wrlen);
-        assert_eq!(pipe.writevs, vec![vec![42, 42]]);
+        pipe.recv_map = recv_clnt;
+        let wrlen = server.write_tls(&mut pipe, 0).unwrap();
+       assert_eq!(106, wrlen);
+        assert_eq!(pipe.writevs, vec![vec![53, 53]]);
+        recv_clnt = pipe.recv_map;
     }
-    check_read(
-        &mut client.reader(),
+    check_read_app_buff(
+        &mut client.reader_app_bufs(),
         b"0123456789012345678901234567890123456789",
+        &mut recv_clnt,
+        0
     );
 }
 
@@ -3425,15 +3436,18 @@ fn vectored_write_for_client_appdata() {
         .write_all(b"01234567890123456789")
         .unwrap();
     {
-        let mut pipe = OtherSession::new(&mut server);
-
-        let wrlen = client.write_tls(&mut pipe).unwrap();
-        assert_eq!(84, wrlen);
-        assert_eq!(pipe.writevs, vec![vec![42, 42]]);
+         let mut pipe = OtherSession::new(&mut server);
+        pipe.recv_map = recv_srv;
+        let wrlen = client.write_tls(&mut pipe, 0).unwrap();
+        assert_eq!(106, wrlen); // Consider TCPLS header size plus stream frame size
+        assert_eq!(pipe.writevs, vec![vec![53, 53]]);
+        recv_srv = pipe.recv_map;
     }
-    check_read(
-        &mut server.reader(),
+   check_read_app_buff(
+        &mut server.reader_app_bufs(),
         b"0123456789012345678901234567890123456789",
+        &mut recv_srv,
+        0
     );
 }
 
@@ -3454,7 +3468,7 @@ fn vectored_write_for_server_handshake_with_half_rtt_data() {
         .write_all(b"0123456789")
         .unwrap();
     transfer(&mut client, &mut server, None);
-    server.process_new_packets().unwrap();
+    server.process_new_packets(&mut recv_srv).unwrap();
     {
         let mut pipe = OtherSession::new(&mut client);
         let wrlen = server.write_tls(&mut pipe).unwrap();
@@ -3467,7 +3481,7 @@ fn vectored_write_for_server_handshake_with_half_rtt_data() {
 
     client.process_new_packets(&mut recv_clnt).unwrap();
     transfer(&mut client, &mut server, None);
-    server.process_new_packets().unwrap();
+    server.process_new_packets(&mut recv_srv).unwrap();
     {
         let mut pipe = OtherSession::new(&mut client);
         let wrlen = server.write_tls(&mut pipe).unwrap();
@@ -3497,7 +3511,7 @@ fn check_half_rtt_does_not_work(server_config: ServerConfig) {
 
 
     transfer(&mut client, &mut server, None);
-    server.process_new_packets().unwrap();
+    server.process_new_packets(&mut recv_srv).unwrap();
     {
         let mut pipe = OtherSession::new(&mut client);
         let wrlen = server.write_tls(&mut pipe).unwrap();
@@ -3516,7 +3530,7 @@ fn check_half_rtt_does_not_work(server_config: ServerConfig) {
     // it to an unauthenticated peer. so it happens here, in the server's second
     // flight (42 and 32 are lengths of appdata sent above).
 
-    server.process_new_packets().unwrap();
+    server.process_new_packets(&mut recv_srv).unwrap();
     {
         let mut pipe = OtherSession::new(&mut client);
         let wrlen = server.write_tls(&mut pipe).unwrap();
@@ -3588,7 +3602,7 @@ fn vectored_write_with_slow_client() {
 
     let (mut client, mut server, mut recv_srv, mut recv_clnt) = make_pair(KeyType::Rsa);
 
-    client.set_buffer_limit(Some(32));
+    client.set_buffer_limit(Some(32), 0);
 
     do_handshake(&mut client, &mut server, &mut recv_srv, &mut recv_clnt);
     server
@@ -4971,7 +4985,7 @@ fn test_client_rejects_hrr_with_varied_session_id() {
         assert_client_sends_hello_with_secp384,
         &mut server,
     );
-    server.process_new_packets().unwrap();
+    server.process_new_packets(&mut recv_srv).unwrap();
     transfer_altered(
         &mut server,
         assert_server_requests_retry_and_echoes_session_id,
@@ -5117,7 +5131,7 @@ fn test_client_sends_share_for_less_preferred_group() {
         assert_client_sends_secp384_share,
         &mut server,
     );
-    server.process_new_packets().unwrap();
+    server.process_new_packets(&mut recv_srv).unwrap();
     transfer_altered(
         &mut server,
         assert_server_requests_retry_to_x25519,
@@ -5161,7 +5175,7 @@ fn test_tls13_client_resumption_does_not_reuse_tickets() {
     for _ in 0..5 {
         let (mut client, mut server, mut recv_srv, mut recv_clnt) = make_pair_for_arc_configs(&client_config, &server_config);
         transfer(&mut client, &mut server, None);
-        server.process_new_packets().unwrap();
+        server.process_new_packets(&mut recv_srv).unwrap();
 
         let ops = shared_storage.ops_and_reset();
         assert!(matches!(ops[0], ClientStorageOp::TakeTls13Ticket(_, true)));
@@ -5171,7 +5185,7 @@ fn test_tls13_client_resumption_does_not_reuse_tickets() {
 
     let (mut client, mut server, mut recv_srv, mut recv_clnt) = make_pair_for_arc_configs(&client_config, &server_config);
     transfer(&mut client, &mut server, None);
-    server.process_new_packets().unwrap();
+    server.process_new_packets(&mut recv_srv).unwrap();
 
     let ops = shared_storage.ops_and_reset();
     println!("last {:?}", ops);
@@ -5245,7 +5259,7 @@ fn test_server_mtu_reduction() {
     let encryption_overhead = 20; // FIXME: see issue #991
 
     transfer(&mut client, &mut server, None);
-    server.process_new_packets().unwrap();
+    server.process_new_packets(&mut recv_srv).unwrap();
     {
         let mut pipe = OtherSession::new(&mut client);
         server.write_tls(&mut pipe).unwrap();
@@ -5259,7 +5273,7 @@ fn test_server_mtu_reduction() {
 
     client.process_new_packets(&mut recv_clnt).unwrap();
     transfer(&mut client, &mut server, None);
-    server.process_new_packets().unwrap();
+    server.process_new_packets(&mut recv_srv).unwrap();
     {
         let mut pipe = OtherSession::new(&mut client);
         server.write_tls(&mut pipe).unwrap();
@@ -5330,7 +5344,7 @@ fn handshakes_complete_and_data_flows_with_gratuitious_max_fragment_sizes() {
                 // and client -> server
                 assert_eq!(pattern.len(), client.writer().write(&pattern).unwrap());
                 transfer(&mut client, &mut server, None);
-                server.process_new_packets().unwrap();
+                server.process_new_packets(&mut recv_srv).unwrap();
                 check_read(&mut server.reader(), &pattern);
             }
         }
@@ -5372,7 +5386,7 @@ fn test_server_rejects_duplicate_sni_names() {
     let (mut client, mut server) = (client.into(), server.into());
     transfer_altered(&mut client, duplicate_sni_payload, &mut server);
     assert_eq!(
-        server.process_new_packets(),
+        server.process_new_packets(&mut recv_srv),
         Err(Error::PeerMisbehaved(
             PeerMisbehaved::DuplicateServerNameTypes
         ))
@@ -5402,7 +5416,7 @@ fn test_server_rejects_empty_sni_extension() {
     let (mut client, mut server) = (client.into(), server.into());
     transfer_altered(&mut client, empty_sni_payload, &mut server);
     assert_eq!(
-        server.process_new_packets(),
+        server.process_new_packets(&mut recv_srv),
         Err(Error::PeerMisbehaved(
             PeerMisbehaved::ServerNameMustContainOneHostName
         ))
@@ -5433,7 +5447,7 @@ fn test_server_rejects_clients_without_any_kx_groups() {
     let (mut client, mut server) = (client.into(), server.into());
     transfer_altered(&mut client, delete_kx_groups, &mut server);
     assert_eq!(
-        server.process_new_packets(),
+        server.process_new_packets(&mut recv_srv),
         Err(Error::PeerIncompatible(
             PeerIncompatible::NoKxGroupsInCommon
         ))
@@ -5464,7 +5478,7 @@ fn test_server_rejects_clients_without_any_kx_group_overlap() {
         );
         transfer(&mut client, &mut server, None);
         assert_eq!(
-            server.process_new_packets(),
+            server.process_new_packets(&mut recv_srv),
             Err(Error::PeerIncompatible(
                 PeerIncompatible::NoKxGroupsInCommon
             ))
@@ -5489,7 +5503,7 @@ fn test_client_rejects_illegal_tls13_ccs() {
 
     let (mut client, mut server, mut recv_srv, mut recv_clnt) = make_pair(KeyType::Rsa);
     transfer(&mut client, &mut server, None);
-    server.process_new_packets().unwrap();
+    server.process_new_packets(&mut recv_srv).unwrap();
     let (mut server, mut client) = (server.into(), client.into());
 
     transfer_altered(&mut server, corrupt_ccs, &mut client);
@@ -5521,7 +5535,7 @@ fn test_client_rejects_no_extended_master_secret_extension_when_require_ems_or_f
     let (client, server, mut recv_srv, mut recv_clnt) = make_pair_for_configs(client_config, server_config);
     let (mut client, mut server) = (client.into(), server.into());
     transfer_altered(&mut client, remove_ems_request, &mut server);
-    server.process_new_packets().unwrap();
+    server.process_new_packets(&mut recv_srv).unwrap();
     transfer_altered(&mut server, |_| Altered::InPlace, &mut client);
     assert_eq!(
         client.process_new_packets(&mut recv_clnt),
@@ -5549,7 +5563,7 @@ fn test_server_rejects_no_extended_master_secret_extension_when_require_ems_or_f
     let (mut client, mut server) = (client.into(), server.into());
     transfer_altered(&mut client, remove_ems_request, &mut server);
     assert_eq!(
-        server.process_new_packets(),
+        server.process_new_packets(&mut recv_srv),
         Err(Error::PeerIncompatible(
             PeerIncompatible::ExtendedMasterSecretExtensionRequired
         ))
@@ -5574,6 +5588,8 @@ fn remove_ems_request(msg: &mut Message) -> Altered {
 #[cfg(feature = "tls12")]
 #[test]
 fn test_client_tls12_no_resume_after_server_downgrade() {
+         let mut recv_svr = RecvBufMap::new();
+    let mut recv_clnt = RecvBufMap::new();
     let mut client_config = common::make_client_config(KeyType::Ed25519);
     let client_storage = Arc::new(ClientStorage::new());
     client_config.resumption = Resumption::store(client_storage.clone());
@@ -5597,7 +5613,7 @@ fn test_client_tls12_no_resume_after_server_downgrade() {
         ClientConnection::new(client_config.clone(), "localhost".try_into().unwrap()).unwrap();
     let mut server_1 = ServerConnection::new(server_config_1).unwrap();
 
-    common::do_handshake(&mut client_1, &mut server_1, &mut recv_srv, &mut recv_clnt);
+    common::do_handshake(&mut client_1, &mut server_1, &mut recv_svr, &mut recv_clnt);
 
     assert_eq!(client_storage.ops().len(), 9);
     println!("hs1 storage ops: {:#?}", client_storage.ops());
@@ -5615,11 +5631,13 @@ fn test_client_tls12_no_resume_after_server_downgrade() {
     ));
 
     dbg!("handshake 2");
+         let mut recv_svr = RecvBufMap::new();
+    let mut recv_clnt = RecvBufMap::new();
 
     let mut client_2 =
         ClientConnection::new(client_config, "localhost".try_into().unwrap()).unwrap();
     let mut server_2 = ServerConnection::new(Arc::new(server_config_2)).unwrap();
-    common::do_handshake(&mut client_2, &mut server_2, &mut recv_srv, &mut recv_clnt);
+    common::do_handshake(&mut client_2, &mut server_2, &mut recv_svr, &mut recv_clnt);
     println!("hs2 storage ops: {:#?}", client_storage.ops());
     assert_eq!(client_storage.ops().len(), 11);
 
@@ -5975,7 +5993,7 @@ fn test_received_plaintext_backpressure() {
             break;
         }
     }
-    server.process_new_packets().unwrap();
+    server.process_new_packets(&mut recv_srv).unwrap();
 
     // Send two more bytes from client to server
     dbg!(client
@@ -6186,7 +6204,7 @@ fn test_client_removes_tls12_session_if_server_sends_undecryptable_first_message
     // resumption
     let (mut client, mut server, mut recv_srv, mut recv_clnt) = make_pair_for_arc_configs(&client_config, &server_config);
     transfer(&mut client, &mut server, None);
-    server.process_new_packets().unwrap();
+    server.process_new_packets(&mut recv_srv).unwrap();
     let mut client = client.into();
     transfer_altered(
         &mut server.into(),
