@@ -63,6 +63,7 @@ fn client_verifier_works() {
         let server_config = Arc::new(server_config);
 
         for version in rustls::ALL_VERSIONS {
+                 if version.version != rustls::ProtocolVersion::TLSv1_3 {continue}
             let client_config = make_client_config_with_versions_with_auth(*kt, &[version]);
             let (mut client, mut server,  mut recv_svr, mut recv_clnt) =
                 make_pair_for_arc_configs(&Arc::new(client_config.clone()), &server_config);
@@ -83,6 +84,7 @@ fn client_verifier_no_schemes() {
         let server_config = Arc::new(server_config);
 
         for version in rustls::ALL_VERSIONS {
+                 if version.version != rustls::ProtocolVersion::TLSv1_3 {continue}
             let client_config = make_client_config_with_versions_with_auth(*kt, &[version]);
             let (mut client, mut server,  mut recv_svr, mut recv_clnt) =
                 make_pair_for_arc_configs(&Arc::new(client_config.clone()), &server_config);

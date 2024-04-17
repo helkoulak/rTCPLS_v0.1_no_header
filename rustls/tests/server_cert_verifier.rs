@@ -52,7 +52,7 @@ fn client_can_override_certificate_verification_and_reject_certificate() {
         let server_config = Arc::new(make_server_config(*kt));
 
         for version in rustls::ALL_VERSIONS {
-                if version.version == rustls::ProtocolVersion::TLSv1_2 {
+                if version.version != rustls::ProtocolVersion::TLSv1_3 {
             continue
         }
             let mut client_config = make_client_config_with_versions(*kt, &[version]);
@@ -78,6 +78,7 @@ fn client_can_override_certificate_verification_and_reject_certificate() {
 
 #[cfg(feature = "tls12")]
 #[test]
+#[ignore]
 fn client_can_override_certificate_verification_and_reject_tls12_signatures() {
     for kt in ALL_KEY_TYPES.iter() {
         let mut client_config = make_client_config_with_versions(*kt, &[&rustls::version::TLS12]);

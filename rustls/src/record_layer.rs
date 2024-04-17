@@ -438,6 +438,8 @@ impl ReadSeq {
 
 #[cfg(test)]
 mod tests {
+    use std::prelude::v1::Vec;
+    use crate::ContentType::ApplicationData;
     use crate::recvbuf::RecvBufMap;
     use super::*;
 
@@ -456,11 +458,15 @@ mod tests {
             }
 
             fn decrypt_tcpls<'a, 'b>(&mut self, msg: InboundOpaqueMessage<'a>, seq: u64, stream_id: u32, recv_buf: &'b mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<InboundPlainMessage<'b>, Error> {
-                todo!()
+                Ok(InboundPlainMessage{
+                    version: ProtocolVersion::TLSv1_3,
+                    payload: &[],
+                    typ: ApplicationData,
+                })
             }
 
             fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error> {
-                todo!()
+                Ok([0u8; 8])
             }
         }
 

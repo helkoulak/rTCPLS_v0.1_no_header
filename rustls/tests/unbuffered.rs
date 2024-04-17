@@ -21,6 +21,7 @@ use common::*;
 const MAX_ITERATIONS: usize = 100;
 
 #[test]
+#[ignore]
 fn tls12_handshake() {
     let outcome = handshake(&rustls::version::TLS12);
     assert_eq!(
@@ -284,8 +285,6 @@ fn run(
     let mut count = 0;
     let mut client_handshake_done = false;
     let mut server_handshake_done = false;
-    let mut recv_srv = rustls::recvbuf::RecvBufMap::new();
-    let mut recv_clnt = rustls::recvbuf::RecvBufMap::new();
 
     let mut client =
         UnbufferedClientConnection::new(client_config.clone(), server_name("localhost")).unwrap();

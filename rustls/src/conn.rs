@@ -853,10 +853,13 @@ impl<Data> ConnectionCore<Data> {
                 Err(e) => {
                     self.state = Err(e.clone());
                     self.message_deframer.calculate_discard_range();
-                    deframer_buffer
-                        .discard(self.message_deframer.processed_range.start as usize,
-                                 (self.message_deframer.processed_range.end - self.message_deframer.processed_range.start) as usize);
-                    self.message_deframer.rearrange_record_info();
+                    if (self.message_deframer.processed_range.end - self.message_deframer.processed_range.start) > 0 {
+                        deframer_buffer
+                            .discard(self.message_deframer.processed_range.start as usize,
+                                     (self.message_deframer.processed_range.end - self.message_deframer.processed_range.start) as usize);
+                        self.message_deframer.rearrange_record_info();
+                    }
+
                     return Err(e);
                 }
             }
