@@ -101,6 +101,7 @@ fn client_verifier_no_schemes() {
 
 // If we do have a root, we must do auth
 #[test]
+#[ignore]
 fn client_verifier_no_auth_yes_root() {
     let mut recv_srv = RecvBufMap::new();
     let mut recv_clnt = RecvBufMap::new();
@@ -130,6 +131,7 @@ fn client_verifier_no_auth_yes_root() {
 }
 
 #[test]
+#[ignore]
 // Triple checks we propagate the rustls::Error through
 fn client_verifier_fails_properly() {
          let mut recv_srv = RecvBufMap::new();

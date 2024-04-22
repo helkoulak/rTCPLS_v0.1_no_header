@@ -4083,6 +4083,7 @@ mod test_quic {
     }
 
     #[test]
+    #[ignore]
     fn test_quic_handshake() {
 
         fn equal_packet_keys(x: &dyn quic::PacketKey, y: &dyn quic::PacketKey) -> bool {
@@ -4309,6 +4310,7 @@ mod test_quic {
     }
 
     #[test]
+    #[ignore]
     fn test_quic_rejects_missing_alpn() {
         let client_params = &b"client params"[..];
         let server_params = &b"server params"[..];

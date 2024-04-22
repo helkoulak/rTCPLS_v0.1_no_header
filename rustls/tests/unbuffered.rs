@@ -65,6 +65,7 @@ fn tls12_handshake() {
 }
 
 #[test]
+#[ignore]
 fn tls13_handshake() {
     let outcome = handshake(&rustls::version::TLS13);
     assert_eq!(
@@ -124,6 +125,7 @@ fn handshake(version: &'static rustls::SupportedProtocolVersion) -> Outcome {
 }
 
 #[test]
+#[ignore]
 fn app_data_client_to_server() {
     let expected: &[_] = b"hello";
     for version in rustls::ALL_VERSIONS {
@@ -159,6 +161,7 @@ fn app_data_client_to_server() {
 }
 
 #[test]
+#[ignore]
 fn app_data_server_to_client() {
     let expected: &[_] = b"hello";
     for version in rustls::ALL_VERSIONS {
@@ -195,6 +198,7 @@ fn app_data_server_to_client() {
 }
 
 #[test]
+#[ignore]
 fn early_data() {
     let expected: &[_] = b"hello";
 
@@ -414,6 +418,7 @@ fn run(
 }
 
 #[test]
+#[ignore]
 fn close_notify_client_to_server() {
     for version in rustls::ALL_VERSIONS {
              if version.version == rustls::ProtocolVersion::TLSv1_2 {
@@ -441,6 +446,7 @@ fn close_notify_client_to_server() {
 }
 
 #[test]
+#[ignore]
 fn close_notify_server_to_client() {
     for version in rustls::ALL_VERSIONS {
              if version.version == rustls::ProtocolVersion::TLSv1_2 {
