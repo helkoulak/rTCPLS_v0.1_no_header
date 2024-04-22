@@ -456,7 +456,7 @@ impl MessageDeframer {
                     typ,
                     version,
                     payload: match record_layer.has_decrypted() {
-                        true => core::mem::take(&mut &*app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).get_mut_consumed()),
+                        true => core::mem::take(&mut &*app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).get_last_written()),
                         false => buffer.take(plain_payload_slice),
                     },
                 };
