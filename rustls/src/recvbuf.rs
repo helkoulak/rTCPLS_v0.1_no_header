@@ -146,16 +146,21 @@ impl RecvBuf {
     /// and returning how many bytes were written there.
     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
 
-        let to_read_length = cmp::min(buf.len(), match self.is_empty() {
-            true => self.get_last_written().len(),
-            false => self.as_ref_consumed().len(),
-        });
+        let mut to_read_length = 0;
 
-        buf[..to_read_length].copy_from_slice(match self.is_empty() {
-            true => &self.get_last_written()[..to_read_length],
-            false => &self.as_ref_consumed()[..to_read_length],
-        });
-        self.consume(to_read_length);
+        match self.is_empty() {
+            true => {
+                to_read_length = cmp::min(buf.len(), self.get_last_written().len());
+                buf[..to_read_length].copy_from_slice(&self.get_last_written()[..to_read_length]);
+            },
+
+            false => {
+                to_read_length = cmp::min(buf.len(), self.as_ref_consumed().len());
+                buf[..to_read_length].copy_from_slice(&self.as_ref_consumed()[..to_read_length]);
+                self.consume(to_read_length);
+            },
+        }
+
         Ok(to_read_length)
     }
 }

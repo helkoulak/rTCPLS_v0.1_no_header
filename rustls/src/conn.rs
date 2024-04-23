@@ -576,17 +576,15 @@ impl<Data> ConnectionCommon<Data> {
     /// [`process_new_packets`]: ConnectionCommon::process_new_packets
 
     pub fn complete_io<T>(&mut self, io: &mut T, recv_map: Option<&mut RecvBufMap>) -> Result<(usize, usize), io::Error>
-    where
-        Self: Sized,
-        T: io::Read + io::Write,
+        where
+            Self: Sized,
+            T: io::Read + io::Write,
     {
 
-        let mut map = RecvBufMap::new();
-        let mut recv = match recv_map  {
-            Some(map) => map,
-            None => &mut map,
-        };
+        let empty_map = &mut RecvBufMap::new();
+        let mut recv = recv_map.unwrap_or_else(|| empty_map);
 
+        let until_handshaked = self.is_handshaking();
         let mut eof = false;
         let mut wrlen = 0;
         let mut rdlen = 0;

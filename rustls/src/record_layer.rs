@@ -37,7 +37,7 @@ pub struct RecordLayer {
     // id of currently used stream
     stream_in_use: u16,
     pub streams: StreamMap,
-    is_handshaking: bool,
+    /*is_handshaking: bool,*/
     has_decrypted: bool,
 
     pub write_seq_map: WriteSeqMap,
@@ -57,7 +57,7 @@ impl RecordLayer {
             message_encrypter: <dyn MessageEncrypter>::invalid(),
             message_decrypter: <dyn MessageDecrypter>::invalid(),
             streams: StreamMap::new(),
-            is_handshaking: true,
+            /*is_handshaking: true,*/
             has_decrypted: false,
             write_seq_map: WriteSeqMap::default() ,
             encrypt_state: DirectionState::Invalid,
@@ -336,9 +336,9 @@ impl RecordLayer {
         }
     }
 
-    pub(crate) fn set_not_handshaking(&mut self) {
+   /* pub(crate) fn set_not_handshaking(&mut self) {
         self.is_handshaking = false;
-    }
+    }*/
 
     pub(crate) fn encrypt_for_stream(&mut self, stream_id: u16) {
         self.stream_in_use = stream_id;
