@@ -482,10 +482,10 @@ impl MessageDecrypter for InvalidMessageDecrypter {
     }
 
     fn decrypt_tcpls<'a, 'b>(&mut self, msg: InboundOpaqueMessage<'a>, seq: u64, stream_id: u32, recv_buf: &'b mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<InboundPlainMessage<'b>, Error> {
-        todo!()
+        Err(Error::DecryptError)
     }
 
     fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error> {
-        todo!()
+        Err(Error::DecryptError)
     }
 }
