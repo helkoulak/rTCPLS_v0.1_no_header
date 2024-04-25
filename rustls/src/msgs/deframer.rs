@@ -44,6 +44,10 @@ pub struct MessageDeframer {
 
     ///Indicates if records are received out of order
     pub(crate) out_of_order: bool,
+
+    ///Range of joined Handshake message in the deframer buffer
+    pub(crate)  joined_message: Range<usize>,
+
 }
 
 impl MessageDeframer {
@@ -427,9 +431,6 @@ impl MessageDeframer {
             let (typ, version, plain_payload_slice) =
                 match record_layer.decrypt_incoming_tcpls(m, app_buffers.get_or_create(hdr_decoded.stream_id as u64, None), &hdr_decoded) {
                 Ok(Some(decrypted)) => {
-                    self.record_info
-                        .get_mut(&(start as u64))
-                        .unwrap().processed = true;
 
                     let Decrypted {
                         want_close_before_decrypt,
@@ -476,6 +477,9 @@ impl MessageDeframer {
                 if typ == ContentType::ApplicationData {
                     app_buffers.insert_readable(record_layer.get_stream_id() as u64);
                 }
+                self.record_info
+                    .get_mut(&(start as u64))
+                    .unwrap().processed = true;
                 buffer.queue_discard(end);
                 let message = InboundPlainMessage {
                     typ,
@@ -542,6 +546,10 @@ impl MessageDeframer {
             // Otherwise, we've yielded the last handshake payload in the buffer, so we can
             // discard all of the bytes that we're previously buffered as handshake data.
             let end = meta.message.end;
+
+            self.joined_message.start = meta.message.start;
+            self.joined_message.end = meta.message.end;
+
             self.joining_hs = None;
 
             buffer.queue_discard(end);
@@ -663,6 +671,7 @@ impl MessageDeframer {
     /// Contiguous data range grows to the left or right depending on adjacent processed records.
     /// Range will only be saved in self.processed_range if range >= DISCARD_THRESHOLD.
     pub fn calculate_discard_range(&mut self) {
+        self.mark_as_processed();
         let mut contiguous = true;
         while contiguous {
             for (offset, info) in self.record_info.iter() {
@@ -727,6 +736,19 @@ impl MessageDeframer {
         self.record_info = new_record_info;
         self.processed_range.start = 0;
         self.processed_range.end   = 0;
+    }
+
+    pub fn mark_as_processed(&mut self){
+        if self.joined_message.end != 0 {
+            for (offset, info) in self.record_info.iter_mut().skip_while(|(offset, _)| (**offset as usize) < self.joined_message.start) {
+                if *offset == self.joined_message.end as u64 {
+                    break
+                }
+                info.processed = true;
+            }
+            self.joined_message.start = 0;
+            self.joined_message.end = 0;
+        }
     }
 }
 
