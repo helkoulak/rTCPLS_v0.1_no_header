@@ -41,6 +41,9 @@ pub struct MessageDeframer {
 
     /// Range of offsets of processed data in deframer buffer.
     pub(crate) processed_range: Range<u64>,
+
+    ///Indicates if records are received out of order
+    pub(crate) out_of_order: bool,
 }
 
 impl MessageDeframer {
@@ -274,7 +277,30 @@ impl MessageDeframer {
         // handshake message payload in `self.joining_hs`, appending to it as we see records.
         let expected_len = loop {
 
-            start = match &self.joining_hs {
+            start = match self.record_info.is_empty() {
+                true => 0,
+                false => match self.out_of_order {
+                    true => {
+                        for (offset, info) in self.record_info.iter() {
+                            if (app_buffers.get(info.id).unwrap().next_recv_pkt_num == info.chunk_num && !info.processed) {
+                                end = *offset as usize;
+                                break
+                            } else {
+                                end = *offset as usize + info.len;
+                                continue
+                            }
+                        }
+                        end
+                    }
+                    false => {
+                        end = *self.record_info.last_key_value().unwrap().0 as usize
+                            + self.record_info.last_key_value().unwrap().1.len;
+                        end
+                    },
+                },
+            };
+
+           /* start = match &self.joining_hs {
 
                 Some(meta) => {
                     match meta.expected_len {
@@ -302,7 +328,7 @@ impl MessageDeframer {
                     }
                     end
                 },
-            };
+            };*/
 
             // Does our `buf` contain a full message?  It does if it is big enough to
             // contain a header, and that header has a length which falls within `buf`.
@@ -378,7 +404,7 @@ impl MessageDeframer {
             }
 
             // Consider header protection in case dec/enc state is active
-            if tag_len != 0 {
+            if record_layer.is_encrypting() && m.payload.len() > TCPLS_HEADER_SIZE {
                 // Take the LSBs of calculated tag as input sample for hash function
                 let sample = m.payload.rchunks(tag_len).next().unwrap();
                 // Decode tcpls header and choose recv_buf accordingly
@@ -389,14 +415,13 @@ impl MessageDeframer {
                 //Update record info if header is present
                 self.record_info.insert(start as u64, RangeBufInfo::from(hdr_decoded.chunk_num, hdr_decoded.stream_id, end - start));
 
+                if app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).next_recv_pkt_num != hdr_decoded.chunk_num {
+                    self.out_of_order = true;
+                    continue
+                }
+
             }
 
-
-            /*recv_buf = app_buffers.get_or_create(hdr_decoded.stream_id as u64, None);*/
-
-            if app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).next_recv_pkt_num != hdr_decoded.chunk_num {
-                continue
-            }
 
             // Decrypt the encrypted message (if necessary).
             let (typ, version, plain_payload_slice) =

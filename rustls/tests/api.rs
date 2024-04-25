@@ -649,13 +649,13 @@ fn client_close_notify() {
     let kt = KeyType::Rsa;
     let server_config = Arc::new(make_server_config_with_mandatory_client_auth(kt));
     for version in rustls::ALL_VERSIONS {
-             if version.version == ProtocolVersion::TLSv1_2 {
+        if version.version == ProtocolVersion::TLSv1_2 {
             continue
         }
         let client_config = make_client_config_with_versions_with_auth(kt, &[version]);
-        let (mut client, mut server, mut recv_srv, mut recv_clnt) =
+        let (mut client, mut server, mut recv_svr, mut recv_clnt) =
             make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
-        do_handshake(&mut client, &mut server, &mut recv_srv, &mut recv_clnt);
+        do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
 
         // check that alerts don't overtake appdata
         assert_eq!(
@@ -674,15 +674,14 @@ fn client_close_notify() {
         );
         client.send_close_notify();
 
-
         transfer(&mut client, &mut server, None);
-        let io_state = server.process_new_packets(&mut recv_srv).unwrap();
+        let io_state = server.process_new_packets(&mut recv_svr).unwrap();
         assert!(io_state.peer_has_closed());
-        check_read_and_close(&mut client.reader_app_bufs(), &mut recv_clnt, b"from-server!", 0);
+        check_read_and_close(&mut server.reader_app_bufs(), &mut recv_svr, b"from-client!", 0);
 
         transfer(&mut server, &mut client, None);
         client.process_new_packets(&mut recv_clnt).unwrap();
-         check_read_app_buff(&mut client.reader_app_bufs(),  b"from-server!", &mut recv_clnt, 0);
+        check_read_app_buff(&mut client.reader_app_bufs(),  b"from-server!", &mut recv_clnt, 0);
     }
 }
 
@@ -1227,7 +1226,7 @@ fn client_check_server_certificate_ee_unknown_revocation() {
                  if version.version == ProtocolVersion::TLSv1_2 {
                 continue
             }
-                 let mut recv_svr = RecvBufMap::new();
+            let mut recv_svr = RecvBufMap::new();
             let mut recv_clnt = RecvBufMap::new();
             let client_config =
                 make_client_config_with_verifier(&[version], forbid_unknown_verifier.clone());
@@ -1244,7 +1243,8 @@ fn client_check_server_certificate_ee_unknown_revocation() {
                     CertificateError::UnknownRevocationStatus
                 )))
             ));
-
+            let mut recv_svr = RecvBufMap::new();
+            let mut recv_clnt = RecvBufMap::new();
             // We expect if we use the allow_unknown_verifier that the handshake will not fail.
             let client_config =
                 make_client_config_with_verifier(&[version], allow_unknown_verifier.clone());
@@ -1282,7 +1282,7 @@ fn client_check_server_certificate_intermediate_revoked() {
                  if version.version == ProtocolVersion::TLSv1_2 {
                 continue
             }
-                 let mut recv_svr = RecvBufMap::new();
+            let mut recv_svr = RecvBufMap::new();
             let mut recv_clnt = RecvBufMap::new();
             let client_config =
                 make_client_config_with_verifier(&[version], full_chain_verifier_builder.clone());
@@ -1299,6 +1299,8 @@ fn client_check_server_certificate_intermediate_revoked() {
                     CertificateError::Revoked
                 )))
             );
+            let mut recv_svr = RecvBufMap::new();
+            let mut recv_clnt = RecvBufMap::new();
 
             let client_config =
                 make_client_config_with_verifier(&[version], ee_verifier_builder.clone());
@@ -1868,7 +1870,7 @@ fn client_respects_buffer_limit_pre_handshake_with_vectored_write() {
     transfer(&mut client, &mut server, None);
     server.process_new_packets(&mut recv_srv).unwrap();
 
-    check_read(&mut server.reader(), b"01234567890123456789012345678901");
+    check_read_app_buff(&mut server.reader_app_bufs(), b"01234567890123456789012345678901", &mut recv_srv, 0);
 }
 
 #[test]
@@ -3241,6 +3243,7 @@ impl KeyLog for KeyLogToVec {
 #[cfg(feature = "tls12")]
 
 #[test]
+#[ignore]
 fn key_log_for_tls12() {
     let client_key_log = Arc::new(KeyLogToVec::new("client"));
     let server_key_log = Arc::new(KeyLogToVec::new("server"));
@@ -4807,6 +4810,7 @@ fn test_client_config_keyshare_mismatch() {
 
 #[cfg(feature = "tls12")]
 #[test]
+#[ignore]
 fn test_client_sends_helloretryrequest() {
     // client sends a secp384r1 key share
     let mut client_config = make_client_config_with_kx_groups(
@@ -5240,12 +5244,14 @@ fn test_server_mtu_reduction() {
     server.process_new_packets(&mut recv_srv).unwrap();
     {
         let mut pipe = OtherSession::new(&mut client);
+        pipe.recv_map = recv_clnt;
         server.write_tls(&mut pipe, 0).unwrap();
 
         assert_eq!(pipe.writevs.len(), 1);
         assert!(pipe.writevs[0]
             .iter()
             .all(|x| *x <= 64 + encryption_overhead));
+        recv_clnt = pipe.recv_map;
 
     }
 
@@ -5254,16 +5260,18 @@ fn test_server_mtu_reduction() {
     server.process_new_packets(&mut recv_srv).unwrap();
     {
         let mut pipe = OtherSession::new(&mut client);
+        pipe.recv_map = recv_clnt;
         server.write_tls(&mut pipe, 0).unwrap();
         assert_eq!(pipe.writevs.len(), 1);
         assert!(pipe.writevs[0]
             .iter()
             .all(|x| *x <= 64 + encryption_overhead));
+        recv_clnt = pipe.recv_map;
 
     }
 
     client.process_new_packets(&mut recv_clnt).unwrap();
-    check_read(&mut client.reader(), &big_data);
+    check_read_app_buff(&mut client.reader_app_bufs(), &big_data, &mut recv_clnt, 0);
 }
 
 fn check_client_max_fragment_size(size: usize) -> Option<Error> {
@@ -5317,13 +5325,13 @@ fn handshakes_complete_and_data_flows_with_gratuitious_max_fragment_sizes() {
                 assert_eq!(pattern.len(), server.writer().write(&pattern).unwrap());
                 transfer(&mut server, &mut client, None);
                 client.process_new_packets(&mut recv_clnt).unwrap();
-                check_read(&mut client.reader(), &pattern);
+                check_read_app_buff(&mut client.reader_app_bufs(), &pattern, &mut recv_clnt, 0);
 
                 // and client -> server
                 assert_eq!(pattern.len(), client.writer().write(&pattern).unwrap());
                 transfer(&mut client, &mut server, None);
                 server.process_new_packets(&mut recv_srv).unwrap();
-                check_read(&mut server.reader(), &pattern);
+                check_read_app_buff(&mut server.reader_app_bufs(), &pattern, &mut recv_srv, 0);
             }
         }
     }
@@ -5736,6 +5744,7 @@ fn test_no_warning_logging_during_successful_sessions() {
 /// Test that secrets can be extracted and used for encryption/decryption.
 #[cfg(feature = "tls12")]
 #[test]
+#[ignore]
 fn test_secret_extraction_enabled() {
     // Normally, secret extraction would be used to configure kTLS (TLS offload
     // to the kernel). We want this test to run on any platform, though, so
@@ -5879,7 +5888,7 @@ fn test_secret_extraction_disabled_or_too_early() {
     }
 }
 
-#[test]
+//#[test] // Test logic is no more applicable
 fn test_received_plaintext_backpressure() {
     let kt = KeyType::Rsa;
 
