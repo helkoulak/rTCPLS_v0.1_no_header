@@ -15,13 +15,18 @@ pub struct RecvBuf {
     pub offset: u64,
 
     // Length of last decrypted data chunk
-    pub last_recv_len: usize,
+    pub last_decrypted_len: usize,
+
+    // Length of decrypted data in case of joined handshake messages
+    pub total_decrypted: usize,
 
     /// indicates to which offset data within offset has already been marked consumed by the
     /// application.
     consumed: usize,
 
     pub next_recv_pkt_num: u32,
+
+    pub last_data_type_decrypted: u8,
 
 
 }
@@ -64,15 +69,26 @@ impl RecvBuf {
     }
     ///Gives mutable reference to slice of last written chunk of bytes. Mainly used in case of handshake
     /// messages because they are always written at offset zero
-    pub fn get_mut_last_written(&mut self) -> &mut [u8] {
-        let start = self.offset as usize;
-        &mut self.data[start..start + self.last_recv_len]
+    pub fn get_mut_last_decrypted(&mut self) -> &mut [u8] {
+        let offset = self.offset as usize;
+        &mut self.data[offset - self.last_decrypted_len.. offset]
     }
     ///Gives immutable reference to slice of last written chunk of bytes. Mainly used in case of handshake
     /// messages because they are always written at offset zero
-    pub fn get_last_written(& self) -> & [u8] {
-        let start = self.offset as usize;
-        & self.data[start..start + self.last_recv_len]
+    pub fn get_last_decrypted(& self) -> & [u8] {
+        let offset = self.offset as usize;
+        & self.data[offset - self.last_decrypted_len.. offset]
+    }
+
+    pub fn get_mut_total_decrypted(&mut self) -> &mut [u8] {
+        let offset = self.offset as usize;
+        &mut self.data[offset - self.total_decrypted.. offset]
+    }
+    ///Gives immutable reference to slice of last written chunk of bytes. Mainly used in case of handshake
+    /// messages because they are always written at offset zero
+    pub fn get_total_decrypted(& self) -> & [u8] {
+        let offset = self.offset as usize;
+        & self.data[offset - self.total_decrypted.. offset]
     }
 
     pub  fn get_offset(&self) -> u64 {
@@ -89,7 +105,7 @@ impl RecvBuf {
 
     /// How many bytes written in buffer in the last decryption
     pub fn len(&self) -> usize {
-        self.last_recv_len
+        self.last_decrypted_len
     }
 
     pub fn capacity(&self) -> usize {
@@ -113,7 +129,7 @@ impl RecvBuf {
         self.consumed as u64 == self.offset
     }
 
-    pub fn truncate_processed(&mut self) { self.offset -= self.last_recv_len as u64; }
+    pub fn truncate_processed(&mut self) { self.offset -= self.last_decrypted_len as u64; }
 
     pub fn subtract_offset(&mut self, sub: u64) {
         self.offset -= sub;
@@ -131,7 +147,7 @@ impl RecvBuf {
         self.offset = 0;
         self.next_recv_pkt_num = 0;
         self.consumed = 0;
-        self.last_recv_len = 0;
+        self.last_decrypted_len = 0;
     }
 
     pub fn empty_stream(&mut self) {
@@ -140,7 +156,7 @@ impl RecvBuf {
         }
         self.offset = 0;
         self.consumed = 0;
-        self.last_recv_len = 0;
+        self.last_decrypted_len = 0;
 
     }
 
@@ -152,8 +168,8 @@ impl RecvBuf {
 
         match self.is_empty() {
             true => {
-                to_read_length = cmp::min(buf.len(), self.get_last_written().len());
-                buf[..to_read_length].copy_from_slice(&self.get_last_written()[..to_read_length]);
+                to_read_length = cmp::min(buf.len(), self.get_last_decrypted().len());
+                buf[..to_read_length].copy_from_slice(&self.get_last_decrypted()[..to_read_length]);
             },
 
             false => {
@@ -346,7 +362,7 @@ mod test {
         let  vector = vec![0x0A; DEFAULT_BUFFER_LIMIT];
         let mut stream = RecvBuf::new(0, Some(DEFAULT_BUFFER_LIMIT));
         stream.data.copy_from_slice(vector.as_slice());
-        stream.last_recv_len = 1234;
+        stream.last_decrypted_len = 1234;
         stream.next_recv_pkt_num = 95475;
 
         stream.consumed = 54455;
@@ -358,7 +374,7 @@ mod test {
         assert_eq!(stream.offset, 0);
         assert_eq!(stream.next_recv_pkt_num, 0);
         assert_eq!(stream.consumed, 0);
-        assert_eq!(stream.last_recv_len, 0);
+        assert_eq!(stream.last_decrypted_len, 0);
     }
 
     #[test]

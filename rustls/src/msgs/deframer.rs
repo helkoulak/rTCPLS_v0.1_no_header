@@ -205,7 +205,7 @@ impl MessageDeframer {
             // If we don't know the payload size yet or if the payload size is larger
             // than the currently buffered payload, we need to wait for more data.
             let src = buffer.raw_slice_to_filled_range(plain_payload_slice);
-            match self.append_hs(version, InternalPayload(src), end, buffer, None)? {
+            match self.append_hs(version, InternalPayload(src), end, 0, buffer, None)? {
                 HandshakePayloadState::Blocked => return Ok(None),
                 HandshakePayloadState::Complete(len) => break len,
                 HandshakePayloadState::Continue => continue,
@@ -453,6 +453,9 @@ impl MessageDeframer {
                     ));
                 }
                 Ok(None) => {
+                    self.record_info
+                        .get_mut(&(start as u64))
+                        .unwrap().processed = true;
 
                     buffer.queue_discard(end);
 
@@ -485,7 +488,7 @@ impl MessageDeframer {
                     typ,
                     version,
                     payload: match record_layer.has_decrypted() {
-                        true => core::mem::take(&mut &*app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).get_last_written()),
+                        true => core::mem::take(&mut &*app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).get_last_decrypted()),
                         false => buffer.take(plain_payload_slice),
                     },
                 };
@@ -504,15 +507,17 @@ impl MessageDeframer {
             // than the currently buffered payload, we need to wait for more data.
 
             let src = match app_buffers.get_or_create(hdr_decoded.stream_id as u64, None)
-                .last_recv_len > 0 {
-                true => 0..0,
+                .last_decrypted_len > 0 {
+                true => 0.. app_buffers.get_or_create(hdr_decoded.stream_id as u64, None)
+                    .last_decrypted_len, // 13 bytes of TLS header + 8 bytes of TCPLS header
                 false => buffer.raw_slice_to_filled_range(plain_payload_slice),
             };
-            match self.append_hs(version, InternalPayload(src), end, buffer, match app_buffers.get_or_create(hdr_decoded.stream_id as u64, None)
-                .last_recv_len > 0 {
-                true => Some(app_buffers.get_or_create(hdr_decoded.stream_id as u64, None)),
-                false => None,
-            }
+            match self.append_hs(version, InternalPayload(src), end,
+                                 start, buffer, match app_buffers.get_or_create(hdr_decoded.stream_id as u64, None)
+                                                             .last_decrypted_len > 0 {
+                                                             true => Some(app_buffers.get_or_create(hdr_decoded.stream_id as u64, None)),
+                                                             false => None,
+                                                         }
             )? {
 
                 HandshakePayloadState::Blocked => return Ok(None),
@@ -559,7 +564,7 @@ impl MessageDeframer {
             typ,
             version,
             payload: match record_layer.has_decrypted() {
-                true => core::mem::take(&mut &*app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).get_mut_last_written()),
+                true => core::mem::take(&mut &*app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).get_mut_total_decrypted()),
                 false => buffer.take(raw_payload),
             },
         };
@@ -591,6 +596,7 @@ impl MessageDeframer {
         version: ProtocolVersion,
         payload: P,
         end: usize,
+        start: usize,
         buffer: &mut B,
         recv_buf: Option<& RecvBuf>,
     ) -> Result<HandshakePayloadState, Error> {
@@ -621,7 +627,7 @@ impl MessageDeframer {
                 // Write it into the buffer and create the metadata.
 
                 let expected_len = match recv_buf {
-                    Some(ref buf) => payload_size(buf.get_last_written())?,
+                    Some(ref buf) => payload_size(buf.get_last_decrypted())?,
                     None => payload.size(buffer)?,
                 };
 
@@ -632,11 +638,11 @@ impl MessageDeframer {
 
                 self.joining_hs
                     .insert(HandshakePayloadMeta {
-                        message: Range { start: 0, end },
+                        message: Range { start: start, end },
                         payload: Range {
                             start: 0,
                             end: match recv_buf {
-                                Some(ref buf) => buf.last_recv_len,
+                                Some(ref buf) => buf.last_decrypted_len,
                                 None => payload.len(),
                             } ,
                         },
@@ -653,7 +659,7 @@ impl MessageDeframer {
             Some(len) if len <= meta.payload.len() => HandshakePayloadState::Complete(len),
 
             _ => match recv_buf {
-                Some(buf) => match buf.last_recv_len > meta.message.end {
+                Some(buf) => match buffer.len() > meta.message.end {
 
                     true => HandshakePayloadState::Continue,
                     false => HandshakePayloadState::Blocked,
@@ -750,6 +756,14 @@ impl MessageDeframer {
             self.joined_message.end = 0;
         }
     }
+
+    pub fn currently_joining_hs(&self) -> bool {
+        self.joining_hs.is_some()
+    }
+
+    pub fn processed_range_is_empty(&self) -> bool {
+        !((self.processed_range.end - self.processed_range.start) > 0)
+    }
 }
 
 #[cfg(feature = "std")]
@@ -770,7 +784,7 @@ impl MessageDeframer {
         }
 
         let end = buffer.len() + payload.len();
-        self.append_hs(version, ExternalPayload(payload), end, buffer, None)?;
+        self.append_hs(version, ExternalPayload(payload), end, 0, buffer, None)?;
         Ok(())
     }
 
