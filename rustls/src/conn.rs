@@ -359,7 +359,7 @@ https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
 
 #[cfg(feature = "std")]
 pub use connection::{Connection, Reader, Writer};
-use crate::recvbuf::{ReaderAppBufs, RecvBufMap};
+use crate::recvbuf::{ReaderAppBufs, RecvBuf, RecvBufMap};
 use crate::tcpls::frame::{Frame, STREAM_FRAME_HEADER_SIZE};
 use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
@@ -841,7 +841,7 @@ impl<Data> ConnectionCore<Data> {
                 None => break,
             };
 
-            if msg.typ != ContentType::Heartbeat {
+            if msg.typ == ContentType::ApplicationData {
                 self.process_tcpls_payload(app_buffers);
                 continue;
             }
@@ -880,62 +880,39 @@ impl<Data> ConnectionCore<Data> {
     fn process_tcpls_payload(&mut self, app_buffers: &mut RecvBufMap) {
         let mut app_buffer = app_buffers.get_mut(self.common_state.record_layer.get_stream_id()).unwrap();
         let offset = app_buffer.get_offset();
-        match ContentType::from(app_buffer.last_data_type_decrypted) {
-            ContentType::ApplicationData => {
-                let mut b = octets::Octets::with_slice_at_offset(app_buffer.as_ref(), offset as usize);
 
-                loop {
-                    let decoded_frame = Frame::parse(&mut b).unwrap();
-                    match decoded_frame {
-                        Frame::Padding => {},
-                        Frame::Ping => {},
-                        Frame::Stream {
-                            length,
-                            fin,
-                        } => {
-                            app_buffer.subtract_offset(STREAM_FRAME_HEADER_SIZE as u64);
-                            break
-                        },
-
-                        Frame::ACK {
-                            highest_record_sn_received,
-                            connection_id,
-                        } => {},
-
-                        Frame::NewToken { token, sequence } => {},
-
-                        Frame::ConnectionReset { connection_id } => {},
-                        Frame::NewAddress {
-                            port,
-                            address,
-                            address_version,
-                            address_id,
-                        } => {},
-
-                        Frame::RemoveAddress { address_id } => {},
-
-                        Frame::StreamChange {
-                            next_record_stream_id,
-                            next_offset,
-                        } => {},
-
-                    }
-                }
-
-            },
-
-            ContentType::Handshake => {
-                if !self.message_deframer.currently_joining_hs() {
-                    app_buffer.subtract_offset(app_buffer.total_decrypted as u64);
-                    app_buffer.total_decrypted = 0;
-                }
-            },
-            _ => {
-                app_buffer.subtract_offset(app_buffer.total_decrypted as u64);
-                app_buffer.total_decrypted = 0;
-            },
+        let mut b = octets::Octets::with_slice_at_offset(app_buffer.as_ref(), offset as usize);
+        loop {
+            let decoded_frame = Frame::parse(&mut b).unwrap();
+            match decoded_frame {
+                Frame::Padding => {},
+                Frame::Ping => {},
+                Frame::Stream {
+                    length,
+                    fin,
+                } => {
+                    app_buffer.subtract_offset(STREAM_FRAME_HEADER_SIZE as u64);
+                    break
+                },
+                Frame::ACK {
+                    highest_record_sn_received,
+                    connection_id,
+                } => {},
+                Frame::NewToken { token, sequence } => {},
+                Frame::ConnectionReset { connection_id } => {},
+                Frame::NewAddress {
+                    port,
+                    address,
+                    address_version,
+                    address_id,
+                } => {},
+                Frame::RemoveAddress { address_id } => {},
+                Frame::StreamChange {
+                    next_record_stream_id,
+                    next_offset,
+                } => {},
+            }
         }
-
     }
 
     fn deframe_unbuffered<'b>(

@@ -46,7 +46,7 @@ pub struct MessageDeframer {
     pub(crate) out_of_order: bool,
 
     ///Range of joined Handshake message in the deframer buffer
-    pub(crate)  joined_message: Range<usize>,
+    pub(crate)  joined_messages: Vec<Range<usize>>,
 
 }
 
@@ -273,7 +273,6 @@ impl MessageDeframer {
         let tag_len = record_layer.get_tag_length();
         let mut hdr_decoded = TcplsHeader::default();
         let mut end = 0;
-        /*let mut recv_buf = &mut RecvBuf::default();*/
 
 
         // We loop over records we've received but not processed yet.
@@ -304,35 +303,6 @@ impl MessageDeframer {
                 },
             };
 
-           /* start = match &self.joining_hs {
-
-                Some(meta) => {
-                    match meta.expected_len {
-                        // We're joining a handshake payload, and we've seen the full payload.
-                        Some(len) if len <= meta.payload.len() => break len,
-                        // Not enough data, and we can't parse any more out of the buffer (QUIC).
-                        _ if meta.quic => return Ok(None),
-                        // Try parsing some more of the encrypted buffered data.
-                        _ => meta.message.end,
-                    }
-                }
-
-                None => {
-                    if !self.record_info.is_empty(){
-                        for (offset, info) in self.record_info.iter() {
-                            if (app_buffers.get(info.id).unwrap().next_recv_pkt_num == info.chunk_num && !info.processed) {
-                                end = *offset as usize;
-                                break
-                            }
-                            else {
-                                end = *offset as usize + info.len;
-                                continue
-                            }
-                        }
-                    }
-                    end
-                },
-            };*/
 
             // Does our `buf` contain a full message?  It does if it is big enough to
             // contain a header, and that header has a length which falls within `buf`.
@@ -418,6 +388,14 @@ impl MessageDeframer {
                     );
                 //Update record info if header is present
                 self.record_info.insert(start as u64, RangeBufInfo::from(hdr_decoded.chunk_num, hdr_decoded.stream_id, end - start));
+
+                //Prepare offset in application receive buffer for next decryption
+                if self.joining_hs.is_none() {
+                    app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).offset -=
+                        app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).total_decrypted as u64;
+                    app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).total_decrypted = 0;
+                }
+
 
                 if app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).next_recv_pkt_num != hdr_decoded.chunk_num {
                     self.out_of_order = true;
@@ -552,8 +530,13 @@ impl MessageDeframer {
             // discard all of the bytes that we're previously buffered as handshake data.
             let end = meta.message.end;
 
-            self.joined_message.start = meta.message.start;
-            self.joined_message.end = meta.message.end;
+            self.joined_messages.push(Range {
+                start: meta.message.start,
+                end: meta.message.end,
+            });
+
+            //Mark the range of the joined message as processed for discarding it later
+            self.mark_as_processed();
 
             self.joining_hs = None;
 
@@ -677,7 +660,6 @@ impl MessageDeframer {
     /// Contiguous data range grows to the left or right depending on adjacent processed records.
     /// Range will only be saved in self.processed_range if range >= DISCARD_THRESHOLD.
     pub fn calculate_discard_range(&mut self) {
-        self.mark_as_processed();
         let mut contiguous = true;
         while contiguous {
             for (offset, info) in self.record_info.iter() {
@@ -739,21 +721,28 @@ impl MessageDeframer {
                 processed: entry.1.processed,
             });
         }
+
+        for i in 0..self.joined_messages.len() {
+            if self.joined_messages[i].start >= self.processed_range.start as usize &&
+                self.joined_messages[i].end <= self.processed_range.end as usize {
+                self.joined_messages.remove(i);
+            }
+        }
         self.record_info = new_record_info;
         self.processed_range.start = 0;
         self.processed_range.end   = 0;
     }
 
     pub fn mark_as_processed(&mut self){
-        if self.joined_message.end != 0 {
-            for (offset, info) in self.record_info.iter_mut().skip_while(|(offset, _)| (**offset as usize) < self.joined_message.start) {
-                if *offset == self.joined_message.end as u64 {
-                    break
+        if !self.joined_messages.is_empty() {
+            for range in self.joined_messages {
+                for (offset, info) in self.record_info.iter_mut().skip_while(|(offset, _)| (**offset as usize) < range.start) {
+                    if *offset == range.end as u64 {
+                        break
+                    }
+                    info.processed = true;
                 }
-                info.processed = true;
             }
-            self.joined_message.start = 0;
-            self.joined_message.end = 0;
         }
     }
 
