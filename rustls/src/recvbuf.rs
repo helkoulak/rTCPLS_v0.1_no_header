@@ -14,10 +14,10 @@ pub struct RecvBuf {
     /// where the next chunk will be appended
     pub offset: u64,
 
-    // Length of last decrypted data chunk
-    pub last_decrypted_len: usize,
+    /// Length of last decrypted data chunk
+    pub last_decrypted: usize,
 
-    // Length of decrypted data in case of joined handshake messages
+    /// Length of decrypted data in case of joined handshake messages
     pub total_decrypted: usize,
 
     /// indicates to which offset data within offset has already been marked consumed by the
@@ -71,24 +71,28 @@ impl RecvBuf {
     /// messages because they are always written at offset zero
     pub fn get_mut_last_decrypted(&mut self) -> &mut [u8] {
         let offset = self.offset as usize;
-        &mut self.data[offset - self.last_decrypted_len.. offset]
+        &mut self.data[offset.. offset + self.last_decrypted]
     }
     ///Gives immutable reference to slice of last written chunk of bytes. Mainly used in case of handshake
     /// messages because they are always written at offset zero
     pub fn get_last_decrypted(& self) -> & [u8] {
         let offset = self.offset as usize;
-        & self.data[offset - self.last_decrypted_len.. offset]
+        & self.data[offset.. offset + self.last_decrypted]
     }
 
     pub fn get_mut_total_decrypted(&mut self) -> &mut [u8] {
         let offset = self.offset as usize;
-        &mut self.data[offset - self.total_decrypted.. offset]
+        let data_len = self.total_decrypted;
+        self.total_decrypted = 0;
+        &mut self.data[offset.. offset + data_len]
     }
     ///Gives immutable reference to slice of last written chunk of bytes. Mainly used in case of handshake
     /// messages because they are always written at offset zero
-    pub fn get_total_decrypted(& self) -> & [u8] {
+    pub fn get_total_decrypted(&mut self) -> & [u8] {
         let offset = self.offset as usize;
-        & self.data[offset - self.total_decrypted.. offset]
+        let data_len = self.total_decrypted;
+        self.total_decrypted = 0;
+        & self.data[offset.. offset + data_len]
     }
 
     pub  fn get_offset(&self) -> u64 {
@@ -105,7 +109,7 @@ impl RecvBuf {
 
     /// How many bytes written in buffer in the last decryption
     pub fn len(&self) -> usize {
-        self.last_decrypted_len
+        self.last_decrypted
     }
 
     pub fn capacity(&self) -> usize {
@@ -129,7 +133,7 @@ impl RecvBuf {
         self.consumed as u64 == self.offset
     }
 
-    pub fn truncate_processed(&mut self) { self.offset -= self.last_decrypted_len as u64; }
+    pub fn truncate_processed(&mut self) { self.offset -= self.last_decrypted as u64; }
 
     pub fn subtract_offset(&mut self, sub: u64) {
         self.offset -= sub;
@@ -147,7 +151,9 @@ impl RecvBuf {
         self.offset = 0;
         self.next_recv_pkt_num = 0;
         self.consumed = 0;
-        self.last_decrypted_len = 0;
+        self.last_decrypted = 0;
+        self.total_decrypted = 0;
+        self.last_data_type_decrypted = 0;
     }
 
     pub fn empty_stream(&mut self) {
@@ -156,7 +162,10 @@ impl RecvBuf {
         }
         self.offset = 0;
         self.consumed = 0;
-        self.last_decrypted_len = 0;
+        self.last_decrypted = 0;
+        self.last_data_type_decrypted = 0;
+        self.total_decrypted = 0;
+
 
     }
 
@@ -362,7 +371,7 @@ mod test {
         let  vector = vec![0x0A; DEFAULT_BUFFER_LIMIT];
         let mut stream = RecvBuf::new(0, Some(DEFAULT_BUFFER_LIMIT));
         stream.data.copy_from_slice(vector.as_slice());
-        stream.last_decrypted_len = 1234;
+        stream.last_decrypted = 1234;
         stream.next_recv_pkt_num = 95475;
 
         stream.consumed = 54455;
@@ -374,7 +383,7 @@ mod test {
         assert_eq!(stream.offset, 0);
         assert_eq!(stream.next_recv_pkt_num, 0);
         assert_eq!(stream.consumed, 0);
-        assert_eq!(stream.last_decrypted_len, 0);
+        assert_eq!(stream.last_decrypted, 0);
     }
 
     #[test]

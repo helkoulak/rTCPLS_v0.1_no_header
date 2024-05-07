@@ -1,4 +1,3 @@
-
 use alloc::vec::Vec;
 use core::ops::Range;
 use core::slice::SliceIndex;
@@ -7,18 +6,17 @@ use std::collections::{BTreeMap, hash_map};
 use std::io;
 use std::vec;
 
-use super::codec::Codec;
 use crate::enums::{ContentType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerMisbehaved};
 use crate::msgs::codec;
 #[cfg(feature = "std")]
 use crate::msgs::message::MAX_WIRE_SIZE;
-use crate::msgs::message::{InboundOpaqueMessage, InboundPlainMessage, MessageError};
 use crate::record_layer::{Decrypted, RecordLayer};
 use crate::recvbuf::{RecvBuf, RecvBufMap};
 use crate::tcpls::frame::{TCPLS_HEADER_SIZE, TcplsHeader};
-
 use crate::tcpls::stream::SimpleIdHashMap;
+
+use super::codec::Codec;
 
 /// This deframer works to reconstruct TLS messages from a stream of arbitrary-sized reads.
 ///
@@ -387,16 +385,10 @@ impl MessageDeframer {
                         &record_layer.decrypt_header(sample, &m.payload[..TCPLS_HEADER_SIZE]).expect("decrypting header failed")
                     );
                 //Update record info if header is present
-                self.record_info.insert(start as u64, RangeBufInfo::from(hdr_decoded.chunk_num, hdr_decoded.stream_id, end - start));
-
-                //Prepare offset in application receive buffer for next decryption
-                if self.joining_hs.is_none() {
-                    app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).offset -=
-                        app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).total_decrypted as u64;
-                    app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).total_decrypted = 0;
-                }
-
-
+                self.record_info
+                    .insert(start as u64, RangeBufInfo::from(hdr_decoded.chunk_num, hdr_decoded.stream_id, end - start)
+                    );
+                
                 if app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).next_recv_pkt_num != hdr_decoded.chunk_num {
                     self.out_of_order = true;
                     continue
@@ -485,14 +477,14 @@ impl MessageDeframer {
             // than the currently buffered payload, we need to wait for more data.
 
             let src = match app_buffers.get_or_create(hdr_decoded.stream_id as u64, None)
-                .last_decrypted_len > 0 {
+                .last_decrypted > 0 {
                 true => 0.. app_buffers.get_or_create(hdr_decoded.stream_id as u64, None)
-                    .last_decrypted_len, // 13 bytes of TLS header + 8 bytes of TCPLS header
+                    .last_decrypted, // 13 bytes of TLS header + 8 bytes of TCPLS header
                 false => buffer.raw_slice_to_filled_range(plain_payload_slice),
             };
             match self.append_hs(version, InternalPayload(src), end,
                                  start, buffer, match app_buffers.get_or_create(hdr_decoded.stream_id as u64, None)
-                                                             .last_decrypted_len > 0 {
+                                                             .last_decrypted > 0 {
                                                              true => Some(app_buffers.get_or_create(hdr_decoded.stream_id as u64, None)),
                                                              false => None,
                                                          }
@@ -625,7 +617,7 @@ impl MessageDeframer {
                         payload: Range {
                             start: 0,
                             end: match recv_buf {
-                                Some(ref buf) => buf.last_decrypted_len,
+                                Some(ref buf) => buf.last_decrypted,
                                 None => payload.len(),
                             } ,
                         },
@@ -722,12 +714,15 @@ impl MessageDeframer {
             });
         }
 
-        for i in 0..self.joined_messages.len() {
+        //Keep ranges that are outside the processed range
+        self.joined_messages.retain(|x| x.start < self.processed_range.start as usize ||
+            x.end > self.processed_range.end as usize );
+        /*for i in 0..self.joined_messages.len() {
             if self.joined_messages[i].start >= self.processed_range.start as usize &&
                 self.joined_messages[i].end <= self.processed_range.end as usize {
                 self.joined_messages.remove(i);
             }
-        }
+        }*/
         self.record_info = new_record_info;
         self.processed_range.start = 0;
         self.processed_range.end   = 0;
@@ -735,7 +730,7 @@ impl MessageDeframer {
 
     pub fn mark_as_processed(&mut self){
         if !self.joined_messages.is_empty() {
-            for range in self.joined_messages {
+            for range in &self.joined_messages {
                 for (offset, info) in self.record_info.iter_mut().skip_while(|(offset, _)| (**offset as usize) < range.start) {
                     if *offset == range.end as u64 {
                         break
