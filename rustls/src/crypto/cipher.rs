@@ -5,6 +5,7 @@ use std::vec;
 use siphasher::sip::SipHasher;
 
 use zeroize::Zeroize;
+use ring::rand::{Random, SecureRandom, SystemRandom};
 use crate::crypto::tls13::HkdfExpander;
 
 use crate::enums::{ContentType, ProtocolVersion};
@@ -14,6 +15,7 @@ pub use crate::msgs::message::{
     BorrowedPayload, InboundOpaqueMessage, InboundPlainMessage, OutboundChunks,
     OutboundOpaqueMessage, OutboundPlainMessage, PlainMessage, PrefixedPayload,
 };
+use crate::msgs::message::HEADER_SIZE;
 use crate::recvbuf::RecvBuf;
 use crate::suites::ConnectionTrafficSecrets;
 use crate::tcpls::frame::{Frame, TcplsHeader};
@@ -484,8 +486,35 @@ impl MessageDecrypter for InvalidMessageDecrypter {
     fn decrypt_tcpls<'a, 'b>(&mut self, msg: InboundOpaqueMessage<'a>, seq: u64, stream_id: u32, recv_buf: &'b mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<InboundPlainMessage<'b>, Error> {
         Err(Error::DecryptError)
     }
+}
+#[test]
+fn test_header_enc_dec() {
+    let rng = SystemRandom::new();
+    const INPUT_SIZE: usize = 16;
+    const HEADER_SIZE: usize = 8;
+    let mut input = [0u8; INPUT_SIZE];
+    let mut header = [0u8; HEADER_SIZE];
+    let mut output = [0u8; HEADER_SIZE];
+    let mut key = [0u8; INPUT_SIZE];
+    rng.fill(&mut key).unwrap();
 
-    fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error> {
-        Err(Error::DecryptError)
+    let mut header_enc_dec = HeaderProtector {
+        key,
+        sip_hasher:SipHasher::new_with_key(&key),
+    };
+
+
+
+
+    for i in 1..10000 {
+        rng.fill(&mut input).unwrap();
+        rng.fill(&mut header).unwrap();
+
+        output = header_enc_dec.calculate_hash(&input);
+        for i in 0..header.len() {
+            output[i] ^= header[i];
+        }
+      assert_eq!(header_enc_dec.decrypt_in_output(&input, &output).unwrap(), header)
+
     }
 }
