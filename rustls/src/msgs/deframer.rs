@@ -377,7 +377,7 @@ impl MessageDeframer {
             }
 
             // Consider header protection in case dec/enc state is active
-            if record_layer.is_encrypting() && m.payload.len() > TCPLS_HEADER_SIZE {
+            if record_layer.is_decrypting() && m.payload.len() > TCPLS_HEADER_SIZE {
                 // Take the LSBs of calculated tag as input sample for hash function
                 let sample = m.payload.rchunks(tag_len).next().unwrap();
                 // Decode tcpls header and choose recv_buf accordingly
