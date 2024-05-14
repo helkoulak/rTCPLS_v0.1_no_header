@@ -284,7 +284,7 @@ impl MessageDeframer {
                 false => match self.out_of_order {
                     true => {
                         for (offset, info) in self.record_info.iter() {
-                            if (app_buffers.get(info.id).unwrap().next_recv_pkt_num == info.chunk_num && !info.processed) {
+                            if app_buffers.get(info.id).unwrap().next_recv_pkt_num == info.chunk_num && !info.processed {
                                 end = *offset as usize;
                                 break
                             } else {
@@ -669,7 +669,7 @@ impl MessageDeframer {
                         self.processed_range.end = entry_end;
                     }
                     // expand to the left
-                    if (entry_end == self.processed_range.start) {
+                    if entry_end == self.processed_range.start {
                         self.processed_range.start = entry_start;
                     }
                 }
