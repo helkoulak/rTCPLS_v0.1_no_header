@@ -104,7 +104,7 @@ impl KeyScheduleEarly {
                 .set_encrypter(&client_early_traffic_secret, common),
             Side::Server => self
                 .ks
-                .set_decrypter(&client_early_traffic_secret, common),
+                .set_decrypter(&client_early_traffic_secret, common, true),
         }
 
 
@@ -182,7 +182,7 @@ impl KeyScheduleHandshakeStart {
 
         // Decrypt with the peer's key, encrypt with our own key
         new.ks
-            .set_decrypter(&new.server_handshake_traffic_secret, common);
+            .set_decrypter(&new.server_handshake_traffic_secret, common, false);
 
         if !early_data_enabled {
             // Set the client encryption key for handshakes if early data is not used
@@ -278,14 +278,21 @@ impl KeyScheduleHandshake {
         debug_assert_eq!(common.side, Side::Server);
         let secret = &self.client_handshake_traffic_secret;
         match skip_requested {
-            None => self.ks.set_decrypter(secret, common),
-            Some(max_early_data_size) => common
-                .record_layer
-                .set_message_decrypter_with_trial_decryption(
-                    self.ks
-                        .derive_decrypter(&self.client_handshake_traffic_secret),
-                    max_early_data_size,
-                ),
+            None => self.ks.set_decrypter(secret, common, false),
+            Some(max_early_data_size) => {
+                let (md, expander) = self.ks
+                    .derive_decrypter(&self.client_handshake_traffic_secret);
+                common
+                    .record_layer
+                    .set_message_decrypter_with_trial_decryption(md,
+                                                                 max_early_data_size);
+                if !common.record_layer.header_decrypter_is_set(){
+                    common.record_layer.set_header_decrypter(HeaderProtector::new(
+                        expander.as_ref(), self.ks.suite.aead_alg.key_len())
+                    )
+                }
+            },
+
         }
     }
 
@@ -358,7 +365,7 @@ impl KeyScheduleClientBeforeFinished {
 
         self.traffic
             .ks
-            .set_decrypter(server_secret, common);
+            .set_decrypter(server_secret, common, false);
         self.traffic
             .ks
             .set_encrypter(client_secret, common);
@@ -391,7 +398,7 @@ impl KeyScheduleTrafficWithClientFinishedPending {
         debug_assert_eq!(common.side, Side::Server);
         self.traffic
             .ks
-            .set_decrypter(&self.handshake_client_traffic_secret, common);
+            .set_decrypter(&self.handshake_client_traffic_secret, common, false);
     }
 
     pub(crate) fn sign_client_finish(
@@ -410,8 +417,7 @@ impl KeyScheduleTrafficWithClientFinishedPending {
             &self
                 .traffic
                 .current_client_traffic_secret,
-            common,
-        );
+            common, false);
 
         (self.traffic, tag)
     }
@@ -472,7 +478,7 @@ impl KeyScheduleTraffic {
 
     pub(crate) fn update_decrypter(&mut self, common: &mut CommonState) {
         let secret = self.next_application_traffic_secret(common.side.peer());
-        self.ks.set_decrypter(&secret, common);
+        self.ks.set_decrypter(&secret, common, false);
     }
 
 
@@ -573,29 +579,39 @@ impl KeySchedule {
             .expander_for_okm(secret);
         let key = derive_traffic_key(expander.as_ref(), self.suite.aead_alg.key_len());
         let iv = derive_traffic_iv(expander.as_ref());
-        let header_encrypter = HeaderProtector::new( expander.as_ref(), self.suite.aead_alg.key_len());
+        if !common.record_layer.header_encrypter_is_set() {
+            common.record_layer
+                .set_header_encrypter(HeaderProtector::new(
+                    expander.as_ref(), self.suite.aead_alg.key_len())
+                ) ;
+        }
         common
             .record_layer
-            .set_message_encrypter(self.suite.aead_alg.encrypter(key, iv, header_encrypter));
+            .set_message_encrypter(self.suite.aead_alg.encrypter(key, iv));
     }
 
-    fn set_decrypter(&self, secret: &OkmBlock, common: &mut CommonState) {
-
+    fn set_decrypter(&self, secret: &OkmBlock, common: &mut CommonState, early_secret: bool) {
+        let (md, expander) = self.derive_decrypter(secret);
         common
             .record_layer
-            .set_message_decrypter(self.derive_decrypter(secret));
+            .set_message_decrypter(md);
+        if !common.record_layer.header_decrypter_is_set() {
+            if !early_secret || (early_secret && common.record_layer.early_data_request()) {
+                common.record_layer.set_header_decrypter(HeaderProtector::new(
+                    expander.as_ref(), self.suite.aead_alg.key_len()))
+            }
+        }
     }
 
 
-    fn derive_decrypter(&self, secret: &OkmBlock) -> Box<dyn MessageDecrypter> {
+    fn derive_decrypter(&self, secret: &OkmBlock) -> (Box<dyn MessageDecrypter>, Box<dyn HkdfExpander>) {
         let expander = self
             .suite
             .hkdf_provider
             .expander_for_okm(secret);
         let key = derive_traffic_key(expander.as_ref(), self.suite.aead_alg.key_len());
         let iv = derive_traffic_iv(expander.as_ref());
-        let header_decrypter = HeaderProtector::new( expander.as_ref(), self.suite.aead_alg.key_len());
-        self.suite.aead_alg.decrypter(key, iv, header_decrypter)
+        (self.suite.aead_alg.decrypter(key, iv), expander)
     }
 
     fn new_with_empty_secret(suite: &'static Tls13CipherSuite) -> Self {

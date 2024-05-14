@@ -21,10 +21,10 @@ use crate::tcpls::frame::{Frame, TcplsHeader};
 /// Factory trait for building `MessageEncrypter` and `MessageDecrypter` for a TLS1.3 cipher suite.
 pub trait Tls13AeadAlgorithm: Send + Sync {
     /// Build a `MessageEncrypter` for the given key/iv.
-    fn encrypter(&self, key: AeadKey, iv: Iv, header_encrypter: HeaderProtector) -> Box<dyn MessageEncrypter>;
+    fn encrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageEncrypter>;
 
     /// Build a `MessageDecrypter` for the given key/iv.
-    fn decrypter(&self, key: AeadKey, iv: Iv, header_decrypter: HeaderProtector) -> Box<dyn MessageDecrypter>;
+    fn decrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageDecrypter>;
 
     /// The length of key in bytes required by `encrypter()` and `decrypter()`.
     fn key_len(&self) -> usize;
@@ -156,7 +156,6 @@ pub trait MessageDecrypter: Send + Sync {
         tcpls_header: &TcplsHeader,
     ) -> Result<InboundPlainMessage<'a>, Error>;
 
-    fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error>;
 }
 
 /// Objects with this trait can encrypt TLS messages.
@@ -178,7 +177,8 @@ pub trait MessageEncrypter: Send + Sync {
         seq: u64,
         stream_id: u32,
         tcpls_header: &TcplsHeader,
-        frame_header: Option<Frame>
+        frame_header: Option<Frame>,
+        header_encrypter: &mut HeaderProtector,
     ) -> Result<OutboundOpaqueMessage, Error>;
     fn encrypted_payload_len_tcpls(&self, payload_len: usize, header_len: usize) -> (usize, usize);
 
@@ -314,7 +314,7 @@ pub fn make_tls12_aad(
 }
 
 
-
+#[derive(Default)]
 pub(crate) struct HeaderProtector{
     key: [u8;16],
     sip_hasher: SipHasher
@@ -374,7 +374,7 @@ impl HeaderProtector {
         input: &[u8],
         header: & [u8],
     ) -> Result<[u8; 8], Error> {
-        let mut out = self.sip_hasher.hash(input).to_be_bytes();
+        let mut out = self.calculate_hash(&input);
         for i in 0..header.len() {
             out[i] ^= header[i];
         }
@@ -456,7 +456,7 @@ impl MessageEncrypter for InvalidMessageEncrypter {
         payload_len
     }
 
-    fn encrypt_tcpls(&mut self, msg: OutboundPlainMessage, seq: u64, stream_id: u32, tcpls_header: &TcplsHeader, frame_header: Option<Frame>) -> Result<OutboundOpaqueMessage, Error> {
+    fn encrypt_tcpls(&mut self, msg: OutboundPlainMessage, seq: u64, stream_id: u32, tcpls_header: &TcplsHeader, frame_header: Option<Frame>, header_encrypter: &mut HeaderProtector) -> Result<OutboundOpaqueMessage, Error> {
         todo!()
     }
 

@@ -11,7 +11,7 @@ use crate::client::ClientConnectionData;
 use crate::msgs::deframer::DeframerSliceBuffer;
 use crate::server::ServerConnectionData;
 use crate::Error;
-use crate::recvbuf::RecvBufMap;
+
 use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
 impl UnbufferedConnectionCommon<ClientConnectionData> {

@@ -172,6 +172,8 @@ mod client_hello {
 
             let early_data_requested = client_hello.early_data_extension_offered();
 
+            cx.common.record_layer.set_early_data_request(early_data_requested);
+
             // EarlyData extension is illegal in second ClientHello
             if self.done_retry && early_data_requested {
 

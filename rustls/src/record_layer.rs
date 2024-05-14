@@ -2,7 +2,7 @@ use alloc::boxed::Box;
 use core::num::NonZeroU64;
 use std::collections::hash_map;
 
-use crate::crypto::cipher::{InboundOpaqueMessage, MessageDecrypter, MessageEncrypter};
+use crate::crypto::cipher::{HeaderProtector, InboundOpaqueMessage, MessageDecrypter, MessageEncrypter};
 use crate::error::Error;
 #[cfg(feature = "logging")]
 use crate::log::trace;
@@ -47,7 +47,12 @@ pub struct RecordLayer {
     // should be swallowed by the caller.  This struct tracks the amount
     // of message size this is allowed for.
     trial_decryption_len: Option<usize>,
+    //Encrypts TCPLS header
+    header_encrypter: Option<HeaderProtector>,
+    //Decrypts TCPLS header
+    header_decrypter: Option<HeaderProtector>,
 
+    early_data_requested: bool,
 }
 
 impl RecordLayer {
@@ -65,6 +70,9 @@ impl RecordLayer {
             stream_in_use: 0,
             trial_decryption_len: None,
             read_seq_map: ReadSeqMap::default(),
+            header_encrypter: Default::default(),
+            header_decrypter: Default::default(),
+            early_data_requested: false,
         }
     }
 
@@ -204,7 +212,7 @@ impl RecordLayer {
         let seq = self.write_seq_map.get_or_create(stream_id as u64).write_seq;
         self.write_seq_map.get_or_create(stream_id as u64).write_seq += 1;
         self.message_encrypter
-            .encrypt_tcpls(plain, seq, stream_id as u32, tcpls_header, frame_header)
+            .encrypt_tcpls(plain, seq, stream_id as u32, tcpls_header, frame_header, self.header_encrypter.as_mut().unwrap())
             .unwrap()
     }
 
@@ -212,9 +220,30 @@ impl RecordLayer {
         self.message_encrypter.get_tag_length()
     }
 
+    pub fn set_early_data_request(&mut self, early_requested: bool) {
+        self.early_data_requested = early_requested;
+    }
+    pub fn early_data_request(&self) -> bool {
+        self.early_data_requested
+    }
 
     pub fn decrypt_header(&mut self, input: &[u8], header: & [u8]) -> Result<[u8; 8], Error> {
-        self.message_decrypter.decrypt_header(input, header)
+        self.header_decrypter.as_mut().unwrap().decrypt_in_output(input, header)
+    }
+    pub fn set_header_encrypter(&mut self, hdr_encrypter: HeaderProtector) {
+        let _ = self.header_encrypter.insert(hdr_encrypter);
+    }
+
+    pub fn set_header_decrypter(&mut self, hdr_decrypter: HeaderProtector) {
+        let _ = self.header_decrypter.insert(hdr_decrypter);
+    }
+
+    pub fn header_encrypter_is_set(&self) -> bool {
+        self.header_encrypter.is_some()
+    }
+
+    pub fn header_decrypter_is_set(&self) -> bool {
+        self.header_decrypter.is_some()
     }
     /// Prepare to use the given `MessageEncrypter` for future message encryption.
     /// It is not used until you call `start_encrypting`.
@@ -292,6 +321,10 @@ impl RecordLayer {
 
     pub(crate) fn is_encrypting(&self) -> bool {
         self.encrypt_state == DirectionState::Active
+    }
+
+    pub(crate) fn is_decrypting(&self) -> bool {
+        self.decrypt_state == DirectionState::Active
     }
 
     /// Return true if we have ever decrypted a message. This is used in place
@@ -465,9 +498,6 @@ mod tests {
                 })
             }
 
-            fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error> {
-                Ok([0u8; 8])
-            }
         }
 
         let mut app_buffs = RecvBufMap::new();

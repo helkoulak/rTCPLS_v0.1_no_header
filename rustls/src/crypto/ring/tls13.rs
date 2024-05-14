@@ -4,9 +4,7 @@ use std::vec;
 use ring::rand::SecureRandom;
 
 use crate::{crypto, PeerMisbehaved};
-use crate::crypto::cipher::{AeadKey, HeaderProtector, InboundOpaqueMessage, Iv,
-                            make_tls13_aad, make_tls13_aad_tcpls, MessageDecrypter, MessageEncrypter,
-                            Nonce, Tls13AeadAlgorithm, UnsupportedOperationError};
+use crate::crypto::cipher::{AeadKey, HeaderProtector, InboundOpaqueMessage, Iv, make_tls13_aad, make_tls13_aad_tcpls, MessageDecrypter, MessageEncrypter, Nonce, Tls13AeadAlgorithm, UnsupportedOperationError};
 use crate::crypto::tls13::{Hkdf, HkdfExpander, OkmBlock, OutputLengthError};
 use crate::enums::{CipherSuite, ContentType, ProtocolVersion};
 use crate::error::Error;
@@ -97,12 +95,12 @@ fn unpad_tls13_from_slice(v: &mut [u8]) -> (ContentType, usize) {
 struct Chacha20Poly1305Aead(AeadAlgorithm);
 
 impl Tls13AeadAlgorithm for Chacha20Poly1305Aead {
-    fn encrypter(&self, key: AeadKey, iv: Iv, header_protector: HeaderProtector) -> Box<dyn MessageEncrypter> {
-        self.0.encrypter(key, iv, header_protector)
+    fn encrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageEncrypter> {
+        self.0.encrypter(key, iv)
     }
 
-    fn decrypter(&self, key: AeadKey, iv: Iv, header_protector: HeaderProtector) -> Box<dyn MessageDecrypter> {
-        self.0.decrypter(key, iv, header_protector)
+    fn decrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageDecrypter> {
+        self.0.decrypter(key, iv)
     }
 
     fn key_len(&self) -> usize {
@@ -125,12 +123,12 @@ impl Tls13AeadAlgorithm for Chacha20Poly1305Aead {
 struct Aes256GcmAead(AeadAlgorithm);
 
 impl Tls13AeadAlgorithm for Aes256GcmAead {
-    fn encrypter(&self, key: AeadKey, iv: Iv, header_encrypter: HeaderProtector) -> Box<dyn MessageEncrypter> {
-        self.0.encrypter(key, iv, header_encrypter)
+    fn encrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageEncrypter> {
+        self.0.encrypter(key, iv)
     }
 
-    fn decrypter(&self, key: AeadKey, iv: Iv, header_decrypter: HeaderProtector) -> Box<dyn MessageDecrypter> {
-        self.0.decrypter(key, iv, header_decrypter)
+    fn decrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageDecrypter> {
+        self.0.decrypter(key, iv)
     }
 
     fn key_len(&self) -> usize {
@@ -153,12 +151,12 @@ impl Tls13AeadAlgorithm for Aes256GcmAead {
 struct Aes128GcmAead(AeadAlgorithm);
 
 impl Tls13AeadAlgorithm for Aes128GcmAead {
-    fn encrypter(&self, key: AeadKey, iv: Iv, header_encrypter: HeaderProtector) -> Box<dyn MessageEncrypter> {
-        self.0.encrypter(key, iv, header_encrypter)
+    fn encrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageEncrypter> {
+        self.0.encrypter(key, iv)
     }
 
-    fn decrypter(&self, key: AeadKey, iv: Iv, header_decrypter: HeaderProtector) -> Box<dyn MessageDecrypter> {
-        self.0.decrypter(key, iv, header_decrypter)
+    fn decrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageDecrypter> {
+        self.0.decrypter(key, iv)
     }
 
     fn key_len(&self) -> usize {
@@ -182,21 +180,19 @@ impl Tls13AeadAlgorithm for Aes128GcmAead {
 struct AeadAlgorithm(&'static aead::Algorithm);
 
 impl AeadAlgorithm {
-    fn encrypter(&self, key: AeadKey, iv: Iv, header_encrypter: HeaderProtector) -> Box<dyn MessageEncrypter> {
+    fn encrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageEncrypter> {
         // safety: the caller arranges that `key` is `key_len()` in bytes, so this unwrap is safe.
         Box::new(Tls13MessageEncrypter {
             enc_key: aead::LessSafeKey::new(aead::UnboundKey::new(self.0, key.as_ref()).unwrap()),
             iv,
-            header_encrypter,
         })
     }
 
-    fn decrypter(&self, key: AeadKey, iv: Iv, header_decrypter: HeaderProtector) -> Box<dyn MessageDecrypter> {
+    fn decrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageDecrypter> {
         // safety: the caller arranges that `key` is `key_len()` in bytes, so this unwrap is safe.
         Box::new(Tls13MessageDecrypter {
             dec_key: aead::LessSafeKey::new(aead::UnboundKey::new(self.0, key.as_ref()).unwrap()),
             iv,
-            header_decrypter,
         })
     }
 
@@ -208,13 +204,11 @@ impl AeadAlgorithm {
 struct Tls13MessageEncrypter {
     enc_key: aead::LessSafeKey,
     iv: Iv,
-    header_encrypter: HeaderProtector,
 }
 
 struct Tls13MessageDecrypter {
     dec_key: aead::LessSafeKey,
     iv: Iv,
-    header_decrypter: HeaderProtector,
 }
 
 impl MessageEncrypter for Tls13MessageEncrypter {
@@ -254,7 +248,8 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         seq: u64,
         stream_id: u32,
         tcpls_header: &TcplsHeader,
-        frame_header: Option<Frame>
+        frame_header: Option<Frame>,
+        header_encrypter: &mut HeaderProtector,
     ) -> Result<OutboundOpaqueMessage, Error> {
         let plain_len = msg.payload.len();
         let hdr_len =  match frame_header.as_ref() {
@@ -265,7 +260,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         let mut payload = PrefixedPayload::with_capacity_tcpls(enc_payload_len);
         let total_len = TCPLS_HEADER_SIZE + enc_payload_len;
 
-        let header_protecter = &mut self.header_encrypter;
+
         let nonce = aead::Nonce::assume_unique_for_key(Nonce::new(&self.iv, seq, stream_id).0);
         let aad = aead::Aad::from(make_tls13_aad_tcpls(total_len, tcpls_header));
 
@@ -307,7 +302,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
 
         let mut i = 0;
         // Calculate hash(sample) XOR TCPLS header
-        for byte in header_protecter.calculate_hash(sample){
+        for byte in header_encrypter.calculate_hash(sample){
             payload.as_mut_tcpls_header()[i] ^= byte;
             i += 1;
         }
@@ -402,25 +397,14 @@ impl MessageDecrypter for Tls13MessageDecrypter {
             return Err(Error::PeerSentOversizedRecord);
         }
 
-        recv_buf.next_recv_pkt_num += 1;
         recv_buf.last_decrypted = payload_len_no_type;
         recv_buf.total_decrypted += payload_len_no_type;
+        recv_buf.offset += payload_len_no_type as u64;
         recv_buf.last_data_type_decrypted = msg.typ.into();
-        Ok(InboundOpaqueMessage::new(msg.typ, ProtocolVersion::TLSv1_3, match msg.typ {
-            ContentType::ApplicationData => {
-                recv_buf.offset += payload_len_no_type as u64;
-                // It does not matter what ref to return as it is upto the application to manipulate decrypted data
-                recv_buf.get_mut_consumed()
-            },
-            _ => {
-                recv_buf.get_mut_last_decrypted()
-            },
-        }).into_plain_message())
+        Ok(InboundOpaqueMessage::new(msg.typ, ProtocolVersion::TLSv1_3, recv_buf.get_mut_last_decrypted()).into_plain_message())
 
     }
-    fn decrypt_header(&mut self, input: &[u8], header: &[u8]) -> Result<[u8; 8], Error> {
-        self.header_decrypter.decrypt_in_output(input, header)
-    }
+
 
 }
 
