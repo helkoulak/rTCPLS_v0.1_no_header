@@ -891,7 +891,8 @@ impl<Data> ConnectionCore<Data> {
                     length,
                     fin,
                 } => {
-                    app_buffer.subtract_offset(STREAM_FRAME_HEADER_SIZE as u64);
+                    app_buffer.offset -= STREAM_FRAME_HEADER_SIZE as u64;
+                    app_buffer.total_decrypted = 0;
                     break
                 },
                 Frame::ACK {

@@ -71,28 +71,33 @@ impl RecvBuf {
     /// messages because they are always written at offset zero
     pub fn get_mut_last_decrypted(&mut self) -> &mut [u8] {
         let offset = self.offset as usize;
-        &mut self.data[offset.. offset + self.last_decrypted]
+        &mut self.data[offset - self.last_decrypted.. offset]
     }
     ///Gives immutable reference to slice of last written chunk of bytes. Mainly used in case of handshake
     /// messages because they are always written at offset zero
     pub fn get_last_decrypted(& self) -> & [u8] {
         let offset = self.offset as usize;
-        & self.data[offset.. offset + self.last_decrypted]
+        & self.data[offset - self.last_decrypted.. offset]
     }
 
+    ///Used in case of joined and unjoined Handshake records
     pub fn get_mut_total_decrypted(&mut self) -> &mut [u8] {
-        let offset = self.offset as usize;
-        let data_len = self.total_decrypted;
+        if self.offset > 0 {
+            self.offset -= self.total_decrypted as u64;
+        }
+        let end_offset = self.offset as usize + self.total_decrypted;
         self.total_decrypted = 0;
-        &mut self.data[offset.. offset + data_len]
+        &mut self.data[self.offset as usize.. end_offset ]
     }
     ///Gives immutable reference to slice of last written chunk of bytes. Mainly used in case of handshake
     /// messages because they are always written at offset zero
     pub fn get_total_decrypted(&mut self) -> & [u8] {
-        let offset = self.offset as usize;
-        let data_len = self.total_decrypted;
+        if self.offset > 0 {
+            self.offset -= self.total_decrypted as u64;
+        }
+        let end_offset = self.offset as usize + self.total_decrypted;
         self.total_decrypted = 0;
-        & self.data[offset.. offset + data_len]
+        & self.data[self.offset as usize.. end_offset ]
     }
 
     pub  fn get_offset(&self) -> u64 {
