@@ -583,7 +583,11 @@ impl MessageDeframer {
                 // We're joining a handshake message to the previous one here.
                 // Write it into the buffer and update the metadata.
 
-                buffer.copy(&payload, meta.payload.end);
+                match recv_buf {
+                    Some(ref buf) => {},
+                    None => buffer.copy(&payload, meta.payload.end),
+                }
+
 
                 meta.message.end = end;
                 meta.payload.end += payload.len();
@@ -885,10 +889,11 @@ impl DeframerVecBuffer {
             //If last record stored in buffer was processed
             if (start + taken) == self.used {
                 self.used = start;
+            } else {
+                self.buf.copy_within(start + taken..self.used, start);
+                self.used -= taken;
             }
-            self.buf
-                .copy_within(start + taken..self.used, start);
-            self.used -= taken;
+
         } else if taken == self.used {
             self.used = 0;
         }
@@ -1003,7 +1008,7 @@ impl<'a> DeframerSliceBuffer<'a> {
 
     /// Tracks a pending discard operation of `num_bytes`
     pub fn queue_discard(&mut self, num_bytes: usize) {
-        self.discard += num_bytes;
+        self.discard += 0;
     }
 
     /// Returns the number of bytes that need to be discarded
