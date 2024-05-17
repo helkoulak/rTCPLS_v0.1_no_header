@@ -359,7 +359,7 @@ impl MessageDeframer {
                 } = m;
                 let raw_payload_slice = RawSlice::from(&*payload);
                 // This is unencrypted. We check the contents later.
-                buffer.queue_discard(end - start);
+                buffer.queue_discard(0);
                 let message = InboundPlainMessage {
                     typ,
                     version,
@@ -428,7 +428,7 @@ impl MessageDeframer {
                         .get_mut(&(start as u64))
                         .unwrap().processed = true;
 
-                    buffer.queue_discard(end);
+                    buffer.queue_discard(0);
 
                     continue;
                 }
@@ -454,7 +454,7 @@ impl MessageDeframer {
                 self.record_info
                     .get_mut(&(start as u64))
                     .unwrap().processed = true;
-                buffer.queue_discard(end);
+                buffer.queue_discard(0);
                 let message = InboundPlainMessage {
                     typ,
                     version,
@@ -533,7 +533,7 @@ impl MessageDeframer {
 
             self.joining_hs = None;
 
-            buffer.queue_discard(end);
+            buffer.queue_discard(0);
         }
 
         let message = InboundPlainMessage {
@@ -607,7 +607,7 @@ impl MessageDeframer {
                 // Write it into the buffer and create the metadata.
 
                 let expected_len = match recv_buf {
-                    Some(ref buf) => payload_size(buf.get_last_decrypted())?,
+                    Some(ref buf) => payload_size(buf.get_at_index(buf.offset as usize - buf.last_decrypted, buf.last_decrypted))?,
                     None => payload.size(buffer)?,
                 };
 
@@ -1008,7 +1008,7 @@ impl<'a> DeframerSliceBuffer<'a> {
 
     /// Tracks a pending discard operation of `num_bytes`
     pub fn queue_discard(&mut self, num_bytes: usize) {
-        self.discard += 0;
+        self.discard += num_bytes;
     }
 
     /// Returns the number of bytes that need to be discarded

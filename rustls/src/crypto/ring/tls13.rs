@@ -397,11 +397,23 @@ impl MessageDecrypter for Tls13MessageDecrypter {
             return Err(Error::PeerSentOversizedRecord);
         }
 
+        let current_offset = recv_buf.offset;
+
         recv_buf.last_decrypted = payload_len_no_type;
         recv_buf.total_decrypted += payload_len_no_type;
         recv_buf.offset += payload_len_no_type as u64;
         recv_buf.last_data_type_decrypted = msg.typ.into();
-        Ok(InboundOpaqueMessage::new(msg.typ, ProtocolVersion::TLSv1_3, recv_buf.get_mut_last_decrypted()).into_plain_message())
+        Ok(InboundOpaqueMessage::new(msg.typ, ProtocolVersion::TLSv1_3, match msg.typ {
+            ContentType::ApplicationData => {
+                recv_buf.get_mut_consumed()
+            },
+            ContentType::Handshake => recv_buf.get_mut_at_index(current_offset as usize, payload_len_no_type),
+            _ => {
+                recv_buf.offset -= payload_len_no_type as u64;
+                recv_buf.get_mut_at_index(recv_buf.offset as usize, payload_len_no_type)
+            },
+
+        }).into_plain_message())
 
     }
 
