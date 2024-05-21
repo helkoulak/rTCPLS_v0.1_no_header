@@ -1534,7 +1534,7 @@ mod tests {
             let mut binding = RecvBufMap::default();
             let m = self
                 .inner
-                .pop(record_layer, negotiated_version, &mut deframer_buffer, &mut binding)
+                .pop_unbuffered(record_layer, negotiated_version, &mut deframer_buffer)
                 .unwrap()
                 .unwrap()
                 .message

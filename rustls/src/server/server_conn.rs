@@ -854,6 +854,7 @@ mod connection {
 
 #[cfg(feature = "std")]
 pub use connection::{AcceptedAlert, Acceptor, ReadEarlyData, ServerConnection};
+use crate::recvbuf::RecvBuf;
 
 /// Unbuffered version of `ServerConnection`
 ///
