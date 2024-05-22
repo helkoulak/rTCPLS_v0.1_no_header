@@ -523,6 +523,13 @@ impl Codec<'_> for TcplsToken {
 }
 
 impl TcplsToken {
+
+    pub fn new(vec: [u8; 32]) -> Self {
+        Self {
+            data:vec,
+            len: 32,
+        }
+    }
     pub fn random(secure_random: &dyn SecureRandom) -> Result<Self, rand::GetRandomFailed> {
         let mut data = [0u8; 32];
         secure_random.fill(&mut data)?;
