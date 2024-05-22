@@ -459,7 +459,12 @@ impl MessageDeframer {
                     typ,
                     version,
                     payload: match record_layer.has_decrypted() {
-                        true => core::mem::take(&mut &*app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).get_last_decrypted()),
+                        true => if app_buffers.get_or_create(hdr_decoded.stream_id as u64, None)
+                            .last_data_type_decrypted != u8::from(ContentType::ApplicationData) {
+                            core::mem::take(&mut &*app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).get_last_decrypted())
+                        } else {
+                            core::mem::take(&mut &*app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).as_ref_consumed())
+                        },
                         false => buffer.take(plain_payload_slice),
                     },
                 };
