@@ -16,6 +16,7 @@ use std::fmt::Debug;
 use std::io::{self, IoSlice, Read, Write};
 use std::mem;
 use std::ops::{Deref, DerefMut};
+use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -26,12 +27,12 @@ use rustls::crypto::{ring as provider, CryptoProvider};
 use rustls::internal::msgs::base::Payload;
 use rustls::internal::msgs::codec::Codec;
 use rustls::internal::msgs::enums::AlertLevel;
-use rustls::internal::msgs::handshake::{ClientExtension, HandshakePayload};
+use rustls::internal::msgs::handshake::{ClientExtension, HandshakePayload, TcplsToken};
 use rustls::internal::msgs::message::{
     Message, MessagePayload,
 };
 use rustls::server::{ClientHello, ParsedCertificate, ResolvesServerCert};
-use rustls::SupportedCipherSuite;
+use rustls::{Connection, SupportedCipherSuite};
 use rustls::{
     sign, AlertDescription, CertificateError, ConnectionCommon, ContentType, Error, InvalidMessage,
     KeyLog, PeerIncompatible, PeerMisbehaved, SideData,
@@ -51,7 +52,8 @@ use provider::cipher_suite;
 use provider::sign::RsaSigningKey;
 use rustls::internal::msgs::fragmenter::MessageFragmenter;
 use rustls::recvbuf::{ReaderAppBufs, RecvBufMap};
-use rustls::tcpls::frame::TCPLS_HEADER_SIZE;
+use rustls::tcpls::frame::{MAX_TCPLS_FRAGMENT_LEN, TCPLS_HEADER_SIZE};
+use rustls::tcpls::TcplsSession;
 
 fn alpn_test_error(
     server_protos: Vec<Vec<u8>>,
@@ -1352,6 +1354,342 @@ fn client_check_server_certificate_helper_api() {
             Error::InvalidCertificate(CertificateError::UnknownIssuer)
         );
     }
+}
+
+#[test]
+fn test_server_rejects_non_empty_tcpls_tokens_extension() {
+    fn non_empty_tcpls_tokens(msg: &mut Message) -> Altered {
+        if let MessagePayload::Handshake { parsed, encoded } = &mut msg.payload {
+            if let HandshakePayload::ClientHello(ch) = &mut parsed.payload {
+                for mut ext in ch.extensions.iter_mut() {
+                    if let ClientExtension::TcplsTokens(tokens) = &mut ext {
+                        for i in 1..=5 {
+                            tokens.push(TcplsToken::new([5u8;32]));
+                        }
+                    }
+
+                }
+            }
+
+            *encoded = Payload::new(parsed.get_encoding());
+        }
+        Altered::InPlace
+    }
+    let server_config = Arc::new(make_server_config(KeyType::Rsa));
+    let mut client_config = make_client_config_with_versions(KeyType::Rsa, &[&rustls::version::TLS13]);
+    client_config.enable_tcpls = true;
+    let (mut client, mut server, mut recv_svr, mut recv_clnt) =
+        make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
+    let (mut conn_client, mut conn_server) = (Connection::Client(client), Connection::Server(server));
+    transfer_altered(&mut conn_client, non_empty_tcpls_tokens, &mut conn_server);
+    client = match conn_client {
+        Connection::Client(conn) => conn,
+        Connection::Server(conn) => panic!("Wrong connection type")
+    };
+    server = match conn_server {
+        Connection::Server(conn) => conn,
+        Connection::Client(conn) => panic!("Wrong connection type"),
+    };
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
+    }));
+    assert!(result.is_err());
+}
+
+#[test]
+fn receive_tcpls_tokens_from_server() {
+    let mut server_config = make_server_config(KeyType::Rsa);
+    server_config.max_tcpls_tokens_cap = 5;
+    let mut client_config = make_client_config_with_versions(KeyType::Rsa, &[&rustls::version::TLS13]);
+    client_config.enable_tcpls = true;
+    let (mut client, mut server, mut recv_svr, mut recv_clnt) =
+        make_pair_for_arc_configs(&Arc::new(client_config), &Arc::new(server_config));
+    do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
+    let client_tokens = match client.tcpls_tokens() {
+        Some(tokens) => tokens,
+        None => panic!("cannot continue test. No tokens found")
+    };
+    let server_tokens = match server.tcpls_tokens() {
+        Some(tokens) => tokens,
+        None => panic!("cannot continue test. No tokens found")
+    };
+    for i in 0..server_tokens.len() {
+        assert_eq!(client_tokens.get(i), server_tokens.get(i));
+    }
+
+}
+
+#[test]
+fn clients_rejects_empty_tcpls_tokens_extension_from_server() {
+    let mut server_config = make_server_config(KeyType::Rsa);
+    let mut client_config = make_client_config_with_versions(KeyType::Rsa, &[&TLS13]);
+    client_config.enable_tcpls = true;
+    server_config.max_tcpls_tokens_cap = 0;
+    let (mut client, mut server, mut recv_svr, mut recv_clnt) =
+        make_pair_for_arc_configs(&Arc::new(client_config), &Arc::new(server_config));
+
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
+    }));
+
+    assert!(result.is_err())
+}
+
+#[test]
+fn receive_same_number_of_tcpls_tokens_from_server() {
+    // Generate 5 tokens on server side and receive 5 on client side
+    let mut server_config = make_server_config(KeyType::Rsa);
+    server_config.max_tcpls_tokens_cap = 5;
+    let mut client_config = make_client_config_with_versions(KeyType::Rsa, &[&rustls::version::TLS13]);
+    client_config.enable_tcpls = true;
+    let (mut client, mut server, mut recv_svr, mut recv_clnt) =
+        make_pair_for_arc_configs(&Arc::new(client_config), &Arc::new(server_config));
+    do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
+    let client_tokens = match client.tcpls_tokens() {
+        Some(tokens) => tokens,
+        None => panic!("cannot continue test. No tokens found")
+    };
+    let server_tokens = match server.tcpls_tokens() {
+        Some(tokens) => tokens,
+        None => panic!("cannot continue test. No tokens found")
+    };
+    for i in 0..=5 {
+        assert_eq!(client_tokens.get(i), server_tokens.get(i));
+    }
+    // Generate 20 tokens on server side and receive 20 on client side
+    let mut server_config = make_server_config(KeyType::Rsa);
+    server_config.max_tcpls_tokens_cap = 20;
+    let mut client_config = make_client_config_with_versions(KeyType::Rsa, &[&rustls::version::TLS13]);
+    client_config.enable_tcpls = true;
+    let (mut client, mut server, mut recv_svr, mut recv_clnt) =
+        make_pair_for_arc_configs(&Arc::new(client_config), &Arc::new(server_config));
+    do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
+    let client_tokens = match client.tcpls_tokens() {
+        Some(tokens) => tokens,
+        None => panic!("cannot continue test. No tokens found")
+    };
+    let server_tokens = match server.tcpls_tokens() {
+        Some(tokens) => tokens,
+        None => panic!("cannot continue test. No tokens found")
+    };
+    for i in 0..=20 {
+        assert_eq!(client_tokens.get(i), server_tokens.get(i));
+    }
+
+}
+
+#[test]
+fn receive_out_of_order_tls_records_single_stream() {
+    let server_config = Arc::new(make_server_config(KeyType::Rsa));
+    let client_config = make_client_config_with_versions(KeyType::Rsa, &[&rustls::version::TLS13]);
+    let (mut client, mut server, mut recv_svr, mut recv_clnt) =
+        make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
+    do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
+    // Prepare records
+    let record_1 = vec![1u8; 2000];
+    let record_2 = vec![2u8; 2000];
+    let record_3 = vec![3u8; 2000];
+    let record_4 = vec![4u8; 2000];
+    let record_5 = vec![5u8; 2000];
+    let record_6 = vec![6u8; 2000];
+    let record_7 = vec![7u8; 2000];
+    // Write records to send buffer
+    client.writer().write(&record_1).expect("TODO: panic message");
+    client.writer().write(&record_2).expect("TODO: panic message");
+    client.writer().write(&record_3).expect("TODO: panic message");
+    client.writer().write(&record_4).expect("TODO: panic message");
+    client.writer().write(&record_5).expect("TODO: panic message");
+
+
+    //Change the order of records in send buffer
+    client.shuffle_records(0, 3);
+
+    client.writer().write(&record_6).expect("TODO: panic message");
+    client.writer().write(&record_7).expect("TODO: panic message");
+
+    //send records from client to server
+    transfer(&mut client, &mut server, None);
+    server.process_new_packets(&mut recv_svr).expect("TODO: panic message");
+
+    //test that data was received in order
+    let mut buf = vec![0u8; 2000];
+    recv_svr.get_mut(0).unwrap().read(&mut buf).expect("TODO: panic message");
+    assert_eq!(record_1, buf);
+    recv_svr.get_mut(0).unwrap().read(&mut buf).expect("TODO: panic message");
+    assert_eq!(record_2, buf);
+    recv_svr.get_mut(0).unwrap().read(&mut buf).expect("TODO: panic message");
+    assert_eq!(record_3, buf);
+    recv_svr.get_mut(0).unwrap().read(&mut buf).expect("TODO: panic message");
+    assert_eq!(record_4, buf);
+    recv_svr.get_mut(0).unwrap().read(&mut buf).expect("TODO: panic message");
+    assert_eq!(record_5, buf);
+    recv_svr.get_mut(0).unwrap().read(&mut buf).expect("TODO: panic message");
+    assert_eq!(record_6, buf);
+    recv_svr.get_mut(0).unwrap().read(&mut buf).expect("TODO: panic message");
+    assert_eq!(record_7, buf);
+}
+
+#[test]
+fn receive_out_of_order_tls_records_multiple_streams() {
+    let server_config = Arc::new(make_server_config(KeyType::Rsa));
+    let client_config = make_client_config_with_versions(KeyType::Rsa, &[&rustls::version::TLS13]);
+    let (mut client, mut server, mut recv_svr, mut recv_clnt) =
+        make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
+    do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
+    server.set_deframer_cap(0, MAX_TCPLS_FRAGMENT_LEN * 6);
+    // Prepare records
+    let mut record_1: Vec<u8> = Vec::new();
+    let mut record_2: Vec<u8> = Vec::new();
+    let mut record_3: Vec<u8> = Vec::new();
+    let mut record_4: Vec<u8> = Vec::new();
+    let mut record_5: Vec<u8> = Vec::new();
+    let mut record_6: Vec<u8> = Vec::new();
+
+    for value in 0..16000 {
+        record_1.push(value as u8);
+    }
+    for value in 16000..32000 {
+        record_2.push(value as u8);
+    }
+    for value in 32000..48000 {
+        record_3.push(value as u8);
+    }
+
+    for value in 48000..64000 {
+        record_4.push(value as u8);
+    }
+    for value in 64000..80000 {
+        record_5.push(value as u8);
+    }
+    for value in 80000..96000 {
+        record_6.push(value as u8);
+    }
+
+
+
+    // Write records to send buffer
+    let mut tcpls_client = TcplsSession::new(false);
+
+    tcpls_client.tls_conn = Some(Connection::from(client));
+
+    tcpls_client.stream_send(0, &record_1, false);
+    tcpls_client.stream_send(0, &record_2, false);
+    tcpls_client.stream_send(1, &record_3, false);
+    tcpls_client.stream_send(1, &record_4, false);
+    tcpls_client.stream_send(2, &record_5, false);
+    tcpls_client.stream_send(2, &record_6, false);
+
+
+    client = match tcpls_client.tls_conn.unwrap() {
+        Connection::Client(conn) => conn,
+        Connection::Server(conn) => panic!("wrong type of connection. Found server connection")
+    };
+
+    //Change the order of records in send buffers
+    client.shuffle_records(0, 1);
+    client.shuffle_records(1, 1);
+    client.shuffle_records(2, 1);
+
+    tcpls_client.tls_conn = Some(Connection::from(client));
+
+    let mut pipe = OtherSession::new(&mut server);
+
+    //Send all data
+    loop {
+        match tcpls_client.send_on_connection(Some(0), Some(&mut pipe), None) {
+            Ok(sent) => if sent == 0 {break},
+            Err(err) => {}, // Process what has been received if buffer is full
+        }
+        //Process records sent from client to server
+        pipe.sess.process_new_packets(&mut recv_svr).expect("TODO: panic message");
+    }
+    //Process remaining sent records from client to server
+    server.process_new_packets(&mut recv_svr).expect("TODO: panic message");
+
+    //test that data was received in order
+    let mut buf = vec![0u8; 16000];
+    recv_svr.get_mut(0).unwrap().read(&mut buf).expect("TODO: panic message");
+    assert_eq!(record_1, buf);
+    recv_svr.get_mut(0).unwrap().read(&mut buf).expect("TODO: panic message");
+    assert_eq!(record_2, buf);
+    recv_svr.get_mut(1).unwrap().read(&mut buf).expect("TODO: panic message");
+    assert_eq!(record_3, buf);
+    recv_svr.get_mut(1).unwrap().read(&mut buf).expect("TODO: panic message");
+    assert_eq!(record_4, buf);
+    recv_svr.get_mut(2).unwrap().read(&mut buf).expect("TODO: panic message");
+    assert_eq!(record_5, buf);
+    recv_svr.get_mut(2).unwrap().read(&mut buf).expect("TODO: panic message");
+    assert_eq!(record_6, buf);
+}
+
+#[test]
+fn send_fragmented_records_on_two_connections() {
+    // Perform the handshake
+    let server_config = Arc::new(make_server_config(KeyType::Rsa));
+    let client_config = make_client_config_with_versions(KeyType::Rsa, &[&rustls::version::TLS13]);
+    let (mut client, mut server, mut recv_svr, mut recv_clnt) =
+        make_pair_for_arc_configs(&Arc::new(client_config.clone()), &server_config);
+    do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
+    server.set_deframer_cap(0, MAX_TCPLS_FRAGMENT_LEN * 6);
+
+    // Prepare records
+    let record_1 = vec![1u8; 20000];
+    let record_2 = vec![2u8; 20000];
+    let record_3 = vec![3u8; 20000];
+
+    // Write records to send buffer
+    let mut tcpls_client = TcplsSession::new(false);
+
+    tcpls_client.tls_conn = Some(Connection::from(client));
+
+    tcpls_client.stream_send(0, &record_1, false);
+    tcpls_client.stream_send(1, &record_2, false);
+    tcpls_client.stream_send(2, &record_3, false);
+
+
+
+    // Prepare an input buffer for comparison
+    let mut input = Vec::new();
+    input.extend_from_slice(record_1.as_slice());
+    input.extend_from_slice(record_2.as_slice());
+    input.extend_from_slice(record_3.as_slice());
+
+
+    //Create pipes that simulate TCP connections
+    let mut pipe = OtherSession::new(&mut server);
+
+    let mut sent = 0;
+
+    let mut output: Vec<u8> = Vec::new();
+
+    // The receiving side will read a maximum of 4096 bytes in one shot. This will force fragmentation of records while sending.
+    // Send part of the data on one tcp connection
+    loop {
+        sent += tcpls_client.send_on_connection(Some(0), Some(&mut pipe), None).unwrap();
+        pipe.sess.process_new_packets(&mut recv_svr).unwrap();
+        if sent >= 30000 {break}
+    }
+
+    let mut pipe2 = OtherSession::new(&mut server);
+
+    //Send the rest of data on the second connection
+
+    loop {
+        sent = tcpls_client.send_on_connection(Some(0), Some(&mut pipe2), None).unwrap();
+        pipe2.sess.process_new_packets(&mut recv_svr).unwrap();
+        if sent == 0 {break}
+    }
+
+    //Process remaining data
+    server.process_new_packets(&mut recv_svr).unwrap();
+
+
+    //build output
+    output.extend_from_slice(&recv_svr.get_mut(0).unwrap().get_mut_consumed()[..20000]);
+    output.extend_from_slice(&recv_svr.get_mut(1).unwrap().get_mut_consumed()[..20000]);
+    output.extend_from_slice(&recv_svr.get_mut(2).unwrap().get_mut_consumed()[..20000]);
+
+    assert_eq!(output, input);
 }
 
 #[derive(Debug)]
