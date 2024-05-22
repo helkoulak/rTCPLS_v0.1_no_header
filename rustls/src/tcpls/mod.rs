@@ -261,7 +261,7 @@ impl TcplsSession {
 
             while len > 0 {
 
-                sent = match stream.send.write_to(socket) {
+                sent = match stream.send.write_chunk_to(socket) {
                     Ok(sent) => sent,
                     _error => return Err(Error::General("Data sending on socket failed".to_string())),
 
