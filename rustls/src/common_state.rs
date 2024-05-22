@@ -698,6 +698,10 @@ impl CommonState {
             && (self.may_send_application_data || self.record_layer.streams.all_empty())
     }
 
+    pub fn shuffle_records(&mut self, id: u16, n: usize) {
+        self.record_layer.streams.get_mut(id).unwrap().send.shuffle_records(n);
+    }
+
     pub(crate) fn current_io_state(&self, app_buf: Option<&RecvBufMap>) -> IoState {
         IoState {
             tls_bytes_to_write: self.record_layer.streams.total_to_write(),
