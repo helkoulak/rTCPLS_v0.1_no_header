@@ -453,6 +453,7 @@ pub mod internal {
                 CertificateChain, ClientExtension, ClientHelloPayload, DistinguishedName,
                 EchConfig, EchConfigContents, HandshakeMessagePayload, HandshakePayload,
                 HpkeKeyConfig, HpkeSymmetricCipherSuite, KeyShareEntry, Random, SessionId,
+                TcplsToken,
             };
         }
         pub mod message {
