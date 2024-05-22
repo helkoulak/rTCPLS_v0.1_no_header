@@ -509,6 +509,10 @@ impl<Data> ConnectionCommon<Data> {
         self.sendable_plaintext.get_or_create_plain_buf(id).unwrap().send_plain_buf.set_limit(limit);
         self.record_layer.streams.get_or_create(id).unwrap().send.set_limit(limit);
     }
+
+    pub fn set_deframer_cap(&mut self, id: u64, cap: usize) {
+        self.deframers_map.get_or_create_def_vec_buff(id).set_deframer_cap(cap);
+    }
 }
 
 #[cfg(feature = "std")]

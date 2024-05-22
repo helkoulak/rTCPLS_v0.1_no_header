@@ -853,12 +853,16 @@ pub struct DeframerVecBuffer {
 
     /// What size prefix of `buf` is used.
     used: usize,
+
+    ///Maximum number of bytes the buffer can hold
+    cap: usize,
 }
 
 impl DeframerVecBuffer {
     pub fn new(id: u64) -> DeframerVecBuffer {
         DeframerVecBuffer{
             id,
+            cap: MAX_WIRE_SIZE,
             ..Default::default()
         }
     }
@@ -898,6 +902,10 @@ impl DeframerVecBuffer {
             self.used = 0;
         }
     }
+
+    pub fn set_deframer_cap(&mut self, cap: usize) {
+        self.cap = cap;
+    }
 }
 
 #[cfg(feature = "std")]
@@ -918,7 +926,7 @@ impl DeframerVecBuffer {
         // At this point, the buffer resizing logic below should reduce the buffer size.
         let allow_max = match is_joining_hs {
             true => MAX_HANDSHAKE_SIZE as usize,
-            false => MAX_WIRE_SIZE,
+            false => self.cap,
         };
 
         if self.used >= allow_max {
@@ -1259,7 +1267,7 @@ mod tests {
 
     #[test]
     fn check_incremental() {
-        let mut d = BufferedDeframer::default();
+        let mut d = BufferedDeframer::new();
         assert!(!d.has_pending());
         input_whole_incremental(&mut d, FIRST_MESSAGE);
         assert!(d.has_pending());
@@ -1272,7 +1280,7 @@ mod tests {
 
     #[test]
     fn check_incremental_2() {
-        let mut d = BufferedDeframer::default();
+        let mut d = BufferedDeframer::new();
         assert!(!d.has_pending());
         input_whole_incremental(&mut d, FIRST_MESSAGE);
         assert!(d.has_pending());
@@ -1289,7 +1297,7 @@ mod tests {
 
     #[test]
     fn check_whole() {
-        let mut d = BufferedDeframer::default();
+        let mut d = BufferedDeframer::new();
         assert!(!d.has_pending());
         assert_len(FIRST_MESSAGE.len(), d.input_bytes(FIRST_MESSAGE));
         assert!(d.has_pending());
@@ -1302,7 +1310,7 @@ mod tests {
 
     #[test]
     fn check_whole_2() {
-        let mut d = BufferedDeframer::default();
+        let mut d = BufferedDeframer::new();
         assert!(!d.has_pending());
         assert_len(FIRST_MESSAGE.len(), d.input_bytes(FIRST_MESSAGE));
         assert_len(SECOND_MESSAGE.len(), d.input_bytes(SECOND_MESSAGE));
@@ -1316,7 +1324,7 @@ mod tests {
 
     #[test]
     fn test_two_in_one_read() {
-        let mut d = BufferedDeframer::default();
+        let mut d = BufferedDeframer::new();
         assert!(!d.has_pending());
         assert_len(
             FIRST_MESSAGE.len() + SECOND_MESSAGE.len(),
@@ -1332,7 +1340,7 @@ mod tests {
 
     #[test]
     fn test_two_in_one_read_shortest_first() {
-        let mut d = BufferedDeframer::default();
+        let mut d = BufferedDeframer::new();
         assert!(!d.has_pending());
         assert_len(
             FIRST_MESSAGE.len() + SECOND_MESSAGE.len(),
@@ -1348,7 +1356,7 @@ mod tests {
 
     #[test]
     fn test_incremental_with_nonfatal_read_error() {
-        let mut d = BufferedDeframer::default();
+        let mut d = BufferedDeframer::new();
         assert_len(3, d.input_bytes(&FIRST_MESSAGE[..3]));
         input_error(&mut d);
         assert_len(FIRST_MESSAGE.len() - 3, d.input_bytes(&FIRST_MESSAGE[3..]));
@@ -1361,7 +1369,7 @@ mod tests {
 
     #[test]
     fn test_invalid_contenttype_errors() {
-        let mut d = BufferedDeframer::default();
+        let mut d = BufferedDeframer::new();
         assert_len(
             INVALID_CONTENTTYPE_MESSAGE.len(),
             d.input_bytes(INVALID_CONTENTTYPE_MESSAGE),
@@ -1376,7 +1384,7 @@ mod tests {
 
     #[test]
     fn test_invalid_version_errors() {
-        let mut d = BufferedDeframer::default();
+        let mut d = BufferedDeframer::new();
         assert_len(
             INVALID_VERSION_MESSAGE.len(),
             d.input_bytes(INVALID_VERSION_MESSAGE),
@@ -1391,7 +1399,7 @@ mod tests {
 
     #[test]
     fn test_invalid_length_errors() {
-        let mut d = BufferedDeframer::default();
+        let mut d = BufferedDeframer::new();
         assert_len(
             INVALID_LENGTH_MESSAGE.len(),
             d.input_bytes(INVALID_LENGTH_MESSAGE),
@@ -1406,7 +1414,7 @@ mod tests {
 
     #[test]
     fn test_empty_applicationdata() {
-        let mut d = BufferedDeframer::default();
+        let mut d = BufferedDeframer::new();
         assert_len(
             EMPTY_APPLICATIONDATA_MESSAGE.len(),
             d.input_bytes(EMPTY_APPLICATIONDATA_MESSAGE),
@@ -1422,7 +1430,7 @@ mod tests {
 
     #[test]
     fn test_invalid_empty_errors() {
-        let mut d = BufferedDeframer::default();
+        let mut d = BufferedDeframer::new();
         assert_len(
             INVALID_EMPTY_MESSAGE.len(),
             d.input_bytes(INVALID_EMPTY_MESSAGE),
@@ -1449,7 +1457,7 @@ mod tests {
         message.extend((PAYLOAD_LEN as u16).to_be_bytes()); // payload length
         message.extend(&[0; PAYLOAD_LEN]);
 
-        let mut d = BufferedDeframer::default();
+        let mut d = BufferedDeframer::new();
         assert_len(4096, d.input_bytes(&message));
         assert_len(4096, d.input_bytes(&message));
         assert_len(4096, d.input_bytes(&message));
@@ -1496,6 +1504,12 @@ mod tests {
     }
 
     impl BufferedDeframer {
+        fn new() -> Self {
+            Self {
+                inner: MessageDeframer::default(),
+                buffer: DeframerVecBuffer::new(0)
+            }
+        }
         fn input_bytes(&mut self, bytes: &[u8]) -> io::Result<usize> {
             let mut rd = io::Cursor::new(bytes);
             self.read(&mut rd)
