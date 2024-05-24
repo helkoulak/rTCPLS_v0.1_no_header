@@ -32,6 +32,7 @@ octets = { version = "0.2", path = "../octets" }
 siphasher = "1.0.1"
 if-addrs = "0.11.1"
 either = "1.10.0"
+criterion = "0.5.1"
 
 [features]
 default = ["ring", "logging", "std", "tls12"]
@@ -51,6 +52,9 @@ log = "0.4.4"
 num-bigint = "0.4.4"
 rustls-pemfile = "2"
 webpki-roots = "0.26"
+cpu-time = "1.0.0"
+criterion = { version = "0.5.1" }
+pprof = { version = "0.13.0", features = ["flamegraph", "criterion"] }
 
 [[example]]
 name = "bogo_shim"
@@ -64,6 +68,12 @@ path = "examples/internal/bench.rs"
 [[bench]]
 name = "benchmarks"
 path = "benches/benchmarks.rs"
+harness = false
+required-features = ["ring"]
+
+[[bench]]
+name = "srv_clnt_single"
+path = "benches/srv_clnt_single.rs"
 harness = false
 required-features = ["ring"]
 
