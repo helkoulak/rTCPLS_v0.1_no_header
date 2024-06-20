@@ -59,8 +59,7 @@ pub struct CommonState {
 
     ///Id of stream to write to
     pub write_to: u16,
-    ///Whether this is the last of data to send
-    pub fin: bool,
+
 
     queued_key_update_message: Option<Vec<u8>>,
 
@@ -97,7 +96,7 @@ impl CommonState {
             received_plaintext: ChunkVecBuffer::new(Some(DEFAULT_RECEIVED_PLAINTEXT_LIMIT)),
             conn_in_use: 0,
             write_to: 0,
-            fin: false,
+
             queued_key_update_message: None,
 
             protocol: Protocol::Tcp,
@@ -296,18 +295,18 @@ impl CommonState {
 
     /// Fragment `m`, encrypt the fragments, and then queue
     /// the encrypted fragments for sending.
-    pub(crate) fn send_msg_encrypt(&mut self, m: PlainMessage, id: u16) {
+    pub(crate) fn send_msg_encrypt(&mut self, m: PlainMessage, id: u32) {
         let iter = self
             .message_fragmenter
             .fragment_message(&m);
         for m in iter {
-            self.send_single_fragment(m, id, false);
+            self.send_single_fragment(m, id);
         }
     }
 
     /// Like send_msg_encrypt, but operate on an appdata directly.
 
-    fn send_appdata_encrypt(&mut self, payload: OutboundChunks<'_>, limit: Limit, id: u16, mut fin: bool) -> usize {
+    fn send_appdata_encrypt(&mut self, payload: OutboundChunks<'_>, limit: Limit, id: u16) -> usize {
         // Here, the limit on sendable_tls applies to encrypted data,
         // but we're respecting it for plaintext data -- so we'll
         // be out by whatever the cipher+record overhead is.  That's a
@@ -318,7 +317,7 @@ impl CommonState {
             Limit::Yes => self
                 .record_layer
                 .streams
-                .get_or_create(id)
+                .get_or_create(id as u32)
                 .unwrap()
                 .send
                 .apply_limit(payload.len()),
@@ -331,9 +330,6 @@ impl CommonState {
             return 0;
         }
 
-        if len < payload.len() {
-            fin = false;
-        }
 
         let iter = self
             .message_fragmenter
@@ -342,23 +338,16 @@ impl CommonState {
                 ProtocolVersion::TLSv1_2,
                 payload.split_at(len).0,
             );
-        let mut count = iter.len();
         for m in iter {
-            count -= 1;
-            //consider flag fin when reaching last chunk
-            let finish = if count == 0 {
-                fin
-            } else {
-                false
-            };
-            self.send_single_fragment(m, id, fin);
+
+            self.send_single_fragment(m, id as u32);
         }
 
         len
     }
 
 
-    fn send_single_fragment(&mut self, m: OutboundPlainMessage, id: u16, fin: bool) {
+    fn send_single_fragment(&mut self, m: OutboundPlainMessage, id: u32) {
         self.record_layer.streams.get_or_create(id).unwrap();
         // set id of stream to decide on crypto context and record seq space
         self.record_layer.encrypt_for_stream(id);
@@ -377,23 +366,22 @@ impl CommonState {
             return;
         }
 
-        let tcpls_header = self.record_layer
-            .streams
-            .get_mut(id)
-            .unwrap()
-            .build_header(m.payload.len() as u16);
+        let current_offset = self.record_layer.streams.get_or_create(id).unwrap().send.get_current_offset();
+        self.record_layer.streams.get_or_create(id).unwrap().send.advance_offset(m.payload.len() as u64);
 
         let stream_frame_header = match m.typ {
             ContentType::ApplicationData => {
                 Some(Frame::Stream {
                     length: m.payload.len() as u16,
-                    fin: fin.into(),
+                    offset: current_offset  ,
+                    stream_id: id,
+                    fin: 0,
                 })
             },
             _ => None,
         };
 
-        let em = self.record_layer.encrypt_outgoing_tcpls(m, &tcpls_header, stream_frame_header);
+        let em = self.record_layer.encrypt_outgoing_tcpls(m, stream_frame_header);
         self.queue_message(em.encode(), id);
     }
 
@@ -407,7 +395,7 @@ impl CommonState {
         }
 
 
-        self.send_appdata_encrypt(payload, limit, id, false)
+        self.send_appdata_encrypt(payload, limit, id)
     }
 
     /// Mark the connection as ready to send application data.
@@ -447,7 +435,7 @@ impl CommonState {
         for key in keys   {
             let mut stream = sendable_plaintext.plain_map.remove(&key).unwrap();
             while let Some(buf) = stream.send_plain_buf.pop() {
-                self.send_plain(buf.as_slice().into(), Limit::No, Some(sendable_plaintext), stream.id, false);
+                self.send_plain(buf.as_slice().into(), Limit::No, Some(sendable_plaintext), stream.id);
             }
         }
     }
@@ -459,7 +447,7 @@ impl CommonState {
     }
 
     /// Send a raw TLS message, fragmenting it if needed.
-    pub(crate) fn send_msg(&mut self, m: Message, must_encrypt: bool, id: u16) {
+    pub(crate) fn send_msg(&mut self, m: Message, must_encrypt: bool, id: u32) {
         {
             if let Protocol::Quic = self.protocol {
                 if let MessagePayload::Alert(alert) = m.payload {
@@ -746,7 +734,7 @@ impl CommonState {
         self.queued_key_update_message =
             Some(self
                      .record_layer
-                     .encrypt_outgoing_tcpls(message.borrow_outbound(), header, None)
+                     .encrypt_outgoing_tcpls(message.borrow_outbound(), None)
                      .encode(),
             );
     }
@@ -764,10 +752,9 @@ impl CommonState {
         payload: OutboundChunks<'_>,
         sendable_plaintext: &mut PlainBufsMap,
         id: u16,
-        fin: bool,
     ) -> usize {
         self.perhaps_write_key_update();
-        self.send_plain(payload, Limit::Yes, Some(sendable_plaintext), id, fin)
+        self.send_plain(payload, Limit::Yes, Some(sendable_plaintext), id)
     }
 
     pub(crate) fn send_early_plaintext(&mut self, data: &[u8], id: u16) -> usize {
@@ -779,7 +766,7 @@ impl CommonState {
             return 0;
         }
 
-        self.send_appdata_encrypt(data.into(), Limit::Yes, id, false)
+        self.send_appdata_encrypt(data.into(), Limit::Yes, id)
     }
 
     /// Encrypt and send some plaintext `data`.  `limit` controls
@@ -793,7 +780,6 @@ impl CommonState {
         limit: Limit,
         sendable_plaintext: Option<&mut PlainBufsMap>,
         id: u16,
-        fin: bool,
     ) -> usize {
         if !self.may_send_application_data {
             // If we haven't completed handshaking, buffer
@@ -824,7 +810,7 @@ impl CommonState {
         }
     }
     // Put m into sendable_tls for writing.
-    pub(crate) fn queue_message(&mut self, msg: Vec<u8>, id: u16) {
+    pub(crate) fn queue_message(&mut self, msg: Vec<u8>, id: u32) {
         self.record_layer.streams.get_or_create(id).unwrap().send.append(msg);
         self.record_layer.streams.insert_flushable(id as u64);
     }

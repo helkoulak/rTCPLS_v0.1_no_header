@@ -178,9 +178,7 @@ pub trait MessageEncrypter: Send + Sync {
         msg: OutboundPlainMessage,
         seq: u64,
         stream_id: u32,
-        tcpls_header: &TcplsHeader,
         frame_header: Option<Frame>,
-        header_encrypter: &mut HeaderProtector,
     ) -> Result<OutboundOpaqueMessage, Error>;
     fn encrypted_payload_len_tcpls(&self, payload_len: usize, header_len: usize) -> (usize, usize);
 
@@ -458,7 +456,7 @@ impl MessageEncrypter for InvalidMessageEncrypter {
         payload_len
     }
 
-    fn encrypt_tcpls(&mut self, msg: OutboundPlainMessage, seq: u64, stream_id: u32, tcpls_header: &TcplsHeader, frame_header: Option<Frame>, header_encrypter: &mut HeaderProtector) -> Result<OutboundOpaqueMessage, Error> {
+    fn encrypt_tcpls(&mut self, msg: OutboundPlainMessage, seq: u64, stream_id: u32, frame_header: Option<Frame>, header_encrypter: &mut HeaderProtector) -> Result<OutboundOpaqueMessage, Error> {
         todo!()
     }
 

@@ -35,7 +35,7 @@ pub struct RecordLayer {
     encrypt_state: DirectionState,
     decrypt_state: DirectionState,
     // id of currently used stream
-    stream_in_use: u16,
+    stream_in_use: u32,
     pub streams: StreamMap,
     /*is_handshaking: bool,*/
     has_decrypted: bool,
@@ -47,10 +47,7 @@ pub struct RecordLayer {
     // should be swallowed by the caller.  This struct tracks the amount
     // of message size this is allowed for.
     trial_decryption_len: Option<usize>,
-    //Encrypts TCPLS header
-    header_encrypter: Option<HeaderProtector>,
-    //Decrypts TCPLS header
-    header_decrypter: Option<HeaderProtector>,
+
 
     early_data_requested: bool,
 }
@@ -70,8 +67,6 @@ impl RecordLayer {
             stream_in_use: 0,
             trial_decryption_len: None,
             read_seq_map: ReadSeqMap::default(),
-            header_encrypter: Default::default(),
-            header_decrypter: Default::default(),
             early_data_requested: false,
         }
     }
@@ -204,7 +199,6 @@ impl RecordLayer {
     pub(crate) fn encrypt_outgoing_tcpls(
         &mut self,
         plain: OutboundPlainMessage,
-        tcpls_header: &TcplsHeader,
         frame_header: Option<Frame>
     ) -> OutboundOpaqueMessage {
         debug_assert!(self.encrypt_state == DirectionState::Active);
@@ -213,7 +207,7 @@ impl RecordLayer {
         let seq = self.write_seq_map.get_or_create(stream_id as u64).write_seq;
         self.write_seq_map.get_or_create(stream_id as u64).write_seq += 1;
         self.message_encrypter
-            .encrypt_tcpls(plain, seq, stream_id as u32, tcpls_header, frame_header, self.header_encrypter.as_mut().unwrap())
+            .encrypt_tcpls(plain, seq, stream_id, frame_header)
             .unwrap()
     }
 
@@ -374,7 +368,7 @@ impl RecordLayer {
         self.is_handshaking = false;
     }*/
 
-    pub(crate) fn encrypt_for_stream(&mut self, stream_id: u16) {
+    pub(crate) fn encrypt_for_stream(&mut self, stream_id: u32) {
         self.stream_in_use = stream_id;
     }
 }

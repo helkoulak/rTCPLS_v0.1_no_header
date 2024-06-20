@@ -247,9 +247,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         msg: OutboundPlainMessage,
         seq: u64,
         stream_id: u32,
-        tcpls_header: &TcplsHeader,
         frame_header: Option<Frame>,
-        header_encrypter: &mut HeaderProtector,
     ) -> Result<OutboundOpaqueMessage, Error> {
         let plain_len = msg.payload.len();
         let hdr_len =  match frame_header.as_ref() {
@@ -258,30 +256,22 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         };
         let (enc_payload_len, tag_len) = self.encrypted_payload_len_tcpls(plain_len, hdr_len);
         let mut payload = PrefixedPayload::with_capacity_tcpls(enc_payload_len);
-        let total_len = TCPLS_HEADER_SIZE + enc_payload_len;
+        let total_len = enc_payload_len;
 
 
         let nonce = aead::Nonce::assume_unique_for_key(Nonce::new(&self.iv, seq, stream_id).0);
-        let aad = aead::Aad::from(make_tls13_aad_tcpls(total_len, tcpls_header));
+        let aad = aead::Aad::from(make_tls13_aad(total_len));
 
         //Write payload in output buffer
         payload.extend_from_chunks(&msg.payload);
-        //Write TCPLS header
-        payload.as_mut()[0] = (tcpls_header.chunk_num >> 24) as u8;
-        payload.as_mut()[1] = (tcpls_header.chunk_num >> 16) as u8;
-        payload.as_mut()[2] = (tcpls_header.chunk_num >> 8) as u8;
-        payload.as_mut()[3] = (tcpls_header.chunk_num & 0xff) as u8;
-        payload.as_mut()[4] = (tcpls_header.offset_step >> 8) as u8;
-        payload.as_mut()[5] = (tcpls_header.offset_step & 0xff) as u8;
-        payload.as_mut()[6] = (tcpls_header.stream_id >> 8) as u8;
-        payload.as_mut()[7] = (tcpls_header.stream_id & 0xff) as u8;
+
 
         // Write frame header and type
         match frame_header {
             Some(ref header) => {
-                payload.extend_from_slice(vec![0u8; 4].as_slice());
+                payload.extend_from_slice(vec![0u8; 16].as_slice());
                 let mut b =
-                    octets::OctetsMut::with_slice_at_offset(payload.as_mut(), plain_len + TCPLS_HEADER_SIZE);
+                    octets::OctetsMut::with_slice_at_offset(payload.as_mut(), plain_len);
                 header.encode(&mut b).unwrap();
                 b.put_bytes(&msg.typ.to_array()).unwrap();
                 ()
@@ -294,18 +284,9 @@ impl MessageEncrypter for Tls13MessageEncrypter {
 
 
         self.enc_key
-            .seal_in_place_append_tag_tcpls(nonce, aad, &mut payload, TCPLS_HEADER_SIZE)
+            .seal_in_place_append_tag_tcpls(nonce, aad, &mut payload, 0)
             .map_err(|_| Error::EncryptError)?;
 
-        // Take the LSBs of calculated tag as input sample for hash function
-        let sample = payload.as_mut_tcpls_payload().rchunks(tag_len).next().unwrap();
-
-        let mut i = 0;
-        // Calculate hash(sample) XOR TCPLS header
-        for byte in header_encrypter.calculate_hash(sample){
-            payload.as_mut_tcpls_header()[i] ^= byte;
-            i += 1;
-        }
 
         Ok(OutboundOpaqueMessage::new(
             ContentType::ApplicationData,

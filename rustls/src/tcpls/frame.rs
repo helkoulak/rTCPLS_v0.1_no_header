@@ -9,7 +9,7 @@ pub const TCPLS_HEADER_SIZE: usize = 8;
 
 pub const SAMPLE_PAYLOAD_LENGTH: usize = 16;
 
-pub const STREAM_FRAME_HEADER_SIZE: usize = 3;
+pub const STREAM_FRAME_HEADER_SIZE: usize = 15;
 
 pub const MAX_TCPLS_FRAGMENT_LEN: usize = MAX_FRAGMENT_LEN - TCPLS_OVERHEAD;
 
@@ -25,6 +25,8 @@ pub enum Frame {
 
     Stream {
         length: u16,
+        offset: u64,
+        stream_id: u32,
         fin: u8,
     },
 
@@ -100,9 +102,14 @@ impl Frame {
             }
             Frame::Stream {
                 length,
+                offset,
+                stream_id,
                 fin,
+
             } => {
                 b.put_u16(*length).unwrap();
+                b.put_u64(*offset).unwrap();
+                b.put_u32(*stream_id).unwrap();
                 match fin {
                     1 => b.put_u8(0x03).unwrap(),
                     0 => b.put_u8(0x02).unwrap(),
@@ -226,6 +233,9 @@ impl Frame {
 fn parse_stream_frame(frame_type: u8, b: &mut octets::Octets) -> octets::Result<Frame> {
 
     let length = b.get_u16_reverse().unwrap();
+    let offset = b.get_u64_reverse().unwrap();
+    let stream_id = b.get_u32_reverse().unwrap();
+
 
     let fin = match frame_type {
         2 => 0,
@@ -235,6 +245,8 @@ fn parse_stream_frame(frame_type: u8, b: &mut octets::Octets) -> octets::Result<
 
     Ok(Frame::Stream {
         length,
+        offset,
+        stream_id,
         fin,
     })
 }
@@ -370,6 +382,8 @@ fn test_encode_decode_stream_frame() {
 
     let stream_frame = Frame::Stream {
         length: 24,
+        offset: 456,
+        stream_id: 9123,
         fin: 1,
     };
 

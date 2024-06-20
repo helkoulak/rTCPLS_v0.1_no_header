@@ -309,7 +309,7 @@ impl MessageEncrypter for GcmMessageEncrypter {
         payload_len + GCM_EXPLICIT_NONCE_LEN + self.enc_key.algorithm().tag_len()
     }
 
-    fn encrypt_tcpls(&mut self, msg: OutboundPlainMessage, seq: u64, stream_id: u32, tcpls_header: &TcplsHeader, frame_header: Option<Frame>, header_encrypter: &mut HeaderProtector) -> Result<OutboundOpaqueMessage, Error> {
+    fn encrypt_tcpls(&mut self, msg: OutboundPlainMessage, seq: u64, stream_id: u32, frame_header: Option<Frame>, header_encrypter: &mut HeaderProtector) -> Result<OutboundOpaqueMessage, Error> {
         todo!()
     }
 
@@ -406,7 +406,7 @@ impl MessageEncrypter for ChaCha20Poly1305MessageEncrypter {
         payload_len + self.enc_key.algorithm().tag_len()
     }
 
-    fn encrypt_tcpls(&mut self, msg: OutboundPlainMessage, seq: u64, stream_id: u32, tcpls_header: &TcplsHeader, frame_header: Option<Frame>, header_encrypter: &mut HeaderProtector) -> Result<OutboundOpaqueMessage, Error> {
+    fn encrypt_tcpls(&mut self, msg: OutboundPlainMessage, seq: u64, stream_id: u32, frame_header: Option<Frame>, header_encrypter: &mut HeaderProtector) -> Result<OutboundOpaqueMessage, Error> {
         todo!()
     }
 
