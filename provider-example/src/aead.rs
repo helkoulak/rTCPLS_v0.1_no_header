@@ -163,7 +163,7 @@ impl MessageEncrypter for Tls12Cipher {
         payload_len + CHACHAPOLY1305_OVERHEAD
     }
 
-    fn encrypt_tcpls(&mut self, msg: OutboundPlainMessage, seq: u64, stream_id: u32, tcpls_header: &TcplsHeader, frame_header: Option<Frame>) -> Result<OutboundOpaqueMessage, Error> {
+    fn encrypt_tcpls(&mut self, msg: OutboundPlainMessage, seq: u64, conn_id: u32, frame_header: Option<Frame>) -> Result<OutboundOpaqueMessage, Error> {
         todo!()
     }
 

@@ -247,7 +247,7 @@ impl TcplsSession {
 
         for id in stream_iter {
 
-            let stream = match tls_conn.record_layer.streams.get_mut(id as u16) {
+            let stream = match tls_conn.record_layer.streams.get_mut(id as u32) {
                 Some(stream) => {
                     stream
                 },

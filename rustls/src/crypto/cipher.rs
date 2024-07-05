@@ -153,9 +153,8 @@ pub trait MessageDecrypter: Send + Sync {
         &mut self,
         msg: InboundOpaqueMessage<'a>,
         seq: u64,
-        stream_id: u32,
-        recv_buf: &'a mut RecvBuf,
-        tcpls_header: &TcplsHeader,
+        conn_id: u32,
+        next_offset: u64,
     ) -> Result<InboundPlainMessage<'a>, Error>;
 
 }
@@ -177,7 +176,7 @@ pub trait MessageEncrypter: Send + Sync {
         &mut self,
         msg: OutboundPlainMessage,
         seq: u64,
-        stream_id: u32,
+        conn_id: u32,
         frame_header: Option<Frame>,
     ) -> Result<OutboundOpaqueMessage, Error>;
     fn encrypted_payload_len_tcpls(&self, payload_len: usize, header_len: usize) -> (usize, usize);
@@ -481,7 +480,7 @@ impl MessageDecrypter for InvalidMessageDecrypter {
         Err(Error::DecryptError)
     }
 
-    fn decrypt_tcpls<'a, 'b>(&mut self, msg: InboundOpaqueMessage<'a>, seq: u64, stream_id: u32, recv_buf: &'b mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<InboundPlainMessage<'b>, Error> {
+    fn decrypt_tcpls<'a, 'b>(&mut self, msg: InboundOpaqueMessage<'a>, seq: u64, conn_id: u32, recv_buf: &'b mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<InboundPlainMessage<'a>, Error> {
         Err(Error::DecryptError)
     }
 }

@@ -728,7 +728,7 @@ impl<Data> ConnectionCommon<Data> {
     /// After this function returns, the connection buffer may not yet be fully flushed. The
     /// [`CommonState::wants_write`] function can be used to check if the output buffer is empty.
 
-    pub fn write_tls(&mut self, wr: &mut dyn io::Write, id: u16) -> Result<usize, io::Error> {
+    pub fn write_tls(&mut self, wr: &mut dyn io::Write, id: u32) -> Result<usize, io::Error> {
         self.record_layer.streams.get_or_create(id).unwrap().send.write_to(wr)
     }
 }
@@ -819,6 +819,7 @@ impl<Data> ConnectionCore<Data> {
 
         let mut discard = 0;
         loop {
+            self.common_state.record_layer.enc_dec_for_connection(self.common_state.conn_in_use);
             let mut borrowed_buffer = deframer_buffer.borrow();
             borrowed_buffer.queue_discard(discard);
 
@@ -880,7 +881,7 @@ impl<Data> ConnectionCore<Data> {
 
     ///TODO: Add process functionality to other TCPLS control frames
     fn process_tcpls_payload(&mut self, app_buffers: &mut RecvBufMap) {
-        let mut app_buffer = app_buffers.get_mut(self.common_state.record_layer.get_stream_id()).unwrap();
+        let mut app_buffer = app_buffers.get_mut(self.common_state.record_layer.get_conn_id()).unwrap();
         let offset = app_buffer.get_offset();
 
         let mut b = octets::Octets::with_slice_at_offset(app_buffer.as_ref(), offset as usize);

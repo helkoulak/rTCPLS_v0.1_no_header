@@ -269,8 +269,6 @@ impl MessageDeframer {
         }
 
         let mut start = 0;
-        let tag_len = record_layer.get_tag_length();
-        let mut hdr_decoded = TcplsHeader::default();
         let mut end = 0;
 
 
@@ -284,7 +282,7 @@ impl MessageDeframer {
                 false => match self.out_of_order {
                     true => {
                         for (offset, info) in self.record_info.iter() {
-                            if app_buffers.get(info.id).unwrap().next_recv_pkt_num == info.chunk_num && !info.processed {
+                            if app_buffers.get(info.id).unwrap().offset == info.next_offset && !info.processed {
                                 end = *offset as usize;
                                 break
                             } else {
@@ -318,6 +316,7 @@ impl MessageDeframer {
                         MessageError::MessageTooLarge => InvalidMessage::MessageTooLarge,
                         MessageError::InvalidContentType => InvalidMessage::InvalidContentType,
                         MessageError::UnknownProtocolVersion => {
+
                             InvalidMessage::UnknownProtocolVersion
                         }
                     };
@@ -328,9 +327,6 @@ impl MessageDeframer {
 
             // Return CCS messages and early plaintext alerts immediately without decrypting.
             end = start + rd.used();
-            //Create an info object for the received record
-            self.record_info.insert(start as u64, RangeBufInfo::from(hdr_decoded.chunk_num, hdr_decoded.stream_id, end - start));
-
             let version_is_tls13 = matches!(negotiated_version, Some(ProtocolVersion::TLSv1_3));
             let allowed_plaintext = match m.typ {
                 // CCS messages are always plaintext.
@@ -376,31 +372,11 @@ impl MessageDeframer {
                 }));
             }
 
-            // Consider header protection in case dec/enc state is active
-            if record_layer.is_decrypting() && m.payload.len() > TCPLS_HEADER_SIZE {
-                // Take the LSBs of calculated tag as input sample for hash function
-                let sample = m.payload.rchunks(tag_len).next().unwrap();
-                // Decode tcpls header and choose recv_buf accordingly
-                hdr_decoded =
-                    TcplsHeader::decode_tcpls_header_from_slice(
-                        &record_layer.decrypt_header(sample, &m.payload[..TCPLS_HEADER_SIZE]).expect("decrypting header failed")
-                    );
-                //Update record info if header is present
-                self.record_info
-                    .insert(start as u64, RangeBufInfo::from(hdr_decoded.chunk_num, hdr_decoded.stream_id, end - start)
-                    );
-                
-                if app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).next_recv_pkt_num != hdr_decoded.chunk_num {
-                    self.out_of_order = true;
-                    continue
-                }
-
-            }
 
 
             // Decrypt the encrypted message (if necessary).
             let (typ, version, plain_payload_slice) =
-                match record_layer.decrypt_incoming_tcpls(m, app_buffers.get_or_create(hdr_decoded.stream_id as u64, None), &hdr_decoded) {
+                match record_layer.decrypt_incoming_tcpls(m) {
                 Ok(Some(decrypted)) => {
 
                     let Decrypted {
@@ -432,6 +408,16 @@ impl MessageDeframer {
 
                     continue;
                 }
+                Err(Error::DataReceivedOutOfOrder) => {
+                    self.record_info
+                        .get_mut(&(start as u64))
+                        .unwrap().processed = true;
+                    self.record_info
+                        .get_mut(&(start as u64))
+                        .unwrap().record = m.payload.to_vec().clone();
+                    self.out_of_order = true;
+                    continue
+                }
                 Err(e) => return Err(e),
             };
 
@@ -449,7 +435,7 @@ impl MessageDeframer {
 
             if typ != ContentType::Handshake {
                 if typ == ContentType::ApplicationData {
-                    app_buffers.insert_readable(record_layer.get_stream_id() as u64);
+                    app_buffers.insert_readable(record_layer.get_conn_id() as u64);
                 }
                 self.record_info
                     .get_mut(&(start as u64))
@@ -697,7 +683,7 @@ impl MessageDeframer {
             .filter(|&(key, info)| *key < self.processed_range.start || *key >= self.processed_range.end) {
             if *entry.0 == self.processed_range.end {
                 new_record_info.insert(self.processed_range.start, RangeBufInfo{
-                    chunk_num: entry.1.chunk_num,
+                    next_offset: entry.1.next_offset,
                     len: entry.1.len,
                     id: entry.1.id,
                     processed: entry.1.processed,
@@ -708,7 +694,7 @@ impl MessageDeframer {
 
             if *entry.0 > self.processed_range.end {
                 new_record_info.insert(next_start, RangeBufInfo{
-                    chunk_num: entry.1.chunk_num,
+                    next_offset: entry.1.next_offset,
                     len: entry.1.len,
                     id: entry.1.id,
                     processed: entry.1.processed,
@@ -717,7 +703,7 @@ impl MessageDeframer {
                 continue
             }
             new_record_info.insert(*entry.0, RangeBufInfo{
-                chunk_num: entry.1.chunk_num,
+                next_offset: entry.1.next_offset,
                 len: entry.1.len,
                 id: entry.1.id,
                 processed: entry.1.processed,
@@ -1137,9 +1123,11 @@ trait FilledDeframerBuffer {
 pub(crate) struct RangeBufInfo {
     /// The id of the stream this record belongs to
     pub(crate) id: u16,
+    /// Received record copied from deframer buffer if out of order
+    pub(crate)  record: Vec<u8>,
 
     /// The chunk number of record.
-    pub(crate) chunk_num: u32,
+    pub(crate) next_offset: u32,
 
     /// Length of chunk
     pub(crate) len: usize,
@@ -1152,7 +1140,8 @@ impl RangeBufInfo {
     pub(crate) fn from(chunk_num: u32, id: u16, len: usize) -> RangeBufInfo {
         RangeBufInfo {
             id,
-            chunk_num,
+            record: vec![],
+            next_offset: chunk_num,
             len,
             processed: false,
         }

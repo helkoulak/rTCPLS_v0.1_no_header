@@ -107,6 +107,7 @@ pub enum Error {
     BufNotFound,
     Done,
     BufferTooShort,
+    DataReceivedOutOfOrder
 }
 
 /// A corrupt TLS message payload that resulted in an error.

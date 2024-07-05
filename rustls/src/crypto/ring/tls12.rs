@@ -277,7 +277,7 @@ impl MessageDecrypter for GcmMessageDecrypter {
         Ok(msg.into_plain_message())
     }
 
-    fn decrypt_tcpls<'a, 'b>(&mut self, _msg: InboundOpaqueMessage<'a>, _seq: u64, stream_id: u32, recv_buf: &'b mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<InboundPlainMessage<'b>, Error> {
+    fn decrypt_tcpls<'a, 'b>(&mut self, msg: InboundOpaqueMessage<'a>, seq: u64, conn_id: u32, next_offset: u64) -> Result<InboundPlainMessage<'a>, Error> {
         todo!()
     }
 
@@ -309,7 +309,7 @@ impl MessageEncrypter for GcmMessageEncrypter {
         payload_len + GCM_EXPLICIT_NONCE_LEN + self.enc_key.algorithm().tag_len()
     }
 
-    fn encrypt_tcpls(&mut self, msg: OutboundPlainMessage, seq: u64, stream_id: u32, frame_header: Option<Frame>, header_encrypter: &mut HeaderProtector) -> Result<OutboundOpaqueMessage, Error> {
+    fn encrypt_tcpls(&mut self, msg: OutboundPlainMessage, seq: u64, conn_id: u32, frame_header: Option<Frame>) -> Result<OutboundOpaqueMessage, Error> {
         todo!()
     }
 
@@ -375,7 +375,7 @@ impl MessageDecrypter for ChaCha20Poly1305MessageDecrypter {
         Ok(msg.into_plain_message())
     }
 
-    fn decrypt_tcpls<'a, 'b>(&mut self, msg: InboundOpaqueMessage<'a>, seq: u64, stream_id: u32, recv_buf: &'b mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<InboundPlainMessage<'b>, Error> {
+    fn decrypt_tcpls<'a, 'b>(&mut self, msg: InboundOpaqueMessage<'a>, seq: u64, conn_id: u32, recv_buf: &'b mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<InboundPlainMessage<'a>, Error> {
         todo!()
     }
 
@@ -406,7 +406,7 @@ impl MessageEncrypter for ChaCha20Poly1305MessageEncrypter {
         payload_len + self.enc_key.algorithm().tag_len()
     }
 
-    fn encrypt_tcpls(&mut self, msg: OutboundPlainMessage, seq: u64, stream_id: u32, frame_header: Option<Frame>, header_encrypter: &mut HeaderProtector) -> Result<OutboundOpaqueMessage, Error> {
+    fn encrypt_tcpls(&mut self, msg: OutboundPlainMessage, seq: u64, conn_id: u32, frame_header: Option<Frame>) -> Result<OutboundOpaqueMessage, Error> {
         todo!()
     }
 

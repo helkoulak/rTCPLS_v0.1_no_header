@@ -12,7 +12,7 @@ pub struct RecvBuf {
     pub id: u64,
     data: Vec<u8>,
     /// where the next chunk will be appended
-    pub offset: u64,
+    pub offset: u32,
 
     /// Length of last decrypted data chunk
     pub last_decrypted: usize,
@@ -240,7 +240,7 @@ impl RecvBufMap {
     }
 
     /// Returns the mutable stream with the given ID if it exists.
-    pub fn get_mut(&mut self, id: u16) -> Option<&mut RecvBuf> {
+    pub fn get_mut(&mut self, id: u32) -> Option<&mut RecvBuf> {
         self.buffers.get_mut(&(id as u64))
     }
 
