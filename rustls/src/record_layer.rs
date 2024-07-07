@@ -1,13 +1,14 @@
 use alloc::boxed::Box;
 use core::num::NonZeroU64;
 use std::collections::hash_map;
-
+use octets::Octets;
+use crate::ContentType;
 use crate::crypto::cipher::{HeaderProtector, InboundOpaqueMessage, MessageDecrypter, MessageEncrypter};
 use crate::error::Error;
 #[cfg(feature = "logging")]
 use crate::log::trace;
 use crate::msgs::message::{InboundPlainMessage, OutboundOpaqueMessage, OutboundPlainMessage};
-use crate::recvbuf::RecvBuf;
+use crate::recvbuf::{RecvBuf, RecvBufMap};
 use crate::tcpls::frame::{Frame, TCPLS_OVERHEAD, TcplsHeader};
 use crate::tcpls::stream::{SimpleIdHashMap, StreamMap};
 
@@ -130,6 +131,7 @@ impl RecordLayer {
     pub(crate) fn decrypt_incoming_tcpls<'a>(
         &mut self,
         encr: InboundOpaqueMessage<'a>,
+        recv_map: &'a mut RecvBufMap,
     ) -> Result<Option<Decrypted<'a>>, Error> {
         if self.decrypt_state != DirectionState::Active {
             return Ok(Some(Decrypted {
@@ -152,11 +154,35 @@ impl RecordLayer {
         let encrypted_len = encr.payload.len();
         match self
             .message_decrypter
-            .decrypt_tcpls(encr, read_seq, self.conn_in_use, self.next_offset)
+            .decrypt_tcpls(encr, read_seq, self.conn_in_use)
         {
             Ok(plaintext) => {
                 self.read_seq_map.get_or_create(self.conn_in_use as u64).read_seq += 1;
-                self.next_offset += (plaintext.payload.len() - TCPLS_OVERHEAD) as u64;
+                if plaintext.typ == ContentType::ApplicationData {
+                    let mut b = Octets::with_slice_reverse(plaintext.payload);
+                    let stream_frame = Frame::parse(&mut b).unwrap();
+                    match stream_frame {
+                        Frame::Stream {
+                            length,
+                            offset,
+                            stream_id, ..
+                        } => {
+                            let mut recv_stream = recv_map.get_or_create(stream_id as u64, None);
+                            if recv_stream.offset != offset {
+                                return Err(Error::DataReceivedOutOfOrder(stream_frame));
+                            } else {
+                                if recv_stream.capacity() < plaintext.payload.len(){
+                                    return Err(Error::BufferTooShort);
+                                }
+                                recv_stream.clone_buffer(plaintext.payload);
+                                recv_stream.offset += length as u64;
+                            }
+                        },
+                        _ => {}
+                    };
+
+
+                }
                 if !self.has_decrypted {
                     self.has_decrypted = true;
                 }
@@ -511,7 +537,7 @@ mod tests {
                 ContentType::Handshake,
                 ProtocolVersion::TLSv1_2,
                 &mut [0xC0, 0xFF, 0xEE],
-            ), &mut rev_buf, &TcplsHeader::default())
+            ), &mut rev_buf)
             .unwrap();
         assert!(matches!(record_layer.decrypt_state, DirectionState::Active));
         assert_eq!(record_layer.read_seq_map.get_or_create(0).read_seq, 1);

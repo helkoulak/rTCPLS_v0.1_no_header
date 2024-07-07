@@ -12,7 +12,7 @@ pub struct RecvBuf {
     pub id: u64,
     data: Vec<u8>,
     /// where the next chunk will be appended
-    pub offset: u32,
+    pub offset: u64,
 
     /// Length of last decrypted data chunk
     pub last_decrypted: usize,
@@ -79,20 +79,11 @@ impl RecvBuf {
         & self.data[offset.. offset + self.last_decrypted]
     }
 
-    ///Used  for Handshake records
-    pub fn get_mut_total_decrypted(&mut self) -> &mut [u8] {
-        if self.offset > 0 {
-            self.offset -= self.total_decrypted as u64;
-        }
-        let end_offset = self.offset as usize + self.total_decrypted;
-        self.total_decrypted = 0;
-        &mut self.data[self.offset as usize.. end_offset ]
+    pub fn clone_buffer(&mut self, buffer: &[u8]){
+        let at = self.offset as usize;
+        self.data[at..at + buffer.len()].clone_from_slice(buffer);
     }
 
-    /// Get a mutable ref for the desirable slice
-    pub fn get_mut_at_index(&mut self, index: usize, len: usize) -> &mut [u8] {
-        &mut self.data[index.. index + len]
-    }
 
     /// Get an immutable ref for the desirable slice
     pub fn get_at_index(&self, index: usize, len: usize) -> &[u8] {
@@ -155,7 +146,7 @@ impl RecvBuf {
 
 
     pub fn data_length(&self) -> u64 {
-        self.offset
+        self.offset as u64
     }
 
     pub fn reset_stream(&mut self) {
@@ -163,7 +154,6 @@ impl RecvBuf {
             *byte = 0;
         }
         self.offset = 0;
-        self.next_recv_pkt_num = 0;
         self.consumed = 0;
         self.last_decrypted = 0;
         self.total_decrypted = 0;
@@ -289,50 +279,6 @@ impl RecvBufMap {
         bytes
     }
 
-    /*pub(crate) fn read_mut(&mut self, stream_id: u64, stream: &mut Stream) -> Result<&mut [u8], Error> {
-        let buf = match self.buffers.entry(stream_id) {
-            hash_map::Entry::Vacant(_v) => {
-                return Err(Error::RecvBufNotFound);
-            }
-            hash_map::Entry::Occupied(v) => v.into_mut().read_mut(&mut stream.recv)?,
-        };
-        Ok(buf)
-    }*/
-
-    /*pub(crate) fn has_consumed(&mut self, stream_id: u64, stream: Option<&Stream>, consumed: usize) -> Result<usize, Error>{
-        match self.buffers.entry(stream_id) {
-            hash_map::Entry::Occupied(v) => {
-                // Registers how much the app has read on this stream buffer. If we don't
-                // have a stream, it means it has been collected. We need to collect our stream
-                // buffer as well assuming the application has read everything that was readable.
-                let (to_collect, remaining_data) = v.into_mut().has_consumed(stream, consumed)?;
-                if to_collect {
-                    self.collect(stream_id);
-                }
-                Ok(remaining_data)
-            },
-            _ => Ok(0),
-        }
-    }*/
-
-    /*pub(crate) fn is_consumed(&self, stream_id: u64) -> bool {
-        match self.buffers.get(&stream_id) {
-            Some(v) => {
-                v.is_consumed()
-            }
-            _ => true,
-        }
-    }*/
-
-    /* pub fn collect(&mut self, stream_id: u64) {
-         if let Some(mut buf) = self.buffers.remove(&stream_id) {
-             if self.recycled_buffers.len() < self.recycled_buffers.capacity() {
-                 buf.clear();
-                 self.recycled_buffers.push_back(buf);
-             }
-         }
-     }*/
-
 }
 
 pub struct ReaderAppBufs {
@@ -386,7 +332,6 @@ mod test {
         let mut stream = RecvBuf::new(0, Some(DEFAULT_BUFFER_LIMIT));
         stream.data.copy_from_slice(vector.as_slice());
         stream.last_decrypted = 1234;
-        stream.next_recv_pkt_num = 95475;
 
         stream.consumed = 54455;
         stream.offset = 412;
@@ -395,7 +340,6 @@ mod test {
 
         assert!(stream.data.iter().all(|&x| x == 0));
         assert_eq!(stream.offset, 0);
-        assert_eq!(stream.next_recv_pkt_num, 0);
         assert_eq!(stream.consumed, 0);
         assert_eq!(stream.last_decrypted, 0);
     }

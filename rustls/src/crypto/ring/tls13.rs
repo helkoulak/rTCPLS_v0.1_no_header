@@ -345,7 +345,6 @@ impl MessageDecrypter for Tls13MessageDecrypter {
         mut msg: InboundOpaqueMessage<'a>,
         seq: u64,
         conn_id: u32,
-        next_offset: u64,
     ) -> Result<InboundPlainMessage<'a>, Error> {
 
         let payload = &mut msg.payload;
@@ -363,40 +362,7 @@ impl MessageDecrypter for Tls13MessageDecrypter {
             .len();
 
         payload.truncate(plain_len);
-
-        if payload.len() > MAX_FRAGMENT_LEN + 1 {
-            return Err(Error::PeerSentOversizedRecord);
-        }
-
-        msg.typ = unpad_tls13_payload(payload);
-
-        if msg.typ == ContentType::Unknown(0) {
-            return Err(PeerMisbehaved::IllegalTlsInnerPlaintext.into());
-        }
-
-        if payload.len() > MAX_FRAGMENT_LEN {
-            return Err(Error::PeerSentOversizedRecord);
-        }
-
-        msg.version = ProtocolVersion::TLSv1_3;
-
-        if msg.typ == ContentType::ApplicationData {
-            let mut b = octets::Octets::with_slice(payload.as_ref());
-            let frame = Frame::parse(&mut b).unwrap();
-            match frame {
-                Frame::Stream { offset, .. } => {
-                    if offset != next_offset {
-                        return Err(Error::DataReceivedOutOfOrder);
-                    }
-                },
-                _ => {
-                },
-
-            }
-        }
-
-        Ok(self.into_plain_message())
-
+        msg.into_tls13_unpadded_message()
     }
 }
 

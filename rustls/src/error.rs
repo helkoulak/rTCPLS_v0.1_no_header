@@ -107,7 +107,7 @@ pub enum Error {
     BufNotFound,
     Done,
     BufferTooShort,
-    DataReceivedOutOfOrder
+    DataReceivedOutOfOrder(Frame)
 }
 
 /// A corrupt TLS message payload that resulted in an error.
@@ -541,6 +541,9 @@ impl fmt::Display for Error {
             Self::General(ref err) => write!(f, "unexpected error: {}", err),
 
             Self::Other(ref err) => write!(f, "other error: {}", err),
+            Self::DataReceivedOutOfOrder(ref err) => {
+                write!(f, "record received out of order: {:?}", err)
+            }
         }
     }
 }
@@ -615,6 +618,7 @@ mod other_error {
 }
 
 pub use other_error::OtherError;
+use crate::tcpls::frame::Frame;
 
 #[cfg(test)]
 mod tests {

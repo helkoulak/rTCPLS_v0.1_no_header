@@ -154,7 +154,6 @@ pub trait MessageDecrypter: Send + Sync {
         msg: InboundOpaqueMessage<'a>,
         seq: u64,
         conn_id: u32,
-        next_offset: u64,
     ) -> Result<InboundPlainMessage<'a>, Error>;
 
 }
