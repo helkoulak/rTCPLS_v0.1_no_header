@@ -218,7 +218,18 @@ impl TcplsSession {
         Ok(conn_id)
     }
 
-    pub fn stream_send(&mut self, str_id: u16, input: &[u8], fin: bool) -> Result<usize, Error> {
+    pub fn stream_send(&mut self, str_id: u16, input: &[u8], fin: bool, attach_to: Option<u32>) -> Result<usize, Error> {
+        match attach_to.unwrap() {
+            Some(conn_id) => self.tls_conn
+                .as_mut()
+                .unwrap()
+                .record_layer
+                .streams
+                .get_mut(str_id as u32)
+                .unwrap()
+                .attach_to_connection(conn_id),
+            None => {},
+        }
 
         self.tls_conn.as_mut().unwrap().write_to = str_id;
         let buffered = self.tls_conn.as_mut().unwrap().writer().write(input).expect("Could not write data to stream");
@@ -253,6 +264,15 @@ impl TcplsSession {
                 },
                 None => return Err(Error::BufNotFound),
             };
+
+            match conn_id.unwrap() {
+                Some(con_id) => {
+                    if stream.attched_to != con_id{
+                        continue
+                    }
+                },
+                None => {},
+            }
 
             let mut len = stream.send.len();
             let mut sent = 0;

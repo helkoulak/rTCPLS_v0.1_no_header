@@ -1572,12 +1572,12 @@ fn receive_out_of_order_tls_records_multiple_streams() {
 
     tcpls_client.tls_conn = Some(Connection::from(client));
 
-    tcpls_client.stream_send(0, &record_1, false);
-    tcpls_client.stream_send(0, &record_2, false);
-    tcpls_client.stream_send(1, &record_3, false);
-    tcpls_client.stream_send(1, &record_4, false);
-    tcpls_client.stream_send(2, &record_5, false);
-    tcpls_client.stream_send(2, &record_6, false);
+    tcpls_client.stream_send(0, &record_1, false, None);
+    tcpls_client.stream_send(0, &record_2, false, None);
+    tcpls_client.stream_send(1, &record_3, false, None);
+    tcpls_client.stream_send(1, &record_4, false, None);
+    tcpls_client.stream_send(2, &record_5, false, None);
+    tcpls_client.stream_send(2, &record_6, false, None);
 
 
     client = match tcpls_client.tls_conn.unwrap() {
@@ -1642,9 +1642,9 @@ fn send_fragmented_records_on_two_connections() {
 
     tcpls_client.tls_conn = Some(Connection::from(client));
 
-    tcpls_client.stream_send(0, &record_1, false);
-    tcpls_client.stream_send(1, &record_2, false);
-    tcpls_client.stream_send(2, &record_3, false);
+    tcpls_client.stream_send(0, &record_1, false, None);
+    tcpls_client.stream_send(1, &record_2, false, None);
+    tcpls_client.stream_send(2, &record_3, false, None);
 
 
 

@@ -39,6 +39,7 @@ use crate::vecbuf::ChunkVecBuffer;
 
 pub const DEFAULT_BUFFER_LIMIT: usize = 64 * 1024;
 pub const DEFAULT_STREAM_ID:u32 = 0;
+pub const DEFAULT_CONNECTION_ID:u32 = 0;
 
 
 pub struct Stream {
@@ -75,6 +76,11 @@ impl Stream {
         }
     }
 
+    #[inline]
+    pub fn attach_to_connection(&mut self, conn_id: u32){
+        self.attched_to = conn_id;
+    }
+
 
 
     /// Returns true if the stream has enough capacity to be
@@ -89,18 +95,7 @@ impl Stream {
     pub fn is_flushable(&self) -> bool {
         !self.send.is_empty()
     }
-    #[inline]
-    pub fn build_header(&mut self, len: u16) -> TcplsHeader {
-        let header = TcplsHeader {
-            chunk_num: self.next_snd_pkt_num,
-            offset_step: len,
-            stream_id: self.id,
-        };
 
-        self.next_snd_pkt_num += 1;
-        self.send.advance_offset(len as u64);
-        header
-    }
 
     /*/// Returns true if the stream is complete.
     ///
@@ -233,7 +228,9 @@ impl StreamMap {
                     return Err(Error::Done);
                 }
 
-                let s = Stream::new(stream_id);
+                let mut s = Stream::new(stream_id);
+
+                s.attched_to = DEFAULT_CONNECTION_ID;
 
                 let is_writable = s.is_writable();
 

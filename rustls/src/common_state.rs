@@ -348,9 +348,9 @@ impl CommonState {
 
 
     fn send_single_fragment(&mut self, m: OutboundPlainMessage, id: u32) {
-        self.record_layer.streams.get_or_create(id).unwrap();
+        let conn_id = self.record_layer.streams.get_or_create(id).unwrap().attched_to;
         // set id of stream to decide on crypto context and record seq space
-        self.record_layer.enc_dec_for_connection(id);
+        self.record_layer.enc_dec_for_connection(conn_id);
         // Close connection once we start to run out of
         // sequence space.
         if self
