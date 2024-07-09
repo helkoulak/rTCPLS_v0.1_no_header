@@ -479,7 +479,7 @@ impl MessageDecrypter for InvalidMessageDecrypter {
         Err(Error::DecryptError)
     }
 
-    fn decrypt_tcpls<'a, 'b>(&mut self, msg: InboundOpaqueMessage<'a>, seq: u64, conn_id: u32, recv_buf: &'b mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<InboundPlainMessage<'a>, Error> {
+    fn decrypt_tcpls<'a, 'b>(&mut self, msg: InboundOpaqueMessage<'a>, seq: u64, conn_id: u32) -> Result<InboundPlainMessage<'a>, Error> {
         Err(Error::DecryptError)
     }
 }

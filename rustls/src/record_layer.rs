@@ -1,12 +1,15 @@
 use alloc::boxed::Box;
 use core::num::NonZeroU64;
 use std::collections::hash_map;
+
 use octets::Octets;
+
 use crate::ContentType;
 use crate::crypto::cipher::{HeaderProtector, InboundOpaqueMessage, MessageDecrypter, MessageEncrypter};
 use crate::error::Error;
 #[cfg(feature = "logging")]
 use crate::log::trace;
+use crate::msgs::deframer::StreamHeader;
 use crate::msgs::message::{InboundPlainMessage, OutboundOpaqueMessage, OutboundPlainMessage};
 use crate::recvbuf::{RecvBuf, RecvBufMap};
 use crate::tcpls::frame::{Frame, TCPLS_OVERHEAD, TcplsHeader};
@@ -132,6 +135,7 @@ impl RecordLayer {
         &mut self,
         encr: InboundOpaqueMessage<'a>,
         recv_map: &'a mut RecvBufMap,
+        stream_header: &mut StreamHeader,
     ) -> Result<Option<Decrypted<'a>>, Error> {
         if self.decrypt_state != DirectionState::Active {
             return Ok(Some(Decrypted {
@@ -169,7 +173,9 @@ impl RecordLayer {
                         } => {
                             let mut recv_stream = recv_map.get_or_create(stream_id as u64, None);
                             if recv_stream.offset != offset {
-                                stream_header = strm_hdr;
+                                stream_header.offset = offset;
+                                stream_header.stream_id = stream_id;
+                                stream_header.len = length;
                                 return Ok(None);
                             } else {
                                 if recv_stream.capacity() < plaintext.payload.len(){
@@ -474,7 +480,6 @@ impl ReadSeq {
 
 #[cfg(test)]
 mod tests {
-    use std::prelude::v1::Vec;
     use crate::ContentType::ApplicationData;
     use crate::recvbuf::RecvBufMap;
     use super::*;
@@ -493,7 +498,7 @@ mod tests {
                 Ok(m.into_plain_message())
             }
 
-            fn decrypt_tcpls<'a, 'b>(&mut self, msg: InboundOpaqueMessage<'a>, seq: u64, conn_id: u32, recv_buf: &'b mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<InboundPlainMessage<'a>, Error> {
+            fn decrypt_tcpls<'a, 'b>(&mut self, msg: InboundOpaqueMessage<'a>, seq: u64, conn_id: u32) -> Result<InboundPlainMessage<'a>, Error> {
                 Ok(InboundPlainMessage{
                     version: ProtocolVersion::TLSv1_3,
                     payload: &[],
@@ -504,7 +509,6 @@ mod tests {
         }
 
         let mut app_buffs = RecvBufMap::new();
-        let mut rev_buf = app_buffs.get_or_create(0, None);
 
         // A record layer starts out invalid, having never decrypted.
         let mut record_layer = RecordLayer::new();
@@ -538,7 +542,7 @@ mod tests {
                 ContentType::Handshake,
                 ProtocolVersion::TLSv1_2,
                 &mut [0xC0, 0xFF, 0xEE],
-            ), &mut rev_buf)
+            ), &mut app_buffs, &mut StreamHeader::new())
             .unwrap();
         assert!(matches!(record_layer.decrypt_state, DirectionState::Active));
         assert_eq!(record_layer.read_seq_map.get_or_create(0).read_seq, 1);

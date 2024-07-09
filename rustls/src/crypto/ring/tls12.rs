@@ -375,7 +375,7 @@ impl MessageDecrypter for ChaCha20Poly1305MessageDecrypter {
         Ok(msg.into_plain_message())
     }
 
-    fn decrypt_tcpls<'a, 'b>(&mut self, msg: InboundOpaqueMessage<'a>, seq: u64, conn_id: u32, recv_buf: &'b mut RecvBuf, tcpls_header: &TcplsHeader) -> Result<InboundPlainMessage<'a>, Error> {
+    fn decrypt_tcpls<'a, 'b>(&mut self, msg: InboundOpaqueMessage<'a>, seq: u64, conn_id: u32) -> Result<InboundPlainMessage<'a>, Error> {
         todo!()
     }
 

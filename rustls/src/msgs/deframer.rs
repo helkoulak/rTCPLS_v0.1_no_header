@@ -47,7 +47,7 @@ pub struct MessageDeframer {
     ///Range of joined Handshake message in the deframer buffer
     pub(crate)  joined_messages: Vec<Range<usize>>,
 
-    pub(crate) stream_header: Option<Frame>,
+    pub(crate) stream_header: StreamHeader,
 
 }
 
@@ -289,6 +289,14 @@ impl MessageDeframer {
             };
 
             if !self.records_info.is_empty() {
+                //Remove processed entries
+                for (stream_id, records_info) in self.records_info.records.iter_mut() {
+                    for (offset, record_info) in records_info.stream_records.iter_mut() {
+                        if record_info.processed {
+                            records_info.stream_records.remove_entry(offset);
+                        }
+                    }
+                }
                 for (stream_id, records_info) in self.records_info.records.iter_mut() {
                     for (offset, record_info) in records_info.stream_records.iter_mut() {
                         if app_buffers.get(*stream_id as u16).unwrap().offset == *offset {
@@ -391,13 +399,12 @@ impl MessageDeframer {
                     ));
                 }
                 Ok(None) => {
-                    match self.stream_header.as_ref().unwrap() {
-                        Frame::Stream {length, offset, stream_id, ..} => {
-                            if *length > 0 {
-                                self.records_info.create_stream_record_info( m.payload.to_vec().clone(), *length, *offset , *stream_id, 0);
-                            }
-                        },
-                        _ => {},
+                    if self.stream_header.len > 0 {
+                        self.records_info.create_stream_record_info( m.payload.to_vec().clone(), 
+                                                                     self.stream_header.len, 
+                                                                     self.stream_header.offset, 
+                                                                     self.stream_header.stream_id,
+                                                                     0);
                     }
                     buffer.queue_discard(end);
                     continue;
@@ -982,6 +989,20 @@ impl RecordInfo {
             len,
             fin,
             processed: false,
+        }
+    }
+}
+#[derive(Clone, Debug, Default)]
+pub struct StreamHeader{
+    pub len: u16,
+    pub offset: u64,
+    pub stream_id: u32,
+}
+
+impl StreamHeader {
+    pub fn new() -> Self {
+        StreamHeader {
+            ..Default::default()
         }
     }
 }
