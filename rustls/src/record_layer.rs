@@ -160,8 +160,8 @@ impl RecordLayer {
                 self.read_seq_map.get_or_create(self.conn_in_use as u64).read_seq += 1;
                 if plaintext.typ == ContentType::ApplicationData {
                     let mut b = Octets::with_slice_reverse(plaintext.payload);
-                    let stream_frame = Frame::parse(&mut b).unwrap();
-                    match stream_frame {
+                    let strm_hdr = Frame::parse(&mut b).unwrap();
+                    match strm_hdr {
                         Frame::Stream {
                             length,
                             offset,
@@ -169,7 +169,8 @@ impl RecordLayer {
                         } => {
                             let mut recv_stream = recv_map.get_or_create(stream_id as u64, None);
                             if recv_stream.offset != offset {
-                                return Err(Error::DataReceivedOutOfOrder(stream_frame));
+                                stream_header = strm_hdr;
+                                return Ok(None);
                             } else {
                                 if recv_stream.capacity() < plaintext.payload.len(){
                                     return Err(Error::BufferTooShort);

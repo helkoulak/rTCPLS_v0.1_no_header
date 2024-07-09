@@ -4,8 +4,8 @@ use core::slice::SliceIndex;
 use std::collections::{BTreeMap, hash_map};
 #[cfg(feature = "std")]
 use std::io;
-use std::{println, vec};
-use std::collections::hash_map::{Iter, IterMut};
+use std::vec;
+
 use crate::enums::{ContentType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerMisbehaved};
 use crate::msgs::codec;
@@ -13,9 +13,9 @@ use crate::msgs::message::{InboundOpaqueMessage, InboundPlainMessage, MessageErr
 #[cfg(feature = "std")]
 use crate::msgs::message::MAX_WIRE_SIZE;
 use crate::record_layer::{Decrypted, RecordLayer};
-use crate::recvbuf::{RecvBuf, RecvBufMap};
-use crate::tcpls::frame::{Frame, TCPLS_HEADER_SIZE, TcplsHeader};
-use crate::tcpls::stream::{SimpleIdHashMap, SimpleIdHashSet, StreamIter};
+use crate::recvbuf::RecvBufMap;
+use crate::tcpls::frame::Frame;
+use crate::tcpls::stream::SimpleIdHashMap;
 
 use super::codec::Codec;
 
@@ -35,8 +35,8 @@ pub struct MessageDeframer {
     /// If we're in the middle of joining a handshake payload, this is the metadata.
     joining_hs: Option<HandshakePayloadMeta>,
 
-    /// Info of records delivered
-    pub(crate) records_info: RecordInfoMap,
+    /// Info of records delivered for each stream. The key is the stream ID.
+    pub(crate) records_info: RecordsInfoMap,
 
     /// Range of offsets of processed data in deframer buffer.
     pub(crate) processed_range: Range<u64>,
@@ -46,6 +46,8 @@ pub struct MessageDeframer {
 
     ///Range of joined Handshake message in the deframer buffer
     pub(crate)  joined_messages: Vec<Range<usize>>,
+
+    pub(crate) stream_header: Option<Frame>,
 
 }
 
@@ -249,301 +251,7 @@ impl MessageDeframer {
             message,
         }))
     }
-   /* /// Return any decrypted messages that the deframer has been able to parse.
-    ///
-    /// Returns an `Error` if the deframer failed to parse some message contents or if decryption
-    /// failed, `Ok(None)` if no full message is buffered or if trial decryption failed, and
-    /// `Ok(Some(_))` if a valid message was found and decrypted successfully.
 
-    pub fn pop_tcpls<'b>(
-        &mut self,
-        record_layer: &mut RecordLayer,
-        negotiated_version: Option<ProtocolVersion>,
-        buffer: &mut DeframerSliceBuffer<'b>,
-        app_buffers: &'b mut RecvBufMap,
-    ) -> Result<Option<Deframed<'b>>, Error> {
-        if let Some(last_err) = self.last_error.clone() {
-            return Err(last_err);
-        } else if buffer.used == 0{
-            return Ok(None);
-        }
-
-        let mut start = 0;
-        let mut end = 0;
-
-
-        // We loop over records we've received but not processed yet.
-        // For records that decrypt as `Handshake`, we keep the current state of the joined
-        // handshake message payload in `self.joining_hs`, appending to it as we see records.
-        let expected_len = loop {
-
-            start = match self.record_info.is_empty() {
-                true => 0,
-                false => match self.out_of_order {
-                    true => {
-                        for (offset, info) in self.record_info.iter() {
-                            if app_buffers.get(info.id).unwrap().offset == info.next_offset && !info.processed {
-                                end = *offset as usize;
-                                break
-                            } else {
-                                end = *offset as usize + info.len;
-                                continue
-                            }
-                        }
-                        end
-                    }
-                    false => {
-                        end = *self.record_info.last_key_value().unwrap().0 as usize
-                            + self.record_info.last_key_value().unwrap().1.len;
-                        end
-                    },
-                },
-            };
-
-
-            // Does our `buf` contain a full message?  It does if it is big enough to
-            // contain a header, and that header has a length which falls within `buf`.
-            // If so, deframe it and place the message onto the frames output queue.
-            let mut rd = codec::ReaderMut::init(buffer.get_mut(start));
-            let m = match InboundOpaqueMessage::read(&mut rd) {
-                Ok(m) => m,
-                Err(msg_err) => {
-                    let err_kind = match msg_err {
-                        MessageError::TooShortForHeader | MessageError::TooShortForLength => {
-                            return Ok(None)
-                        }
-                        MessageError::InvalidEmptyPayload => InvalidMessage::InvalidEmptyPayload,
-                        MessageError::MessageTooLarge => InvalidMessage::MessageTooLarge,
-                        MessageError::InvalidContentType => InvalidMessage::InvalidContentType,
-                        MessageError::UnknownProtocolVersion => {
-
-                            InvalidMessage::UnknownProtocolVersion
-                        }
-                    };
-
-                    return Err(self.set_err(err_kind));
-                }
-            };
-
-            // Return CCS messages and early plaintext alerts immediately without decrypting.
-            end = start + rd.used();
-            let version_is_tls13 = matches!(negotiated_version, Some(ProtocolVersion::TLSv1_3));
-            let allowed_plaintext = match m.typ {
-                // CCS messages are always plaintext.
-                ContentType::ChangeCipherSpec => true,
-                // Alerts are allowed to be plaintext if-and-only-if:
-                // * The negotiated protocol version is TLS 1.3. - In TLS 1.2 it is unambiguous when
-                //   keying changes based on the CCS message. Only TLS 1.3 requires these heuristics.
-                // * We have not yet decrypted any messages from the peer - if we have we don't
-                //   expect any plaintext.
-                // * The payload size is indicative of a plaintext alert message.
-                ContentType::Alert
-                    if version_is_tls13
-                        && !record_layer.has_decrypted()
-                        && m.payload.len() <= 2 =>
-                {
-                    true
-                }
-                // In other circumstances, we expect all messages to be encrypted.
-                _ => false,
-            };
-            if self.joining_hs.is_none() && allowed_plaintext {
-                let InboundOpaqueMessage {
-                    typ,
-                    version,
-                    payload,
-                } = m;
-                let raw_payload_slice = RawSlice::from(&*payload);
-                // This is unencrypted. We check the contents later.
-                buffer.queue_discard(0);
-                let message = InboundPlainMessage {
-                    typ,
-                    version,
-                    payload: buffer.take(raw_payload_slice),
-                };
-                self.record_info
-                    .get_mut(&(start as u64))
-                    .unwrap().processed = true;
-                return Ok(Some(Deframed {
-                    want_close_before_decrypt: false,
-                    aligned: true,
-                    trial_decryption_finished: false,
-                    message,
-                }));
-            }
-
-
-
-            // Decrypt the encrypted message (if necessary).
-            let (typ, version, plain_payload_slice) =
-                match record_layer.decrypt_incoming_tcpls(m) {
-                Ok(Some(decrypted)) => {
-
-                    let Decrypted {
-                        want_close_before_decrypt,
-                        plaintext:
-                            InboundPlainMessage {
-                                typ,
-                                version,
-                                payload,
-                            },
-                    } = decrypted;
-                    debug_assert!(!want_close_before_decrypt);
-                    (typ, version, RawSlice::from(payload))
-
-                }
-                // This was rejected early data, discard it. If we currently have a handshake
-                // payload in progress, this counts as interleaved, so we error out.
-                Ok(None) if self.joining_hs.is_some() => {
-                    return Err(self.set_err(
-                        PeerMisbehaved::RejectedEarlyDataInterleavedWithHandshakeMessage,
-                    ));
-                }
-                Ok(None) => {
-                    self.record_info
-                        .get_mut(&(start as u64))
-                        .unwrap().processed = true;
-
-                    buffer.queue_discard(0);
-
-                    continue;
-                }
-                Err(Error::DataReceivedOutOfOrder) => {
-                    self.record_info
-                        .get_mut(&(start as u64))
-                        .unwrap().processed = true;
-                    self.record_info
-                        .get_mut(&(start as u64))
-                        .unwrap().record = m.payload.to_vec().clone();
-                    self.out_of_order = true;
-                    continue
-                }
-                Err(e) => return Err(e),
-            };
-
-
-            if self.joining_hs.is_some() && typ != ContentType::Handshake {
-
-                // "Handshake messages MUST NOT be interleaved with other record
-                // types.  That is, if a handshake message is split over two or more
-                // records, there MUST NOT be any other records between them."
-                // https://www.rfc-editor.org/rfc/rfc8446#section-5.1
-                return Err(self.set_err(PeerMisbehaved::MessageInterleavedWithHandshakeMessage));
-            }
-
-            // If it's not a handshake message, just return it -- no joining necessary.
-
-            if typ != ContentType::Handshake {
-                if typ == ContentType::ApplicationData {
-                    app_buffers.insert_readable(record_layer.get_conn_id() as u64);
-                }
-                self.record_info
-                    .get_mut(&(start as u64))
-                    .unwrap().processed = true;
-                buffer.queue_discard(0);
-                let message = InboundPlainMessage {
-                    typ,
-                    version,
-                    payload: match record_layer.has_decrypted() {
-                        true => if app_buffers.get_or_create(hdr_decoded.stream_id as u64, None)
-                            .last_data_type_decrypted != u8::from(ContentType::ApplicationData) {
-                            core::mem::take(&mut &*app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).get_last_decrypted())
-                        } else {
-                            core::mem::take(&mut &*app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).as_ref_consumed())
-                        },
-                        false => buffer.take(plain_payload_slice),
-                    },
-                };
-
-                return Ok(Some(Deframed {
-                    want_close_before_decrypt: false,
-                    aligned: true,
-                    trial_decryption_finished: false,
-
-                    message,
-
-                }));
-            }
-
-            // If we don't know the payload size yet or if the payload size is larger
-            // than the currently buffered payload, we need to wait for more data.
-
-            let src = match app_buffers.get_or_create(hdr_decoded.stream_id as u64, None)
-                .last_decrypted > 0 {
-                true => 0.. app_buffers.get_or_create(hdr_decoded.stream_id as u64, None)
-                    .last_decrypted, // 13 bytes of TLS header + 8 bytes of TCPLS header
-                false => buffer.raw_slice_to_filled_range(plain_payload_slice),
-            };
-            match self.append_hs(version, InternalPayload(src), end,
-                                 start, buffer, match app_buffers.get_or_create(hdr_decoded.stream_id as u64, None)
-                                                             .last_decrypted > 0 {
-                                                             true => Some(app_buffers.get_or_create(hdr_decoded.stream_id as u64, None)),
-                                                             false => None,
-                                                         }
-            )? {
-
-                HandshakePayloadState::Blocked => return Ok(None),
-                HandshakePayloadState::Complete(len) => break len,
-                HandshakePayloadState::Continue => continue,
-            }
-        };
-
-        let meta = self.joining_hs.as_mut().unwrap(); // safe after calling `append_hs()`
-
-        // We can now wrap the complete handshake payload in a `PlainMessage`, to be returned.
-
-        let typ = ContentType::Handshake;
-        let version = meta.version;
-        let raw_payload = match record_layer.has_decrypted() {
-            true => RawSlice::from(Vec::new().as_slice()),
-            false => RawSlice::from(buffer.filled_get(meta.payload.start..meta.payload.start + expected_len)),
-        };
-
-
-        // But before we return, update the `joining_hs` state to skip past this payload.
-        if meta.payload.len() > expected_len {
-            // If we have another (beginning of) a handshake payload left in the buffer, update
-            // the payload start to point past the payload we're about to yield, and update the
-            // `expected_len` to match the state of that remaining payload.
-            meta.payload.start += expected_len;
-
-            meta.expected_len =
-                payload_size(buffer.filled_get(meta.payload.start..meta.payload.end))?;
-        } else {
-            // Otherwise, we've yielded the last handshake payload in the buffer, so we can
-            // discard all of the bytes that we're previously buffered as handshake data.
-            let end = meta.message.end;
-
-            self.joined_messages.push(Range {
-                start: meta.message.start,
-                end: meta.message.end,
-            });
-
-            //Mark the range of the joined message as processed for discarding it later
-            self.mark_as_processed();
-
-            self.joining_hs = None;
-
-            buffer.queue_discard(0);
-        }
-
-        let message = InboundPlainMessage {
-            typ,
-            version,
-            payload: match record_layer.has_decrypted() {
-                true => core::mem::take(&mut &*app_buffers.get_or_create(hdr_decoded.stream_id as u64, None).get_mut_total_decrypted()),
-                false => buffer.take(raw_payload),
-            },
-        };
-
-        Ok(Some(Deframed {
-            want_close_before_decrypt: false,
-            aligned: self.joining_hs.is_none(),
-            trial_decryption_finished: true,
-
-            message,
-        }))
-    }*/
     /// Return any decrypted messages that the deframer has been able to parse.
     ///
     /// Returns an `Error` if the deframer failed to parse some message contents or if decryption
@@ -579,6 +287,19 @@ impl MessageDeframer {
                 }
                 None => 0,
             };
+
+            if !self.records_info.is_empty() {
+                for (stream_id, records_info) in self.records_info.records.iter_mut() {
+                    for (offset, record_info) in records_info.stream_records.iter_mut() {
+                        if app_buffers.get(*stream_id as u16).unwrap().offset == *offset {
+                            app_buffers.get_mut(*stream_id).unwrap().clone_buffer(&record_info.record);
+                            app_buffers.get_mut(*stream_id).unwrap().offset += record_info.len as u64;
+                            record_info.processed = true;
+                        }
+                    }
+                }
+            }
+
 
             // Does our `buf` contain a full message?  It does if it is big enough to
             // contain a header, and that header has a length which falls within `buf`.
@@ -648,7 +369,7 @@ impl MessageDeframer {
             }
 
             // Decrypt the encrypted message (if necessary).
-            let (typ, version, plain_payload_slice) = match record_layer.decrypt_incoming_tcpls(m, app_buffers) {
+            let (typ, version, plain_payload_slice) = match record_layer.decrypt_incoming_tcpls(m, app_buffers, &mut self.stream_header) {
                 Ok(Some(decrypted)) => {
                     let Decrypted {
                         want_close_before_decrypt,
@@ -670,28 +391,18 @@ impl MessageDeframer {
                     ));
                 }
                 Ok(None) => {
+                    match self.stream_header.as_ref().unwrap() {
+                        Frame::Stream {length, offset, stream_id, ..} => {
+                            if *length > 0 {
+                                self.records_info.create_stream_record_info( m.payload.to_vec().clone(), *length, *offset , *stream_id, 0);
+                            }
+                        },
+                        _ => {},
+                    }
                     buffer.queue_discard(end);
                     continue;
                 }
-
-                Err(e) => match e {
-                    Error::DataReceivedOutOfOrder(f) => {
-                        match f {
-                            Frame::Stream {
-                                length,
-                                offset,
-                                stream_id, ..
-                            } => {
-                                self.records_info.create_record_info(m.payload.to_vec().clone(), length as usize, offset, stream_id, 0);
-                                buffer.queue_discard(end);
-                                continue;
-                            },
-                            _ => {},
-                        },
-
-                    },
-                    _ => return Err(e),
-                },
+                Err(e) => return Err(e),
             };
 
             if self.joining_hs.is_some() && typ != ContentType::Handshake {
@@ -1215,77 +926,64 @@ trait FilledDeframerBuffer {
 }
 
 #[derive(Clone, Debug, Default)]
+pub(crate) struct RecordsInfoMap {
+    records: BTreeMap<u32, StreamInfoMap>
+}
+
+impl RecordsInfoMap {
+    pub fn create_stream_record_info(&mut self, record: Vec<u8>, len: u16, offset: u64, stream_id: u32, fin: u8) {
+        match self.records.contains_key(&stream_id) {
+          true => {
+              self.records.get_mut(&stream_id).unwrap().insert_record(record, len, offset, fin);
+          },
+          false => {
+              let mut stream_map = StreamInfoMap::default();
+              stream_map.insert_record(record, len, offset, fin);
+              self.records.insert(stream_id, stream_map);
+          },
+        };
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.records.is_empty()
+    }
+
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct StreamInfoMap {
+    stream_records: SimpleIdHashMap<RecordInfo>
+}
+
+impl StreamInfoMap {
+    pub fn insert_record(&mut self, record: Vec<u8>, len: u16, offset: u64, fin: u8) {
+        self.stream_records.insert(offset, RecordInfo::from(record, len, fin));
+    }
+
+
+}
+#[derive(Clone, Debug, Default)]
 pub(crate) struct RecordInfo {
     /// Received record copied from deframer buffer if out of order
     pub(crate)  record: Vec<u8>,
 
     /// Length of chunk
-    pub(crate) len: usize,
+    pub(crate) len: u16,
 
-    /// The chunk number of record.
-    pub(crate) offset: u64,
+    pub(crate) fin: u8,
 
-    fin: u8,
+    pub(crate) processed: bool,
 }
 
 impl RecordInfo {
-    pub(crate) fn from(record: Vec<u8>, len: usize, offset: u64, fin: u8) -> RecordInfo {
+    pub(crate) fn from(record: Vec<u8>, len: u16, fin: u8) -> RecordInfo {
         RecordInfo {
             record,
             len,
-            offset,
-            fin
-        }
-    }
-}
-
-#[derive(Default)]
-#[derive(Debug)]
-pub struct RecordInfoMap {
-    records: BTreeMap<u64, RecordInfo>,
-}
-
-impl RecordInfoMap {
-
-    pub fn new() -> RecordInfoMap {
-        RecordInfoMap {
-            ..Default::default()
-        }
-    }
-
-    pub fn create_record_info(&mut self, record: Vec<u8>, len: usize, offset: u64, stream_id: u32, fin: u8) {
-        self.records.insert(stream_id as u64, RecordInfo {
-            record,
-            len,
-            offset,
             fin,
-        });
+            processed: false,
+        }
     }
-
-
-    pub fn get(&self, id: u32) -> Option<&RecordInfo> {
-        self.records.get(&(id as u64))
-    }
-
-    /// Returns the mutable stream with the given ID if it exists.
-    pub fn get_mut(&mut self, id: u32) -> Option<&mut RecordInfo> {
-        self.records.get_mut(&(id as u64))
-    }
-
-    pub fn is_empty(&self) -> bool {
-       self.records.is_empty()
-    }
-
-    pub fn get_iter(&self) -> alloc::collections::btree_map::Iter<'_, u64, RecordInfo> {
-        self.records.iter()
-    }
-
-    pub fn get_iter_mut(&mut self) -> alloc::collections::btree_map::IterMut<'_, u64, RecordInfo> {
-        self.records.iter_mut()
-    }
-
-
-
 }
 
 enum HandshakePayloadState {
