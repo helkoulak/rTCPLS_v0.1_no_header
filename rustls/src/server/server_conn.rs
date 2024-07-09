@@ -1,4 +1,3 @@
-
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -11,11 +10,14 @@ use std::io;
 
 use pki_types::{DnsName, UnixTime};
 
-use super::hs;
+#[cfg(feature = "std")]
+pub use connection::{AcceptedAlert, Acceptor, ReadEarlyData, ServerConnection};
+
+use crate::{KeyLog, sign, verify, versions, WantsVersions};
 use crate::builder::ConfigBuilder;
+use crate::common_state::{CommonState, Side, State};
 #[cfg(feature = "std")]
 use crate::common_state::Protocol;
-use crate::common_state::{CommonState, Side, State};
 use crate::conn::{ConnectionCommon, ConnectionCore, UnbufferedConnectionCommon};
 #[cfg(doc)]
 use crate::crypto;
@@ -27,14 +29,15 @@ use crate::log::trace;
 use crate::msgs::base::Payload;
 use crate::msgs::handshake::{ClientHelloPayload, ProtocolName, ServerExtension};
 use crate::msgs::message::Message;
-
+use crate::recvbuf::RecvBuf;
 #[cfg(feature = "std")]
 use crate::time_provider::DefaultTimeProvider;
 use crate::time_provider::TimeProvider;
 use crate::vecbuf::ChunkVecBuffer;
 #[cfg(feature = "std")]
 use crate::WantsVerifier;
-use crate::{sign, verify, versions, KeyLog, WantsVersions};
+
+use super::hs;
 
 /// A trait for the ability to store server session data.
 ///
@@ -527,15 +530,15 @@ mod connection {
     use core::ops::{Deref, DerefMut};
     use std::io;
 
-    use super::{Accepted, Accepting, EarlyDataState, ServerConfig, ServerConnectionData};
     use crate::common_state::{CommonState, Context, DEFAULT_BUFFER_LIMIT, Side};
     use crate::conn::{ConnectionCommon, ConnectionCore};
     use crate::error::Error;
     use crate::recvbuf::RecvBufMap;
     use crate::server::hs;
     use crate::suites::ExtractedSecrets;
-    use crate::tcpls::stream::DEFAULT_STREAM_ID;
     use crate::vecbuf::ChunkVecBuffer;
+
+    use super::{Accepted, Accepting, EarlyDataState, ServerConfig, ServerConnectionData};
 
     /// Allows reading of early data in resumed TLS1.3 connections.
     ///
@@ -851,10 +854,6 @@ mod connection {
         }
     }
 }
-
-#[cfg(feature = "std")]
-pub use connection::{AcceptedAlert, Acceptor, ReadEarlyData, ServerConnection};
-use crate::recvbuf::RecvBuf;
 
 /// Unbuffered version of `ServerConnection`
 ///

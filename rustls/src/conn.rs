@@ -59,7 +59,7 @@ mod connection {
         ///
         /// See [`ConnectionCommon::write_tls()`] for more information.
         pub fn write_tls(&mut self, wr: &mut dyn io::Write, id: u16) -> Result<usize, io::Error> {
-            self.record_layer.streams.get_or_create(id).unwrap().send.write_to(wr)
+            self.record_layer.streams.get_or_create(id as u32).unwrap().send.write_to(wr)
         }
 
         /// Returns an object that allows reading plaintext.
@@ -505,7 +505,7 @@ impl<Data> ConnectionCommon<Data> {
     /// [`Connection::process_new_packets`]: crate::Connection::process_new_packets
     pub fn set_buffer_limit(&mut self, limit: Option<usize>, id: u16) {
         self.sendable_plaintext.get_or_create_plain_buf(id).unwrap().send_plain_buf.set_limit(limit);
-        self.record_layer.streams.get_or_create(id).unwrap().send.set_limit(limit);
+        self.record_layer.streams.get_or_create(id as u32).unwrap().send.set_limit(limit);
     }
 
     pub fn set_deframer_cap(&mut self, id: u64, cap: usize) {
@@ -667,7 +667,7 @@ impl<Data> ConnectionCommon<Data> {
             .deframe(None, &mut deframer_buffer, Some(recv_buf))
             .map(|opt| opt.map(|pm| Message::try_from(pm).map(|m| m.into_owned())));
         let discard = deframer_buffer.pending_discard();
-        self.deframers_map.get_or_create_def_vec_buff(DEFAULT_STREAM_ID as u64).discard(0, discard);
+        self.deframers_map.get_or_create_def_vec_buff(DEFAULT_STREAM_ID as u64).discard(discard);
 
         match res? {
             Some(Ok(msg)) => Ok(Some(msg)),
@@ -830,11 +830,7 @@ impl<Data> ConnectionCore<Data> {
                 Ok(opt_msg) => opt_msg,
                 Err(e) => {
                     self.state = Err(e.clone());
-                    self.message_deframer.calculate_discard_range();
-                    deframer_buffer
-                        .discard(self.message_deframer.processed_range.start as usize,
-                                 (self.message_deframer.processed_range.end - self.message_deframer.processed_range.start) as usize);
-                    self.message_deframer.rearrange_record_info();
+                    deframer_buffer.discard(discard);
                     return Err(e);
                 }
             };
@@ -844,38 +840,20 @@ impl<Data> ConnectionCore<Data> {
                 None => break,
             };
 
-            if msg.typ == ContentType::ApplicationData {
-                self.process_tcpls_payload(app_buffers);
-                continue;
-            }
 
             match self.process_msg(msg, state, Some(sendable_plaintext)) {
                 Ok(new) => state = new,
                 Err(e) => {
                     self.state = Err(e.clone());
-                    self.message_deframer.calculate_discard_range();
-                    if !self.message_deframer.processed_range_is_empty() {
-                        deframer_buffer
-                            .discard(self.message_deframer.processed_range.start as usize,
-                                     (self.message_deframer.processed_range.end - self.message_deframer.processed_range.start) as usize);
-                        self.message_deframer.rearrange_record_info();
-                    }
-
+                    deframer_buffer.discard(discard);
                     return Err(e);
                 }
             }
         }
 
-        self.message_deframer.calculate_discard_range();
-        if !self.message_deframer.processed_range_is_empty() {
-            deframer_buffer
-                .discard(self.message_deframer.processed_range.start as usize,
-                         (self.message_deframer.processed_range.end - self.message_deframer.processed_range.start) as usize);
-            self.message_deframer.rearrange_record_info();
-        }
-
+        deframer_buffer.discard(discard);
         self.state = Ok(state);
-        Ok(self.common_state.current_io_state(Some(app_buffers)))
+        Ok(self.common_state.current_io_state())
     }
 
 

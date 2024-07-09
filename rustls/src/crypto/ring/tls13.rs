@@ -3,13 +3,12 @@ use std::vec;
 
 use ring::rand::SecureRandom;
 
-use crate::{crypto, PeerMisbehaved};
+use crate::crypto;
 use crate::crypto::cipher::{AeadKey, BorrowedPayload, InboundOpaqueMessage, Iv, make_tls13_aad, MessageDecrypter, MessageEncrypter, Nonce, Tls13AeadAlgorithm, UnsupportedOperationError};
 use crate::crypto::tls13::{Hkdf, HkdfExpander, OkmBlock, OutputLengthError};
 use crate::enums::{CipherSuite, ContentType, ProtocolVersion};
 use crate::error::Error;
 use crate::msgs::codec::Codec;
-use crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
 use crate::msgs::message::{InboundPlainMessage, OutboundOpaqueMessage, OutboundPlainMessage, PrefixedPayload};
 use crate::suites::{CipherSuiteCommon, ConnectionTrafficSecrets, SupportedCipherSuite};
 use crate::tcpls::frame::{Frame, STREAM_FRAME_HEADER_SIZE};

@@ -2,12 +2,13 @@ use alloc::boxed::Box;
 use alloc::string::ToString;
 use core::fmt;
 use std::vec;
+
 use siphasher::sip::SipHasher;
-
 use zeroize::Zeroize;
-use ring::rand::{Random, SecureRandom, SystemRandom};
-use crate::crypto::tls13::HkdfExpander;
 
+use ring::rand::{SecureRandom, SystemRandom};
+
+use crate::crypto::tls13::HkdfExpander;
 use crate::enums::{ContentType, ProtocolVersion};
 use crate::error::Error;
 use crate::msgs::codec;
@@ -15,8 +16,6 @@ pub use crate::msgs::message::{
     BorrowedPayload, InboundOpaqueMessage, InboundPlainMessage, OutboundChunks,
     OutboundOpaqueMessage, OutboundPlainMessage, PlainMessage, PrefixedPayload,
 };
-use crate::msgs::message::HEADER_SIZE;
-use crate::recvbuf::RecvBuf;
 use crate::suites::ConnectionTrafficSecrets;
 use crate::tcpls::frame::{Frame, TcplsHeader};
 
@@ -454,7 +453,7 @@ impl MessageEncrypter for InvalidMessageEncrypter {
         payload_len
     }
 
-    fn encrypt_tcpls(&mut self, msg: OutboundPlainMessage, seq: u64, stream_id: u32, frame_header: Option<Frame>, header_encrypter: &mut HeaderProtector) -> Result<OutboundOpaqueMessage, Error> {
+    fn encrypt_tcpls(&mut self, msg: OutboundPlainMessage, seq: u64, conn_id: u32, frame_header: Option<Frame>) -> Result<OutboundOpaqueMessage, Error> {
         todo!()
     }
 

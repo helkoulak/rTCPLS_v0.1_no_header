@@ -277,7 +277,7 @@ impl MessageDecrypter for GcmMessageDecrypter {
         Ok(msg.into_plain_message())
     }
 
-    fn decrypt_tcpls<'a, 'b>(&mut self, msg: InboundOpaqueMessage<'a>, seq: u64, conn_id: u32, next_offset: u64) -> Result<InboundPlainMessage<'a>, Error> {
+    fn decrypt_tcpls<'a, 'b>(&mut self, msg: InboundOpaqueMessage<'a>, seq: u64, conn_id: u32) -> Result<InboundPlainMessage<'a>, Error> {
         todo!()
     }
 

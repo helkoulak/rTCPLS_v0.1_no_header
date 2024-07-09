@@ -400,9 +400,9 @@ impl MessageDeframer {
                 }
                 Ok(None) => {
                     if self.stream_header.len > 0 {
-                        self.records_info.create_stream_record_info( m.payload.to_vec().clone(), 
-                                                                     self.stream_header.len, 
-                                                                     self.stream_header.offset, 
+                        self.records_info.create_stream_record_info( m.payload.to_vec().clone(),
+                                                                     self.stream_header.len,
+                                                                     self.stream_header.offset,
                                                                      self.stream_header.stream_id,
                                                                      0);
                     }
@@ -677,8 +677,7 @@ impl DeframerVecBuffer {
     }
 
     /// Discard `taken` bytes from the start of our buffer.
-    pub fn discard(&mut self, start: usize, taken: usize) {
-
+    pub fn discard(&mut self, taken: usize) {
         #[allow(clippy::comparison_chain)]
         if taken < self.used {
             /* Before:
@@ -694,14 +693,9 @@ impl DeframerVecBuffer {
              * 0          ^ self.used
              */
 
-            //If last record stored in buffer was processed
-            if (start + taken) == self.used {
-                self.used = start;
-            } else {
-                self.buf.copy_within(start + taken..self.used, start);
-                self.used -= taken;
-            }
-
+            self.buf
+                .copy_within(taken..self.used, 0);
+            self.used -= taken;
         } else if taken == self.used {
             self.used = 0;
         }
@@ -1382,13 +1376,12 @@ mod tests {
             negotiated_version: Option<ProtocolVersion>,
         ) -> Error {
             let mut deframer_buffer = self.buffer.borrow();
-            let mut binding = RecvBufMap::new();
             let err = self
                 .inner
-                .pop(record_layer, negotiated_version, &mut deframer_buffer, &mut binding)
+                .pop(record_layer, negotiated_version, &mut deframer_buffer)
                 .unwrap_err();
             let discard = deframer_buffer.pending_discard();
-            self.buffer.discard(0, discard);
+            self.buffer.discard(discard);
             err
         }
 
@@ -1398,16 +1391,15 @@ mod tests {
             negotiated_version: Option<ProtocolVersion>,
         ) -> PlainMessage {
             let mut deframer_buffer = self.buffer.borrow();
-            let mut binding = RecvBufMap::default();
             let m = self
                 .inner
-                .pop_unbuffered(record_layer, negotiated_version, &mut deframer_buffer)
+                .pop(record_layer, negotiated_version, &mut deframer_buffer)
                 .unwrap()
                 .unwrap()
                 .message
                 .into_owned();
             let discard = deframer_buffer.pending_discard();
-            self.buffer.discard(0, discard);
+            self.buffer.discard(discard);
             m
         }
 
