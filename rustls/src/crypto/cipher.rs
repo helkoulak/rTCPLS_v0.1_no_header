@@ -453,11 +453,11 @@ impl MessageEncrypter for InvalidMessageEncrypter {
         payload_len
     }
 
-    fn encrypt_tcpls(&mut self, msg: OutboundPlainMessage, seq: u64, conn_id: u32, frame_header: Option<Frame>) -> Result<OutboundOpaqueMessage, Error> {
+    fn encrypt_tcpls(&mut self, _msg: OutboundPlainMessage, _seq: u64, _conn_id: u32, _frame_header: Option<Frame>) -> Result<OutboundOpaqueMessage, Error> {
         todo!()
     }
 
-    fn encrypted_payload_len_tcpls(&self, payload_len: usize, header_len: usize) -> (usize, usize) {
+    fn encrypted_payload_len_tcpls(&self, _payload_len: usize, _header_len: usize) -> (usize, usize) {
         todo!()
     }
 
@@ -478,7 +478,7 @@ impl MessageDecrypter for InvalidMessageDecrypter {
         Err(Error::DecryptError)
     }
 
-    fn decrypt_tcpls<'a, 'b>(&mut self, msg: InboundOpaqueMessage<'a>, seq: u64, conn_id: u32) -> Result<InboundPlainMessage<'a>, Error> {
+    fn decrypt_tcpls<'a, 'b>(&mut self, _msg: InboundOpaqueMessage<'a>, _seq: u64, _conn_id: u32) -> Result<InboundPlainMessage<'a>, Error> {
         Err(Error::DecryptError)
     }
 }
@@ -501,7 +501,7 @@ fn test_header_enc_dec() {
 
 
 
-    for i in 1..10000 {
+    for _i in 1..10000 {
         rng.fill(&mut input).unwrap();
         rng.fill(&mut header).unwrap();
 

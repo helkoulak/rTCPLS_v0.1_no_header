@@ -171,7 +171,7 @@ impl RecordLayer {
                             offset,
                             stream_id, ..
                         } => {
-                            let mut recv_stream = recv_map.get_or_create(stream_id as u64, None);
+                            let recv_stream = recv_map.get_or_create(stream_id as u64, None);
                             if recv_stream.offset != offset {
                                 records_info_map.create_stream_record_info( plaintext.payload.iter().as_slice(),
                                                                              length,
@@ -183,7 +183,7 @@ impl RecordLayer {
                                 if recv_stream.capacity() < plaintext.payload.len(){
                                     return Err(Error::BufferTooShort);
                                 }
-                                recv_stream.clone_buffer(plaintext.payload.deref());
+                                recv_stream.clone_buffer(plaintext.payload);
                                 recv_stream.offset += length as u64;
                             }
                         },
@@ -500,7 +500,7 @@ mod tests {
                 Ok(m.into_plain_message())
             }
 
-            fn decrypt_tcpls<'a, 'b>(&mut self, msg: InboundOpaqueMessage<'a>, seq: u64, conn_id: u32) -> Result<InboundPlainMessage<'a>, Error> {
+            fn decrypt_tcpls<'a, 'b>(&mut self, _msg: InboundOpaqueMessage<'a>, _seq: u64, _conn_id: u32) -> Result<InboundPlainMessage<'a>, Error> {
                 Ok(InboundPlainMessage{
                     version: ProtocolVersion::TLSv1_3,
                     payload: &[],

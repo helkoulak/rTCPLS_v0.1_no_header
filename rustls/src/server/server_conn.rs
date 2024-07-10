@@ -843,7 +843,7 @@ mod connection {
     }
 
     impl From<ConnectionCommon<ServerConnectionData>> for AcceptedAlert {
-        fn from(conn: ConnectionCommon<ServerConnectionData>) -> Self {
+        fn from(_conn: ConnectionCommon<ServerConnectionData>) -> Self {
             Self(ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)))
         }
     }

@@ -347,7 +347,7 @@ fn aes_gcm_open_output(
 
 
     #[cfg(target_arch = "x86_64")]
-      let (mut output_remaining, input_remaining )= {
+      let (output_remaining, input_remaining )= {
         if !aes_key.is_aes_hw(cpu_features) || !auth.is_avx() {
             (out, in_buf)
         } else {

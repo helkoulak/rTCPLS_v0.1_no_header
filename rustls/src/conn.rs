@@ -586,7 +586,7 @@ impl<Data> ConnectionCommon<Data> {
         let empty_map = &mut RecvBufMap::new();
         let mut recv = recv_map.unwrap_or_else(|| empty_map);
 
-        let until_handshaked = self.is_handshaking();
+        let _until_handshaked = self.is_handshaking();
         let mut eof = false;
         let mut wrlen = 0;
         let mut rdlen = 0;
@@ -859,7 +859,7 @@ impl<Data> ConnectionCore<Data> {
 
     ///TODO: Add process functionality to other TCPLS control frames
     fn process_tcpls_payload(&mut self, app_buffers: &mut RecvBufMap) {
-        let mut app_buffer = app_buffers.get_mut(self.common_state.record_layer.get_conn_id()).unwrap();
+        let app_buffer = app_buffers.get_mut(self.common_state.record_layer.get_conn_id()).unwrap();
         let offset = app_buffer.get_offset();
 
         let mut b = octets::Octets::with_slice_at_offset(app_buffer.as_ref(), offset as usize);
@@ -869,31 +869,31 @@ impl<Data> ConnectionCore<Data> {
                 Frame::Padding => {},
                 Frame::Ping => {},
                 Frame::Stream {
-                    length,
-                    offset,
-                    stream_id,
-                    fin,
+                    length: _,
+                    offset: _,
+                    stream_id: _,
+                    fin: _,
                 } => {
                     app_buffer.offset -= STREAM_FRAME_HEADER_SIZE as u64;
                     app_buffer.total_decrypted = 0;
                     break
                 },
                 Frame::ACK {
-                    highest_record_sn_received,
-                    connection_id,
+                    highest_record_sn_received: _,
+                    connection_id: _,
                 } => {},
-                Frame::NewToken { token, sequence } => {},
-                Frame::ConnectionReset { connection_id } => {},
+                Frame::NewToken { token: _, sequence: _ } => {},
+                Frame::ConnectionReset { connection_id: _ } => {},
                 Frame::NewAddress {
-                    port,
-                    address,
-                    address_version,
-                    address_id,
+                    port: _,
+                    address: _,
+                    address_version: _,
+                    address_id: _,
                 } => {},
-                Frame::RemoveAddress { address_id } => {},
+                Frame::RemoveAddress { address_id: _ } => {},
                 Frame::StreamChange {
-                    next_record_stream_id,
-                    next_offset,
+                    next_record_stream_id: _,
+                    next_offset: _,
                 } => {},
             }
         }

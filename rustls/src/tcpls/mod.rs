@@ -76,7 +76,7 @@ impl TcplsSession {
 
         if self.next_conn_id == DEFAULT_CONNECTION_ID {
             match config {
-                Some(ref client_config) => (),
+                Some(ref _client_config) => (),
                 None => panic!("No ClientConfig supplied"),
             };
             let client_conn = ClientConnection::new(config.as_ref().unwrap().clone(), server_name.unwrap())
@@ -112,7 +112,7 @@ impl TcplsSession {
             false => (),
         };
 
-        let mut client_conn = match self.tls_conn.as_mut().unwrap() {
+        let client_conn = match self.tls_conn.as_mut().unwrap() {
             Connection::Client(conn) => conn,
             Connection::Server(_conn) => panic!("Server connection found. Client connection required")
         };
@@ -218,7 +218,7 @@ impl TcplsSession {
         Ok(conn_id)
     }
 
-    pub fn stream_send(&mut self, str_id: u16, input: &[u8], fin: bool, attach_to: Option<u32>) -> Result<usize, Error> {
+    pub fn stream_send(&mut self, str_id: u16, input: &[u8], _fin: bool, attach_to: Option<u32>) -> Result<usize, Error> {
         match attach_to {
             Some(conn_id) => self.tls_conn
                 .as_mut()

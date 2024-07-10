@@ -262,7 +262,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
             Some(_header) => STREAM_FRAME_HEADER_SIZE,
             None => 0,
         };
-        let (enc_payload_len, tag_len) = self.encrypted_payload_len_tcpls(plain_len, hdr_len);
+        let (enc_payload_len, _tag_len) = self.encrypted_payload_len_tcpls(plain_len, hdr_len);
         let mut payload = PrefixedPayload::with_capacity_tcpls(enc_payload_len);
         let total_len = enc_payload_len;
 

@@ -790,7 +790,7 @@ fn walk_dir(dir: &Path, cb: &impl Fn(&DirEntry)) {
 fn ring_core_prefix() -> String {
     let links = std::env::var("CARGO_MANIFEST_LINKS").unwrap();
 
-    let computed = {
+    let _computed = {
         let name = std::env::var("CARGO_PKG_NAME").unwrap();
         let version = std::env::var("CARGO_PKG_VERSION").unwrap();
         name + "_core_" + &version.replace(&['-', '.'][..], "_")

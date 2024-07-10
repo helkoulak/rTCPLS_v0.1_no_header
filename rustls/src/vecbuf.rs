@@ -176,7 +176,7 @@ impl ChunkVecBuffer {
     }
 
 
-    pub(crate) fn consume_chunk(&mut self, mut used: usize, chunk: Vec<u8>) {
+    pub(crate) fn consume_chunk(&mut self, used: usize, chunk: Vec<u8>) {
         let mut buf = chunk;
         if used < buf.len() {
             self.chunks.push_front(buf.split_off(used));
@@ -207,7 +207,7 @@ impl ChunkVecBuffer {
 
         let mut sent = 0;
         let chunk = self.chunks.pop_front().unwrap();
-        let chunk_len = chunk.len();
+        let _chunk_len = chunk.len();
 
         sent = wr
             .write(chunk.as_slice())

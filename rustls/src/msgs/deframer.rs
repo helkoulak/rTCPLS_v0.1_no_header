@@ -1387,7 +1387,7 @@ mod tests {
             negotiated_version: Option<ProtocolVersion>,
         ) -> PlainMessage {
             let mut deframer_buffer = self.buffer.borrow();
-            let mut binding = RecvBufMap::default();
+            let binding = RecvBufMap::default();
             let m = self
                 .inner
                 .pop_unbuffered(record_layer, negotiated_version, &mut deframer_buffer)

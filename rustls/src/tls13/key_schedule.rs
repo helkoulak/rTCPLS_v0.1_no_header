@@ -280,7 +280,7 @@ impl KeyScheduleHandshake {
         match skip_requested {
             None => self.ks.set_decrypter(secret, common, false),
             Some(max_early_data_size) => {
-                let (md, expander) = self.ks
+                let (md, _expander) = self.ks
                     .derive_decrypter(&self.client_handshake_traffic_secret);
                 common
                     .record_layer
@@ -580,8 +580,8 @@ impl KeySchedule {
             .set_message_encrypter(self.suite.aead_alg.encrypter(key, iv));
     }
 
-    fn set_decrypter(&self, secret: &OkmBlock, common: &mut CommonState, early_secret: bool) {
-        let (md, expander) = self.derive_decrypter(secret);
+    fn set_decrypter(&self, secret: &OkmBlock, common: &mut CommonState, _early_secret: bool) {
+        let (md, _expander) = self.derive_decrypter(secret);
         common
             .record_layer
             .set_message_decrypter(md);
