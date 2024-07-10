@@ -687,7 +687,7 @@ impl CommonState {
     }
 
     pub fn shuffle_records(&mut self, id: u16, n: usize) {
-        self.record_layer.streams.get_mut(id).unwrap().send.shuffle_records(n);
+        self.record_layer.streams.get_mut(id as u32).unwrap().send.shuffle_records(n);
     }
 
     pub(crate) fn current_io_state(&self, app_buf: Option<&RecvBufMap>) -> IoState {
@@ -725,12 +725,6 @@ impl CommonState {
             .get_or_create(DEFAULT_STREAM_ID)
             .unwrap();
         self.record_layer.enc_dec_for_connection(DEFAULT_STREAM_ID);
-        let header = &self
-            .record_layer
-            .streams
-            .get_mut(DEFAULT_STREAM_ID)
-            .unwrap()
-            .build_header(message.payload.bytes().len() as u16);
         self.queued_key_update_message =
             Some(self
                      .record_layer

@@ -47,8 +47,6 @@ pub struct MessageDeframer {
     ///Range of joined Handshake message in the deframer buffer
     pub(crate)  joined_messages: Vec<Range<usize>>,
 
-    pub(crate) stream_header: StreamHeader,
-
 }
 
 impl MessageDeframer {
@@ -290,11 +288,15 @@ impl MessageDeframer {
 
             if !self.records_info.is_empty() {
                 //Remove processed entries
-                for (stream_id, records_info) in self.records_info.records.iter_mut() {
-                    for (offset, record_info) in records_info.stream_records.iter_mut() {
-                        if record_info.processed {
-                            records_info.stream_records.remove_entry(offset);
-                        }
+                for (_stream_id, records_info) in self.records_info.records.iter_mut() {
+                    let offsets_to_remove: Vec<_> = records_info
+                        .stream_records
+                        .iter()
+                        .filter_map(|(offset, record_info)| if record_info.processed { Some(*offset) } else { None })
+                        .collect();
+
+                    for offset in offsets_to_remove {
+                        records_info.stream_records.remove(&offset);
                     }
                 }
                 for (stream_id, records_info) in self.records_info.records.iter_mut() {
@@ -377,7 +379,7 @@ impl MessageDeframer {
             }
 
             // Decrypt the encrypted message (if necessary).
-            let (typ, version, plain_payload_slice) = match record_layer.decrypt_incoming_tcpls(m, app_buffers, &mut self.stream_header) {
+            let (typ, version, plain_payload_slice) = match record_layer.decrypt_incoming_tcpls(m, app_buffers, &mut self.records_info) {
                 Ok(Some(decrypted)) => {
                     let Decrypted {
                         want_close_before_decrypt,
@@ -399,13 +401,6 @@ impl MessageDeframer {
                     ));
                 }
                 Ok(None) => {
-                    if self.stream_header.len > 0 {
-                        self.records_info.create_stream_record_info( m.payload.to_vec().clone(),
-                                                                     self.stream_header.len,
-                                                                     self.stream_header.offset,
-                                                                     self.stream_header.stream_id,
-                                                                     0);
-                    }
                     buffer.queue_discard(end);
                     continue;
                 }
@@ -932,7 +927,7 @@ pub(crate) struct RecordsInfoMap {
 }
 
 impl RecordsInfoMap {
-    pub fn create_stream_record_info(&mut self, record: Vec<u8>, len: u16, offset: u64, stream_id: u32, fin: u8) {
+    pub(crate) fn create_stream_record_info(&mut self, record: & [u8], len: u16, offset: u64, stream_id: u32, fin: u8) {
         match self.records.contains_key(&stream_id) {
           true => {
               self.records.get_mut(&stream_id).unwrap().insert_record(record, len, offset, fin);
@@ -945,7 +940,7 @@ impl RecordsInfoMap {
         };
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.records.is_empty()
     }
 
@@ -957,8 +952,8 @@ pub(crate) struct StreamInfoMap {
 }
 
 impl StreamInfoMap {
-    pub fn insert_record(&mut self, record: Vec<u8>, len: u16, offset: u64, fin: u8) {
-        self.stream_records.insert(offset, RecordInfo::from(record, len, fin));
+    pub(crate) fn insert_record(&mut self, record: &[u8], len: u16, offset: u64, fin: u8) {
+        self.stream_records.insert(offset, RecordInfo::from(record.to_vec(), len, fin));
     }
 
 
@@ -987,14 +982,14 @@ impl RecordInfo {
     }
 }
 #[derive(Clone, Debug, Default)]
-pub struct StreamHeader{
-    pub len: u16,
-    pub offset: u64,
-    pub stream_id: u32,
+pub(crate) struct StreamHeader{
+    pub(crate) len: u16,
+    pub(crate) offset: u64,
+    pub(crate) stream_id: u32,
 }
 
 impl StreamHeader {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         StreamHeader {
             ..Default::default()
         }
@@ -1376,9 +1371,10 @@ mod tests {
             negotiated_version: Option<ProtocolVersion>,
         ) -> Error {
             let mut deframer_buffer = self.buffer.borrow();
+            let mut binding = RecvBufMap::new();
             let err = self
                 .inner
-                .pop(record_layer, negotiated_version, &mut deframer_buffer)
+                .pop(record_layer, negotiated_version, &mut deframer_buffer, &mut binding)
                 .unwrap_err();
             let discard = deframer_buffer.pending_discard();
             self.buffer.discard(discard);
@@ -1391,9 +1387,10 @@ mod tests {
             negotiated_version: Option<ProtocolVersion>,
         ) -> PlainMessage {
             let mut deframer_buffer = self.buffer.borrow();
+            let mut binding = RecvBufMap::default();
             let m = self
                 .inner
-                .pop(record_layer, negotiated_version, &mut deframer_buffer)
+                .pop_unbuffered(record_layer, negotiated_version, &mut deframer_buffer)
                 .unwrap()
                 .unwrap()
                 .message

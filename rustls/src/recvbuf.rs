@@ -146,7 +146,7 @@ impl RecvBuf {
 
 
     pub fn data_length(&self) -> u64 {
-        self.offset as u64
+        self.offset
     }
 
     pub fn reset_stream(&mut self) {

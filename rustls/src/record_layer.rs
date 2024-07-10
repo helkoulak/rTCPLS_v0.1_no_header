@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 use core::num::NonZeroU64;
 use std::collections::hash_map;
-
+use std::ops::Deref;
 use octets::Octets;
 
 use crate::ContentType;
@@ -9,7 +9,7 @@ use crate::crypto::cipher::{HeaderProtector, InboundOpaqueMessage, MessageDecryp
 use crate::error::Error;
 #[cfg(feature = "logging")]
 use crate::log::trace;
-use crate::msgs::deframer::StreamHeader;
+use crate::msgs::deframer::{RecordsInfoMap, StreamHeader};
 use crate::msgs::message::{InboundPlainMessage, OutboundOpaqueMessage, OutboundPlainMessage};
 use crate::recvbuf::{RecvBuf, RecvBufMap};
 use crate::tcpls::frame::{Frame, TCPLS_OVERHEAD, TcplsHeader};
@@ -135,7 +135,7 @@ impl RecordLayer {
         &mut self,
         encr: InboundOpaqueMessage<'a>,
         recv_map: &'a mut RecvBufMap,
-        stream_header: &mut StreamHeader,
+        records_info_map: &mut RecordsInfoMap,
     ) -> Result<Option<Decrypted<'a>>, Error> {
         if self.decrypt_state != DirectionState::Active {
             return Ok(Some(Decrypted {
@@ -173,15 +173,17 @@ impl RecordLayer {
                         } => {
                             let mut recv_stream = recv_map.get_or_create(stream_id as u64, None);
                             if recv_stream.offset != offset {
-                                stream_header.offset = offset;
-                                stream_header.stream_id = stream_id;
-                                stream_header.len = length;
+                                records_info_map.create_stream_record_info( plaintext.payload.iter().as_slice(),
+                                                                             length,
+                                                                             offset,
+                                                                             stream_id,
+                                                                             0);
                                 return Ok(None);
                             } else {
                                 if recv_stream.capacity() < plaintext.payload.len(){
                                     return Err(Error::BufferTooShort);
                                 }
-                                recv_stream.clone_buffer(plaintext.payload);
+                                recv_stream.clone_buffer(plaintext.payload.deref());
                                 recv_stream.offset += length as u64;
                             }
                         },
@@ -542,7 +544,7 @@ mod tests {
                 ContentType::Handshake,
                 ProtocolVersion::TLSv1_2,
                 &mut [0xC0, 0xFF, 0xEE],
-            ), &mut app_buffs, &mut StreamHeader::new())
+            ), &mut app_buffs, &mut RecordsInfoMap::default())
             .unwrap();
         assert!(matches!(record_layer.decrypt_state, DirectionState::Active));
         assert_eq!(record_layer.read_seq_map.get_or_create(0).read_seq, 1);

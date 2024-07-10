@@ -728,7 +728,7 @@ mod connection {
                 .check_write(data.len())
                 .map(|sz| {
                     self.inner
-                        .send_early_plaintext(&data[..sz], DEFAULT_STREAM_ID)
+                        .send_early_plaintext(&data[..sz], DEFAULT_STREAM_ID as u16)
                 })
         }
     }

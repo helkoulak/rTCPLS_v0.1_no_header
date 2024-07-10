@@ -219,7 +219,7 @@ impl TcplsSession {
     }
 
     pub fn stream_send(&mut self, str_id: u16, input: &[u8], fin: bool, attach_to: Option<u32>) -> Result<usize, Error> {
-        match attach_to.unwrap() {
+        match attach_to {
             Some(conn_id) => self.tls_conn
                 .as_mut()
                 .unwrap()
@@ -265,9 +265,9 @@ impl TcplsSession {
                 None => return Err(Error::BufNotFound),
             };
 
-            match conn_id.unwrap() {
+            match conn_id {
                 Some(con_id) => {
-                    if stream.attched_to != con_id{
+                    if stream.attched_to as u64 != con_id{
                         continue
                     }
                 },

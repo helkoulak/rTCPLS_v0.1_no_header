@@ -853,7 +853,7 @@ impl<Data> ConnectionCore<Data> {
 
         deframer_buffer.discard(discard);
         self.state = Ok(state);
-        Ok(self.common_state.current_io_state())
+        Ok(self.common_state.current_io_state(Some(app_buffers)))
     }
 
 
@@ -870,6 +870,8 @@ impl<Data> ConnectionCore<Data> {
                 Frame::Ping => {},
                 Frame::Stream {
                     length,
+                    offset,
+                    stream_id,
                     fin,
                 } => {
                     app_buffer.offset -= STREAM_FRAME_HEADER_SIZE as u64;
