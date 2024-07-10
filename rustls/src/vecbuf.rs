@@ -114,7 +114,13 @@ impl ChunkVecBuffer {
         self.chunks.pop_front()
     }
 
-
+    pub(crate) fn reset(&mut self) {
+        self.chunks.clear();
+        self.limit = None;
+        self.plain_buffered = 0;
+        self.previous_offset = 0;
+        self.current_offset = 0;
+    }
     #[cfg(read_buf)]
     /// Read data out of this object, writing it into `cursor`.
     pub(crate) fn read_buf(&mut self, mut cursor: core::io::BorrowedCursor<'_>) -> io::Result<()> {

@@ -298,8 +298,7 @@ impl TcplsSession {
             }
 
             if len == 0 {
-                tls_conn.record_layer.streams.remove_flushable(id);
-                tls_conn.record_layer.streams.insert_writable(id);
+                tls_conn.record_layer.streams.reset_stream(id as u32);
             }
         }
 
