@@ -313,7 +313,7 @@ impl MessageEncrypter for GcmMessageEncrypter {
         todo!()
     }
 
-    fn encrypted_payload_len_tcpls(&self, _payload_len: usize, _header_len: usize) -> (usize, usize) {
+    fn encrypted_payload_len_tcpls(&self, _payload_len: usize, _header_len: usize) -> usize {
         todo!()
     }
 
@@ -410,7 +410,7 @@ impl MessageEncrypter for ChaCha20Poly1305MessageEncrypter {
         todo!()
     }
 
-    fn encrypted_payload_len_tcpls(&self, _payload_len: usize, _header_len: usize) -> (usize, usize) {
+    fn encrypted_payload_len_tcpls(&self, _payload_len: usize, _header_len: usize) -> usize {
         todo!()
     }
 

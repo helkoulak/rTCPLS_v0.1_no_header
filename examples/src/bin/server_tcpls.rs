@@ -127,7 +127,7 @@ impl TlsServer {
 
 
         for id in recv_map.readable() {
-            let mut stream = recv_map.get_mut(id as u16).unwrap();
+            let mut stream = recv_map.get_mut(id as u32).unwrap();
 
             let received_len: usize = u16::from_be_bytes([stream.as_ref_consumed()[0], stream.as_ref_consumed()[1]]) as usize;
             let unprocessed_len = stream.as_ref_consumed()[2..].len();
@@ -614,6 +614,7 @@ fn main() {
     let mut tcpls_server = TlsServer::new(listener, config);
 
     let mut events = mio::Events::with_capacity(256);
+    let ten_seconds = Duration::new(10, 0);
     loop {
        match poll.poll(&mut events, None){
             Ok(_) => {}

@@ -49,9 +49,9 @@ impl TlsClient {
                 //Send three byte arrays on three streams
                 let mut id_set = SimpleIdHashSet::default();
 
-                self.send_data(vec![0u8; 20].as_slice(), 0).expect("");
-                self.send_data(vec![1u8; 20].as_slice(), 1).expect("");
-                self.send_data(vec![2u8; 20].as_slice(), 2).expect("");
+                self.send_data(vec![0u8; 60000].as_slice(), 0).expect("");
+                self.send_data(vec![1u8; 60000].as_slice(), 1).expect("");
+                self.send_data(vec![2u8; 60000].as_slice(), 2).expect("");
 
                 id_set.insert(0);
                 id_set.insert(1);
@@ -177,7 +177,7 @@ impl TlsClient {
         data.extend(hash.as_ref());
 
         // Print the hash as a hexadecimal string
-        // println!("\n \n File bytes on stream {:?} : \n {:?} \n \n SHA-256 Hash {:?} \n Total length: {:?} \n", stream, file_contents, hash, len);
+        println!("\n \n File bytes on stream {:?} : \n \n SHA-256 Hash {:?} \n Total length: {:?} \n", stream, hash, len);
 
         self.tcpls_session.stream_send(stream, data.as_ref(), false, None).expect("buffering failed");
 

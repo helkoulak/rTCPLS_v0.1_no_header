@@ -840,6 +840,10 @@ impl<Data> ConnectionCore<Data> {
                 None => break,
             };
 
+            if msg.typ == ContentType::ApplicationData {
+                continue;
+            }
+
 
             match self.process_msg(msg, state, Some(sendable_plaintext)) {
                 Ok(new) => state = new,

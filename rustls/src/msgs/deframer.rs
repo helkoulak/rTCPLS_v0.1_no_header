@@ -301,8 +301,9 @@ impl MessageDeframer {
                 }
                 for (stream_id, records_info) in self.records_info.records.iter_mut() {
                     for (offset, record_info) in records_info.stream_records.iter_mut() {
-                        if app_buffers.get(*stream_id as u16).unwrap().offset == *offset {
+                        if app_buffers.get_or_create(*stream_id as u64, None).offset == *offset {
                             app_buffers.get_mut(*stream_id).unwrap().clone_buffer(&record_info.record);
+                            app_buffers.insert_readable(*stream_id as u64);
                             app_buffers.get_mut(*stream_id).unwrap().offset += record_info.len as u64;
                             record_info.processed = true;
                         }

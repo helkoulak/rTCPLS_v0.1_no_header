@@ -24,8 +24,6 @@ pub struct RecvBuf {
     /// application.
     consumed: usize,
 
-    pub next_recv_pkt_num: u32,
-
     pub last_data_type_decrypted: u8,
 
 

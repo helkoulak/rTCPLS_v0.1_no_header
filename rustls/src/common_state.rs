@@ -366,11 +366,12 @@ impl CommonState {
             return;
         }
 
-        let current_offset = self.record_layer.streams.get_or_create(id).unwrap().send.get_current_offset();
-        self.record_layer.streams.get_or_create(id).unwrap().send.advance_offset(m.payload.len() as u64);
+
 
         let stream_frame_header = match m.typ {
             ContentType::ApplicationData => {
+                let current_offset = self.record_layer.streams.get_or_create(id).unwrap().send.get_current_offset();
+                self.record_layer.streams.get_or_create(id).unwrap().send.advance_offset(m.payload.len() as u64);
                 Some(Frame::Stream {
                     length: m.payload.len() as u16,
                     offset: current_offset  ,

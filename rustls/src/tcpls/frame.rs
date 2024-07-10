@@ -230,11 +230,9 @@ impl Frame {
 }
 
 fn parse_stream_frame(frame_type: u8, b: &mut octets::Octets) -> octets::Result<Frame> {
-
-    let length = b.get_u16_reverse().unwrap();
-    let offset = b.get_u64_reverse().unwrap();
     let stream_id = b.get_u32_reverse().unwrap();
-
+    let offset = b.get_u64_reverse().unwrap();
+    let length = b.get_u16_reverse().unwrap();
 
     let fin = match frame_type {
         2 => 0,

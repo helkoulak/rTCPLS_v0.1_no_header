@@ -177,7 +177,7 @@ pub trait MessageEncrypter: Send + Sync {
         conn_id: u32,
         frame_header: Option<Frame>,
     ) -> Result<OutboundOpaqueMessage, Error>;
-    fn encrypted_payload_len_tcpls(&self, payload_len: usize, header_len: usize) -> (usize, usize);
+    fn encrypted_payload_len_tcpls(&self, payload_len: usize, header_len: usize) -> usize;
 
     fn get_tag_length(&self) -> usize;
 }
@@ -235,10 +235,10 @@ impl Nonce {
     ///
     /// This is `iv ^ seq` where `seq` is encoded as a 96-bit big-endian integer.
     #[inline]
-    pub fn new(iv: &Iv, seq: u64, stream_id: u32) -> Self {
+    pub fn new(iv: &Iv, seq: u64, conn_id: u32) -> Self {
         let mut nonce = Self([0u8; NONCE_LEN]);
         codec::put_u64(seq, &mut nonce.0[4..]);
-        codec::put_u32(stream_id,&mut nonce.0[..4]);
+        codec::put_u32(conn_id, &mut nonce.0[..4]);
         nonce
             .0
             .iter_mut()
@@ -457,7 +457,7 @@ impl MessageEncrypter for InvalidMessageEncrypter {
         todo!()
     }
 
-    fn encrypted_payload_len_tcpls(&self, _payload_len: usize, _header_len: usize) -> (usize, usize) {
+    fn encrypted_payload_len_tcpls(&self, _payload_len: usize, _header_len: usize) -> usize {
         todo!()
     }
 

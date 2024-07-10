@@ -171,8 +171,8 @@ impl RecordLayer {
                             offset,
                             stream_id, ..
                         } => {
-                            let recv_stream = recv_map.get_or_create(stream_id as u64, None);
-                            if recv_stream.offset != offset {
+                            recv_map.get_or_create(stream_id as u64, None);
+                            if recv_map.get_mut(stream_id).unwrap().offset != offset {
                                 records_info_map.create_stream_record_info( plaintext.payload.iter().as_slice(),
                                                                              length,
                                                                              offset,
@@ -180,11 +180,12 @@ impl RecordLayer {
                                                                              0);
                                 return Ok(None);
                             } else {
-                                if recv_stream.capacity() < plaintext.payload.len(){
+                                if recv_map.get_mut(stream_id).unwrap().capacity() < plaintext.payload.len(){
                                     return Err(Error::BufferTooShort);
                                 }
-                                recv_stream.clone_buffer(plaintext.payload);
-                                recv_stream.offset += length as u64;
+                                recv_map.get_mut(stream_id).unwrap().clone_buffer(plaintext.payload);
+                                recv_map.insert_readable(stream_id as u64);
+                                recv_map.get_mut(stream_id).unwrap().offset += length as u64;
                             }
                         },
                         _ => {}
