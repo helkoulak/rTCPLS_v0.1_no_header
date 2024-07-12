@@ -225,7 +225,7 @@ impl TcplsSession {
                 .unwrap()
                 .record_layer
                 .streams
-                .get_mut(str_id as u32)
+                .get_or_create(str_id as u32)
                 .unwrap()
                 .attach_to_connection(conn_id),
             None => {},

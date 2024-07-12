@@ -254,7 +254,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         &mut self,
         msg: OutboundPlainMessage,
         seq: u64,
-        stream_id: u32,
+        conn_id: u32,
         frame_header: Option<Frame>,
     ) -> Result<OutboundOpaqueMessage, Error> {
         let plain_len = msg.payload.len();
@@ -266,8 +266,7 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         let mut payload = PrefixedPayload::with_capacity(enc_payload_len);
         let total_len = enc_payload_len;
 
-
-        let nonce = aead::Nonce::assume_unique_for_key(Nonce::new(&self.iv, seq, stream_id).0);
+        let nonce = aead::Nonce::assume_unique_for_key(Nonce::new(&self.iv, seq, conn_id).0);
         let aad = aead::Aad::from(make_tls13_aad(total_len));
 
         //Write payload in output buffer

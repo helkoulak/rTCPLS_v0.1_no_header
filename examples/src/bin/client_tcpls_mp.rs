@@ -57,30 +57,30 @@ impl TlsClient {
 
                 print!("Client sends on connection {:?} \n", token.0);
                 if token.0 == 0 {
-                    self.send_data(vec![0u8; 64000].as_slice(), 0).expect("");
-                    self.send_data(vec![1u8; 64000].as_slice(), 1).expect("");
-                    self.send_data(vec![2u8; 64000].as_slice(), 2).expect("");
-                    self.send_data(vec![3u8; 64000].as_slice(), 3).expect("");
                     id_set.insert(0);
                     id_set.insert(1);
                     id_set.insert(2);
                     id_set.insert(3);
+                    for id in &id_set{
+                        self.send_data(vec![0u8; 64000].as_slice(), *id as u16, token.0 as u32).expect("");
+                    }
                 }
                 if token.0 == 1 {
-                    self.send_data(vec![4u8; 64000].as_slice(), 4).expect("");
-                    self.send_data(vec![5u8; 64000].as_slice(), 5).expect("");
-                    self.send_data(vec![6u8; 64000].as_slice(), 6).expect("");
                     id_set.insert(4);
                     id_set.insert(5);
                     id_set.insert(6);
+                    for id in &id_set{
+                        self.send_data(vec![0u8; 64000].as_slice(), *id as u16, token.0 as u32).expect("");
+                    }
                 }
                 if token.0 == 2 {
-                    self.send_data(vec![7u8; 64000].as_slice(), 7).expect("");
-                    self.send_data(vec![8u8; 64000].as_slice(), 8).expect("");
-                    self.send_data(vec![9u8; 64000].as_slice(), 9).expect("");
                     id_set.insert(7);
                     id_set.insert(8);
                     id_set.insert(9);
+                    for id in &id_set{
+                        self.send_data(vec![0u8; 64000].as_slice(), *id as u16, token.0 as u32).expect("");
+                    }
+
                 }
                 self.tcpls_session.send_on_connection(Some(token.0 as u64), None, Some(id_set)).expect("Sending on connection failed");
                 self.sending_ids.insert(token.0 as u64);
@@ -213,7 +213,7 @@ impl TlsClient {
 
 
 
-    fn send_data(&mut self, input: &[u8], stream: u16) -> io::Result<()> {
+    fn send_data(&mut self, input: &[u8], stream: u16, attach_to: u32) -> io::Result<()> {
         let mut data = Vec::new();
         // Total length to send
         let mut len:u16 = 0;
@@ -232,7 +232,7 @@ impl TlsClient {
         // Print the hash as a hexadecimal string
        // println!("\n \n File bytes on stream {:?} : \n {:?} \n \n SHA-256 Hash {:?} \n Total length: {:?} \n", stream, file_contents, hash, len);
 
-        self.tcpls_session.stream_send(stream, data.as_ref(), false, None).expect("buffering failed");
+        self.tcpls_session.stream_send(stream, data.as_ref(), false, Some(attach_to)).expect("buffering failed");
 
 
         Ok(())
