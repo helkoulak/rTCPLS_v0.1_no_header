@@ -346,7 +346,7 @@ pub(super) fn emit_fake_ccs(sent_tls13_fake_ccs: &mut bool, common: &mut CommonS
         payload: MessagePayload::ChangeCipherSpec(ChangeCipherSpecPayload {}),
     };
 
-    common.send_msg(m, false, DEFAULT_STREAM_ID);
+    common.send_msg(m, false);
 
 }
 
@@ -848,7 +848,7 @@ fn emit_certificate_tls13(
         }),
     };
     transcript.add_message(&m);
-    common.send_msg(m, true, DEFAULT_STREAM_ID);
+    common.send_msg(m, true);
 }
 
 fn emit_certverify_tls13(
@@ -872,7 +872,7 @@ fn emit_certverify_tls13(
     };
 
     transcript.add_message(&m);
-    common.send_msg(m, true, DEFAULT_STREAM_ID);
+    common.send_msg(m, true);
 
     Ok(())
 }
@@ -894,7 +894,7 @@ fn emit_finished_tls13(
 
     trace!("sending finished {:?}", m);
     transcript.add_message(&m);
-    common.send_msg(m, true, DEFAULT_STREAM_ID);
+    common.send_msg(m, true);
 
 }
 
@@ -912,7 +912,7 @@ fn emit_end_of_early_data_tls13(transcript: &mut HandshakeHash, common: &mut Com
     };
 
     transcript.add_message(&m);
-    common.send_msg(m, true, DEFAULT_STREAM_ID);
+    common.send_msg(m, true);
 }
 
 struct ExpectFinished {

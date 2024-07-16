@@ -521,7 +521,7 @@ fn emit_certificate(
     };
 
     transcript.add_message(&cert);
-    common.send_msg(cert, false, DEFAULT_STREAM_ID);
+    common.send_msg(cert, false);
 }
 
 fn emit_client_kx(
@@ -551,7 +551,7 @@ fn emit_client_kx(
     };
 
     transcript.add_message(&ckx);
-    common.send_msg(ckx, false, DEFAULT_STREAM_ID);
+    common.send_msg(ckx, false);
 
 }
 
@@ -577,7 +577,7 @@ fn emit_certverify(
     };
 
     transcript.add_message(&m);
-    common.send_msg(m, false, DEFAULT_STREAM_ID);
+    common.send_msg(m, false);
 
     Ok(())
 }
@@ -588,7 +588,7 @@ fn emit_ccs(common: &mut CommonState) {
         payload: MessagePayload::ChangeCipherSpec(ChangeCipherSpecPayload {}),
     };
 
-    common.send_msg(ccs, false, DEFAULT_STREAM_ID);
+    common.send_msg(ccs, false);
 
 }
 
@@ -610,7 +610,7 @@ fn emit_finished(
     };
 
     transcript.add_message(&f);
-    common.send_msg(f, true, DEFAULT_STREAM_ID);
+    common.send_msg(f, true);
 
 }
 

@@ -26,6 +26,7 @@ use crate::msgs::handshake::{ClientExtension, ClientHelloPayload,
 use crate::msgs::message::{InboundOpaqueMessage, Message, MessageError, MessagePayload, PlainMessage};
 use crate::PeerMisbehaved::{InvalidTcplsJoinToken, TcplsJoinExtensionNotFound};
 use crate::recvbuf::RecvBufMap;
+use crate::tcpls::frame::MAX_TCPLS_FRAGMENT_LEN;
 use crate::tcpls::network_address::AddressMap;
 use crate::tcpls::outstanding_conn::OutstandingTcpConn;
 use crate::tcpls::stream::{SimpleIdHashMap, SimpleIdHashSet, StreamIter};
@@ -218,27 +219,19 @@ impl TcplsSession {
         Ok(conn_id)
     }
 
-    pub fn stream_send(&mut self, str_id: u16, input: &[u8], _fin: bool, attach_to: Option<u32>) -> Result<usize, Error> {
-        match attach_to {
-            Some(conn_id) => self.tls_conn
-                .as_mut()
-                .unwrap()
-                .record_layer
-                .streams
-                .get_or_create(str_id as u32)
-                .unwrap()
-                .attach_to_connection(conn_id),
-            None => {},
-        }
+    /// Buffer outgoing data in send stream
+    pub fn stream_send(&mut self, str_id: u16, input: &[u8], _fin: bool) {
 
-        self.tls_conn.as_mut().unwrap().write_to = str_id;
-        let buffered = self.tls_conn.as_mut().unwrap().writer().write(input).expect("Could not write data to stream");
-        Ok(buffered)
+        for chunk in input.chunks(MAX_TCPLS_FRAGMENT_LEN).map(|chunk| chunk.to_vec()).collect(){
+            self.tls_conn.as_mut().unwrap().queue_message(chunk, str_id as u32, );
+        }
     }
 
     /// Flush bytes of a certain stream of a set of streams on specified byte-oriented sink.
-    pub fn send_on_connection(&mut self, conn_id: Option<u64>, wr: Option<&mut dyn io::Write>, flushables: Option<SimpleIdHashSet>) -> Result<usize, Error> {
+    pub fn send_on_connection(&mut self, conn_ids: Option<Vec<u64>>, wr: Option<SimpleIdHashMap<&mut dyn io::Write>>, flushables: Option<SimpleIdHashSet>) -> Result<usize, Error> {
         let tls_conn = self.tls_conn.as_mut().unwrap();
+
+        let mut sockets: SimpleIdHashMap<&mut dyn io::Write> = SimpleIdHashMap::default();
 
         //Flush streams selected by the app or flush all
         let stream_iter = match flushables {

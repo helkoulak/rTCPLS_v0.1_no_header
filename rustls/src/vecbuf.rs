@@ -23,8 +23,6 @@ pub(crate) struct ChunkVecBuffer {
     current_offset: u64,
     /// The offset immediately behind "current_offset"
     previous_offset: u64,
-    /// Amount of application bytes in plain that are buffered
-    plain_buffered: usize,
 
 }
 
@@ -41,17 +39,11 @@ impl ChunkVecBuffer {
         self.current_offset
     }
 
-    /// Output is of type u16 as maximum payload size for a TLS record is 16384 bytes
-    #[inline]
-    pub(crate)  fn get_offset_diff(&self) -> u16 {
-        self.current_offset.saturating_sub(self.previous_offset) as u16
-    }
     #[inline]
     pub(crate)  fn advance_offset(&mut self, added: u64) {
         self.previous_offset = self.current_offset;
         self.current_offset += added;
     }
-
 
     /// Sets the upper limit on how many bytes this
     /// object can store.
@@ -117,7 +109,6 @@ impl ChunkVecBuffer {
     pub(crate) fn reset(&mut self) {
         self.chunks.clear();
         self.limit = None;
-        self.plain_buffered = 0;
         self.previous_offset = 0;
         self.current_offset = 0;
     }
@@ -182,13 +173,6 @@ impl ChunkVecBuffer {
     }
 
 
-    pub(crate) fn consume_chunk(&mut self, used: usize, chunk: Vec<u8>) {
-        let mut buf = chunk;
-        if used < buf.len() {
-            self.chunks.push_front(buf.split_off(used));
-        }
-    }
-
     /// Read data out of this object, passing it `wr`
     pub(crate) fn write_to(&mut self, wr: &mut dyn io::Write) -> io::Result<usize> {
         if self.is_empty() {
@@ -218,10 +202,17 @@ impl ChunkVecBuffer {
         sent = wr
             .write(chunk.as_slice())
             .unwrap();
-        self.consume_chunk(sent, chunk);
-
         Ok(sent)
     }
+
+   pub(crate) fn get_chunk(&mut self) -> Option<Vec<u8>> {
+        if self.is_empty() {
+            return None ;
+        } else {
+            Some(self.chunks.pop_front().unwrap())
+        }
+    }
+
 
 }
 

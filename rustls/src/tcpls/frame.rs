@@ -4,8 +4,6 @@ use octets::varint_len;
 use crate::{Error, InvalidMessage};
 use crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
 
-/// chunk_num = 4 Bytes + Offset_step = 2 Bytes + Stream Id = 2 Bytes.
-pub const TCPLS_HEADER_SIZE: usize = 8;
 
 pub const SAMPLE_PAYLOAD_LENGTH: usize = 16;
 

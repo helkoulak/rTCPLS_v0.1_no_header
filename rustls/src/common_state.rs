@@ -1,7 +1,7 @@
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use std::collections::hash_map;
+use std::collections::{hash_map, VecDeque};
 
 use pki_types::CertificateDer;
 
@@ -67,6 +67,8 @@ pub struct CommonState {
     pub(crate) protocol: Protocol,
     pub(crate) quic: quic::Quic,
     pub(crate) enable_secret_extraction: bool,
+
+    pub(crate) tls_outgoing: VecDeque<OutboundTlsMessage>
 }
 
 impl CommonState {
@@ -102,6 +104,7 @@ impl CommonState {
             protocol: Protocol::Tcp,
             quic: quic::Quic::default(),
             enable_secret_extraction: false,
+            tls_outgoing: VecDeque::new(),
         }
     }
     /// sets the id of the currently active tcp connection
@@ -442,13 +445,12 @@ impl CommonState {
     }
 
     // Put m into sendable_tls for writing.
-
-    fn queue_tls_message(&mut self, m: OutboundOpaqueMessage) {
-        self.record_layer.streams.get_or_create(DEFAULT_STREAM_ID).unwrap().send.append(m.encode());
+    fn queue_tls_message(&mut self, typ: ContentType, version: ProtocolVersion, paylaod: Vec<u8>, must_encrypt: bool) {
+        self.tls_outgoing.push_back(OutboundTlsMessage::new(typ, version, paylaod, must_encrypt));
     }
 
     /// Send a raw TLS message, fragmenting it if needed.
-    pub(crate) fn send_msg(&mut self, m: Message, must_encrypt: bool, id: u32) {
+    pub(crate) fn send_msg(&mut self, m: Message, must_encrypt: bool) {
         {
             if let Protocol::Quic = self.protocol {
                 if let MessagePayload::Alert(alert) = m.payload {
@@ -467,17 +469,15 @@ impl CommonState {
                 return;
             }
         }
-        if !must_encrypt {
-            let msg = &m.into();
-            let iter = self
-                .message_fragmenter
-                .fragment_message(msg);
-            for m in iter {
-                self.queue_message(m.to_unencrypted_opaque().encode(), id);
-            }
-        } else {
-            self.send_msg_encrypt(m.into(), id);
+
+        let msg = &m.into();
+        let iter = self
+            .message_fragmenter
+            .fragment_message(msg);
+        for m in iter {
+            self.queue_tls_message(m.typ, m.version, m.payload.to_vec(), must_encrypt);
         }
+
     }
 
     pub(crate) fn take_received_plaintext(&mut self, bytes: Payload) {
@@ -555,7 +555,7 @@ impl CommonState {
     ) -> Error {
         debug_assert!(!self.sent_fatal_alert);
         let m = Message::build_alert(AlertLevel::Fatal, desc);
-        self.send_msg(m, self.record_layer.is_encrypting(), DEFAULT_STREAM_ID);
+        self.send_msg(m, self.record_layer.is_encrypting());
         self.sent_fatal_alert = true;
         err.into()
     }
@@ -598,7 +598,7 @@ impl CommonState {
 
     fn send_warning_alert_no_log(&mut self, desc: AlertDescription) {
         let m = Message::build_alert(AlertLevel::Warning, desc);
-        self.send_msg(m, self.record_layer.is_encrypting(), DEFAULT_STREAM_ID);
+        self.send_msg(m, self.record_layer.is_encrypting());
     }
 
     fn check_required_size<'a>(
@@ -950,6 +950,24 @@ enum Limit {
     #[cfg(feature = "std")]
     Yes,
     No,
+}
+
+pub(crate)  struct OutboundTlsMessage {
+    typ: ContentType,
+    version: ProtocolVersion,
+    payload: Vec<u8>,
+    must_encrypt: bool,
+}
+
+impl OutboundTlsMessage {
+    pub(crate) fn new(typ: ContentType, version: ProtocolVersion, payload: Vec<u8>, must_encrypt: bool) -> Self {
+        Self {
+            typ,
+            version,
+            payload,
+            must_encrypt,
+        }
+    }
 }
 
 const DEFAULT_RECEIVED_PLAINTEXT_LIMIT: usize = 16 * 1024;

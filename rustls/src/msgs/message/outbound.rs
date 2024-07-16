@@ -5,7 +5,6 @@ use crate::enums::{ContentType, ProtocolVersion};
 use crate::internal::record_layer::RecordLayer;
 use crate::msgs::base::Payload;
 use crate::msgs::codec::{Codec, Reader};
-use crate::tcpls::frame::TCPLS_HEADER_SIZE;
 
 /// A TLS frame, named `TLSPlaintext` in the standard.
 ///
@@ -221,11 +220,7 @@ impl PrefixedPayload {
         prefixed_payload.resize(HEADER_SIZE, 0);
         Self(prefixed_payload)
     }
-    pub fn with_capacity_tcpls(capacity: usize) -> Self {
-        let mut prefixed_payload = Vec::with_capacity(HEADER_SIZE + TCPLS_HEADER_SIZE + capacity);
-        prefixed_payload.resize(HEADER_SIZE + TCPLS_HEADER_SIZE, 0);
-        Self(prefixed_payload)
-    }
+
 
     pub fn extend_from_slice(&mut self, slice: &[u8]) {
         self.0.extend_from_slice(slice)
@@ -243,17 +238,10 @@ impl PrefixedPayload {
         self.0.len() - HEADER_SIZE
     }
 
-    pub fn as_mut_tcpls_payload(&mut self) -> &mut [u8] {
-        &mut self.0[HEADER_SIZE + TCPLS_HEADER_SIZE..]
-    }
-
     pub fn as_mut_tcpls_header(&mut self) -> &mut [u8] {
         &mut self.0[HEADER_SIZE..]
     }
 
-    pub fn as_ref_tcpls(&self) -> &[u8] {
-        &self.0[HEADER_SIZE + TCPLS_HEADER_SIZE..]
-    }
 }
 
 impl AsRef<[u8]> for PrefixedPayload {

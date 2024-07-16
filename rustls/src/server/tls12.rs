@@ -369,7 +369,7 @@ mod client_hello {
         trace!("sending server hello {:?}", sh);
         transcript.add_message(&sh);
 
-        cx.common.send_msg(sh, false, DEFAULT_STREAM_ID);
+        cx.common.send_msg(sh, false);
         Ok(ep.send_ticket)
     }
 
@@ -387,7 +387,7 @@ mod client_hello {
         };
 
         transcript.add_message(&c);
-        common.send_msg(c, false, DEFAULT_STREAM_ID);
+        common.send_msg(c, false);
 
     }
 
@@ -403,7 +403,7 @@ mod client_hello {
         };
 
         transcript.add_message(&c);
-        common.send_msg(c, false, DEFAULT_STREAM_ID);
+        common.send_msg(c, false);
 
     }
 
@@ -441,7 +441,7 @@ mod client_hello {
         };
 
         transcript.add_message(&m);
-        common.send_msg(m, false, DEFAULT_STREAM_ID);
+        common.send_msg(m, false);
 
         Ok(kx)
     }
@@ -483,7 +483,7 @@ mod client_hello {
 
         trace!("Sending CertificateRequest {:?}", m);
         transcript.add_message(&m);
-        cx.common.send_msg(m, false, DEFAULT_STREAM_ID);
+        cx.common.send_msg(m, false);
         Ok(true)
     }
 
@@ -497,7 +497,7 @@ mod client_hello {
         };
 
         transcript.add_message(&m);
-        common.send_msg(m, false, DEFAULT_STREAM_ID);
+        common.send_msg(m, false);
 
     }
 }
@@ -885,7 +885,7 @@ fn emit_ticket(
     };
 
     transcript.add_message(&m);
-    cx.common.send_msg(m, false, DEFAULT_STREAM_ID);
+    cx.common.send_msg(m, false);
 
     Ok(())
 }
@@ -896,7 +896,7 @@ fn emit_ccs(common: &mut CommonState) {
         payload: MessagePayload::ChangeCipherSpec(ChangeCipherSpecPayload {}),
     };
 
-    common.send_msg(m, false, DEFAULT_STREAM_ID);
+    common.send_msg(m, false);
 
 }
 
@@ -919,7 +919,7 @@ fn emit_finished(
     };
 
     transcript.add_message(&f);
-    common.send_msg(f, true, DEFAULT_STREAM_ID);
+    common.send_msg(f, true);
 
 }
 

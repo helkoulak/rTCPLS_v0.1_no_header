@@ -277,7 +277,7 @@ fn emit_fake_client_hello(client_config: &Arc<ClientConfig>, common: &mut Common
 
 
     trace!("Sending ClientHello {:#?}", ch);
-    common.send_msg(ch, false, DEFAULT_STREAM_ID);
+    common.send_msg(ch, false);
     Ok(())
 
 }
@@ -470,7 +470,7 @@ fn emit_client_hello_for_retry(
 
     transcript_buffer.add_message(&ch);
 
-    cx.common.send_msg(ch, false, DEFAULT_STREAM_ID);
+    cx.common.send_msg(ch, false);
 
 
     // Calculate the hash of ClientHello and use it to derive EarlyTrafficSecret
