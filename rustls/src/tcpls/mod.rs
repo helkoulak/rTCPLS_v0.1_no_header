@@ -5,8 +5,8 @@
 use std::{io, u32, vec};
 use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, ToSocketAddrs};
-use std::ops::DerefMut;
-use std::prelude::rust_2021::{ToString, Vec};
+use std::ops::{Deref, DerefMut};
+use std::prelude::rust_2021::{Box, ToString, Vec};
 use std::sync::Arc;
 use log::trace;
 
@@ -228,28 +228,19 @@ impl TcplsSession {
     }
 
     /// Flush bytes of a certain stream of a set of streams on specified byte-oriented sink.
-    pub fn send_on_connection(&mut self, conn_ids: Option<Vec<u64>>, wr: Option<SimpleIdHashMap<&mut dyn io::Write>>, flushables: Option<SimpleIdHashSet>) -> Result<usize, Error> {
+    pub fn send_on_connection(&mut self, conn_ids: Option<Vec<u64>>, mut wr: Option<SimpleIdHashMap<Box<&mut dyn io::Write>>>, flushables: Option<SimpleIdHashSet>) -> Result<usize, Error> {
         let tls_conn = self.tls_conn.as_mut().unwrap();
 
-        let mut sockets: SimpleIdHashMap<&mut dyn io::Write> = SimpleIdHashMap::default();
-
         //Flush streams selected by the app or flush all
-        let stream_iter = match flushables {
+        let stream_ids = match flushables {
             Some(set) => StreamIter::from(&set),
             None => tls_conn.record_layer.streams.flushable(),
         };
 
         let mut done = 0;
-        sockets = match wr {
-            Some(socks) => socks,
-            None => {for (id, s) in self.tcp_connections.iter_mut() {
-                sockets.insert(*id, &mut s.socket);
-            }
-                sockets
-            }
-        };
 
-        for id in stream_iter {
+
+        for id in stream_ids {
             match tls_conn.record_layer.streams.get_mut(id as u32) {
                 Some(_stream) => {},
                 None => return Err(Error::BufNotFound),
@@ -260,7 +251,11 @@ impl TcplsSession {
             let mut sent = 0;
 
             while len > 0 {
-                for (conn_id, socket) in &mut sockets {
+                for conn_id in conn_ids.as_ref().unwrap() {
+                    let socket: &mut dyn Write = match wr {
+                        Some(ref mut socks) => socks.get_mut(conn_id).unwrap().deref_mut(),
+                        None => &mut self.tcp_connections.get_mut(&conn_id).unwrap().socket,
+                    };
                     let chunk = match tls_conn.record_layer.streams.get_mut(id as u32).unwrap().send.get_chunk(){
                         Some(ch) => ch,
                         None => {

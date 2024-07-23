@@ -57,12 +57,11 @@ impl TlsClient {
                 id_set.insert(1);
                 id_set.insert(2);
 
-                let mut sockets = SimpleIdHashMap::default();
-                for (id, s) in self.tcpls_session.tcp_connections.iter_mut() {
-                    sockets.insert(*id, &mut s.socket)
-                }
 
-                self.tcpls_session.send_on_connection(&mut sockets, Some(id_set)).expect("Sending on connection failed");
+                let mut conn_ids = Vec::new();
+                conn_ids.push(token.0 as u64);
+
+                self.tcpls_session.send_on_connection(Some(conn_ids), None, Some(id_set)).expect("Sending on connection failed");
             }
         }
 
@@ -126,7 +125,9 @@ impl TlsClient {
     }
 
     fn do_write(&mut self, token: &Token) {
-        self.tcpls_session.send_on_connection(Some(token.0 as u64), None, None).unwrap();
+        let mut conn_ids = Vec::new();
+        conn_ids.push(token.0 as u64);
+        self.tcpls_session.send_on_connection(Some(conn_ids), None, None).unwrap();
     }
 
     /// Registers self as a 'listener' in mio::Registry
@@ -184,7 +185,7 @@ impl TlsClient {
         // Print the hash as a hexadecimal string
         println!("\n \n File bytes on stream {:?} : \n \n SHA-256 Hash {:?} \n Total length: {:?} \n", stream, hash, len);
 
-        self.tcpls_session.stream_send(stream, data.as_ref(), false, None).expect("buffering failed");
+        self.tcpls_session.stream_send(stream, data.as_ref(), false);
 
 
         Ok(())

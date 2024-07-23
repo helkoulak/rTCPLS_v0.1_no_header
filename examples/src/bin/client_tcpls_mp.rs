@@ -62,7 +62,7 @@ impl TlsClient {
                     id_set.insert(2);
                     id_set.insert(3);
                     for id in &id_set{
-                        self.send_data(vec![0u8; 64000].as_slice(), *id as u16, token.0 as u32).expect("");
+                        self.send_data(vec![0u8; 64000].as_slice(), *id as u16).expect("");
                     }
                 }
                 if token.0 == 1 {
@@ -70,7 +70,7 @@ impl TlsClient {
                     id_set.insert(5);
                     id_set.insert(6);
                     for id in &id_set{
-                        self.send_data(vec![0u8; 64000].as_slice(), *id as u16, token.0 as u32).expect("");
+                        self.send_data(vec![0u8; 64000].as_slice(), *id as u16).expect("");
                     }
                 }
                 if token.0 == 2 {
@@ -78,13 +78,13 @@ impl TlsClient {
                     id_set.insert(8);
                     id_set.insert(9);
                     for id in &id_set{
-                        self.send_data(vec![0u8; 64000].as_slice(), *id as u16, token.0 as u32).expect("");
+                        self.send_data(vec![0u8; 64000].as_slice(), *id as u16).expect("");
                     }
 
                 }
                 let mut conn_ids = Vec::new();
                 conn_ids.push(token.0 as u64);
-                self.tcpls_session.send_on_connection(Some(), None, Some(id_set)).expect("Sending on connection failed");
+                self.tcpls_session.send_on_connection(Some(conn_ids), None, Some(id_set)).expect("Sending on connection failed");
                 self.sending_ids.insert(token.0 as u64);
             }
 
@@ -162,7 +162,9 @@ impl TlsClient {
         }
         if self.tcpls_session.tcp_connections.contains_key(&id) {
 
-            self.tcpls_session.send_on_connection(Some(id), None, None).expect("Send on connection failed");
+            let mut conn_ids = Vec::new();
+            conn_ids.push(id);
+            self.tcpls_session.send_on_connection(Some(conn_ids), None, None).expect("Send on connection failed");
         }
 
 
@@ -215,7 +217,7 @@ impl TlsClient {
 
 
 
-    fn send_data(&mut self, input: &[u8], stream: u16, attach_to: u32) -> io::Result<()> {
+    fn send_data(&mut self, input: &[u8], stream: u16) -> io::Result<()> {
         let mut data = Vec::new();
         // Total length to send
         let mut len:u16 = 0;
