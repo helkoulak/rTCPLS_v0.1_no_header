@@ -16,7 +16,7 @@ use ring::digest;
 use rustls::recvbuf::RecvBufMap;
 use rustls::RootCertStore;
 use rustls::tcpls::TcplsSession;
-use rustls::tcpls::stream::SimpleIdHashSet;
+use rustls::tcpls::stream::{SimpleIdHashMap, SimpleIdHashSet};
 
 const CLIENT: Token = Token(0);
 
@@ -57,7 +57,12 @@ impl TlsClient {
                 id_set.insert(1);
                 id_set.insert(2);
 
-                self.tcpls_session.send_on_connection(Some(token.0 as u64), None, Some(id_set)).expect("Sending on connection failed");
+                let mut sockets = SimpleIdHashMap::default();
+                for (id, s) in self.tcpls_session.tcp_connections.iter_mut() {
+                    sockets.insert(*id, &mut s.socket)
+                }
+
+                self.tcpls_session.send_on_connection(&mut sockets, Some(id_set)).expect("Sending on connection failed");
             }
         }
 

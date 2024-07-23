@@ -102,16 +102,17 @@ impl<C, S> io::Write for OtherSession<C, S>
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput, BenchmarkId, BatchSize};
 use pprof::criterion::{Output, PProfProfiler};
-use rustls::{Connection, ConnectionCommon, SideData};
+use rustls::{Connection, ConnectionCommon, IoState, ServerConnection, SideData};
 use rustls::recvbuf::RecvBufMap;
 use rustls::tcpls::stream::SimpleIdHashSet;
 use rustls::tcpls::TcplsSession;
 use crate::bench_util::CPUTime;
 use rustls::crypto::{ring as provider, CryptoProvider};
+use rustls::server::ServerConnectionData;
 
 mod bench_util;
 fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
-    let data_len= 50*16384;
+    let data_len= 70*16384;
     let sendbuf = vec![1u8; data_len];
     let mut group = c.benchmark_group("Data_recv");
     group.throughput(Throughput::Bytes(data_len as u64));
@@ -123,7 +124,7 @@ fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
                                    let (mut client, mut server, mut recv_svr, mut recv_clnt) =
                                        make_pair(KeyType::Rsa);
                                    do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
-                                   server.set_deframer_cap(0, 60*16384);
+                                   server.set_deframer_cap(0, 80*16384);
                                    let mut tcpls_client = TcplsSession::new(false);
                                    let _ = tcpls_client.tls_conn.insert(Connection::from(client));
                                    tcpls_client.tls_conn.as_mut().unwrap().set_buffer_limit(None, 1);

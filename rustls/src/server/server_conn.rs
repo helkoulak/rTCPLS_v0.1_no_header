@@ -13,7 +13,7 @@ use pki_types::{DnsName, UnixTime};
 #[cfg(feature = "std")]
 pub use connection::{AcceptedAlert, Acceptor, ReadEarlyData, ServerConnection};
 
-use crate::{KeyLog, sign, verify, versions, WantsVersions};
+use crate::{ContentType, KeyLog, sign, verify, versions, WantsVersions};
 use crate::builder::ConfigBuilder;
 use crate::common_state::{CommonState, Side, State};
 #[cfg(feature = "std")]
@@ -1054,7 +1054,7 @@ impl EarlyDataState {
         let available = bytes.bytes().len();
         match self {
             Self::Accepted(ref mut received) if received.apply_limit(available) == available => {
-                received.append(bytes.into_vec());
+                received.append(ContentType::ApplicationData, ProtocolVersion::TLSv1_2, bytes.into_vec(), false);
                 true
             }
             _ => false,

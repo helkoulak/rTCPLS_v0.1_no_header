@@ -165,7 +165,7 @@ pub fn transfer(
         let sz = {
             let into_buf: &mut dyn io::Write = &mut &mut buf[..];
 
-            left.write_tls(into_buf, id.unwrap_or_else(|| DEFAULT_STREAM_ID)).unwrap()
+            left.write_tls(into_buf, id.unwrap_or_else(|| DEFAULT_STREAM_ID as u16) as u32).unwrap()
         };
         total += sz;
         if sz == 0 {

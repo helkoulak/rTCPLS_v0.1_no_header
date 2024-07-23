@@ -82,7 +82,9 @@ impl TlsClient {
                     }
 
                 }
-                self.tcpls_session.send_on_connection(Some(token.0 as u64), None, Some(id_set)).expect("Sending on connection failed");
+                let mut conn_ids = Vec::new();
+                conn_ids.push(token.0 as u64);
+                self.tcpls_session.send_on_connection(Some(), None, Some(id_set)).expect("Sending on connection failed");
                 self.sending_ids.insert(token.0 as u64);
             }
 
@@ -232,7 +234,7 @@ impl TlsClient {
         // Print the hash as a hexadecimal string
        // println!("\n \n File bytes on stream {:?} : \n {:?} \n \n SHA-256 Hash {:?} \n Total length: {:?} \n", stream, file_contents, hash, len);
 
-        self.tcpls_session.stream_send(stream, data.as_ref(), false, Some(attach_to)).expect("buffering failed");
+        self.tcpls_session.stream_send(stream, data.as_ref(), false);
 
 
         Ok(())

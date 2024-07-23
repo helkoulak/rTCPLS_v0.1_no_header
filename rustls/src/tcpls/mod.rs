@@ -23,7 +23,7 @@ use crate::msgs::handshake::{ClientExtension, ClientHelloPayload,
                              HandshakeMessagePayload, HandshakePayload,
                              HasServerExtensions, KeyShareEntry, Random,
                              ServerExtension, ServerHelloPayload, SessionId};
-use crate::msgs::message::{InboundOpaqueMessage, Message, MessageError, MessagePayload, PlainMessage};
+use crate::msgs::message::{InboundOpaqueMessage, Message, MessageError, MessagePayload, OutboundChunks, OutboundPlainMessage, PlainMessage};
 use crate::PeerMisbehaved::{InvalidTcplsJoinToken, TcplsJoinExtensionNotFound};
 use crate::recvbuf::RecvBufMap;
 use crate::tcpls::frame::MAX_TCPLS_FRAGMENT_LEN;
@@ -222,8 +222,8 @@ impl TcplsSession {
     /// Buffer outgoing data in send stream
     pub fn stream_send(&mut self, str_id: u16, input: &[u8], _fin: bool) {
 
-        for chunk in input.chunks(MAX_TCPLS_FRAGMENT_LEN).map(|chunk| chunk.to_vec()).collect(){
-            self.tls_conn.as_mut().unwrap().queue_message(chunk, str_id as u32, );
+        for chunk in input.chunks(MAX_TCPLS_FRAGMENT_LEN).map(|chunk| chunk.to_vec()) {
+            self.tls_conn.as_mut().unwrap().queue_message(ContentType::ApplicationData, ProtocolVersion::TLSv1_2, chunk, str_id as u32, true);
         }
     }
 
@@ -240,54 +240,67 @@ impl TcplsSession {
         };
 
         let mut done = 0;
-        let socket = match wr {
-            Some(socket) => socket,
-            None => &mut self
-                .tcp_connections
-                .get_mut(&(conn_id.unwrap_or_else(||panic!("No connection id provided"))))
-                .unwrap()
-                .socket,
+        sockets = match wr {
+            Some(socks) => socks,
+            None => {for (id, s) in self.tcp_connections.iter_mut() {
+                sockets.insert(*id, &mut s.socket);
+            }
+                sockets
+            }
         };
 
         for id in stream_iter {
-
-            let stream = match tls_conn.record_layer.streams.get_mut(id as u32) {
-                Some(stream) => {
-                    stream
-                },
+            match tls_conn.record_layer.streams.get_mut(id as u32) {
+                Some(_stream) => {},
                 None => return Err(Error::BufNotFound),
             };
 
-            match conn_id {
-                Some(con_id) => {
-                    if stream.attched_to as u64 != con_id{
-                        continue
-                    }
-                },
-                None => {},
-            }
 
-            let mut len = stream.send.len();
+            let mut len = tls_conn.record_layer.streams.get_mut(id as u32).unwrap().send.len();
             let mut sent = 0;
-           /* let mut complete_sent = false;*/
 
             while len > 0 {
+                for (conn_id, socket) in &mut sockets {
+                    let chunk = match tls_conn.record_layer.streams.get_mut(id as u32).unwrap().send.get_chunk(){
+                        Some(ch) => ch,
+                        None => {
+                            len = 0;
+                            break
+                        },
+                    };
+                    let typ = chunk.typ;
+                    let encrypt = chunk.encrypt;
 
-                sent = match stream.send.write_chunk_to(socket) {
-                    Ok(sent) => sent,
-                    _error => return Err(Error::General("Data sending on socket failed".to_string())),
+                    sent = match encrypt {
+                      true => {
+                          tls_conn.set_connection_in_use(*conn_id as u32);
+                          match typ {
+                              ContentType::ApplicationData => {
+                                  tls_conn.writer().write(chunk.data.as_slice()).expect("Could not write data to stream");
+                              },
+                              _ => {
+                                  let msg = OutboundPlainMessage {
+                                      typ: chunk.typ,
+                                      version: chunk.version,
+                                      payload: OutboundChunks::from(chunk.data.as_slice())
+                                  };
+                                  tls_conn.send_msg_encrypt(msg);
+                              },
+                          }
+                          socket.write(tls_conn.encrypted_chunk.as_slice()).expect("Data sending on socket failed")
+                      },
+                      false => {
+                          socket.write(chunk.data.as_slice()).expect("Data sending on socket failed")
+                      },
+                    };
 
-                };
+                    len -= sent;
+                    done += sent;
 
-                len -= sent;
-                done += sent;
-                //stream.send.consume_chunk(sent, chunk);
-                // In case the chunk was partially sent, by the next call
-                // to send on the same connection this stream should be chosen as first
-                if sent == 0 {
-                    return Ok(done);
+                    if sent == 0 {
+                        return Ok(done);
+                    }
                 }
-
             }
 
             if len == 0 {

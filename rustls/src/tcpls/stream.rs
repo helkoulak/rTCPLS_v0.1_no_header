@@ -48,8 +48,6 @@ pub struct Stream {
 
     /// buffers encrypted TLS records that to be sent on the TCP socket
     pub(crate) send: ChunkVecBuffer,
-    /// The id of tcp connection the stream is attached to
-    pub attched_to: u32,
 
 }
 
@@ -58,16 +56,8 @@ impl Stream {
         Self{
             id,
             send: ChunkVecBuffer::new(Some(DEFAULT_BUFFER_LIMIT)),
-            attched_to: 0,
-
         }
     }
-
-    #[inline]
-    pub fn attach_to_connection(&mut self, conn_id: u32){
-        self.attched_to = conn_id;
-    }
-
 
 
     /// Returns true if the stream has enough capacity to be
@@ -86,7 +76,6 @@ impl Stream {
     #[inline]
     pub fn reset_stream(&mut self) {
         self.send.reset();
-        self.attched_to = 0;
     }
 
 
@@ -194,8 +183,6 @@ impl StreamMap {
                 }
 
                 let mut s = Stream::new(stream_id);
-
-                s.attched_to = DEFAULT_CONNECTION_ID;
 
                 let is_writable = s.is_writable();
 
