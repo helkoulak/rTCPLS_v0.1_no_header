@@ -5,18 +5,20 @@ use std::{fs, process};
 use std::io;
 use std::io::{BufReader, Read, Write};
 use std::net::ToSocketAddrs;
-use rustls::crypto::{ring as provider, CryptoProvider};
 use std::ops::{Deref, DerefMut};
 use std::str;
 use std::sync::Arc;
+
 use docopt::Docopt;
 use mio::Token;
 use pki_types::{CertificateDer, PrivateKeyDer, ServerName};
+
 use ring::digest;
+use rustls::crypto::{CryptoProvider, ring as provider};
 use rustls::recvbuf::RecvBufMap;
 use rustls::RootCertStore;
+use rustls::tcpls::stream::SimpleIdHashSet;
 use rustls::tcpls::TcplsSession;
-use rustls::tcpls::stream::{SimpleIdHashMap, SimpleIdHashSet};
 
 const CLIENT: Token = Token(0);
 
@@ -333,8 +335,9 @@ fn load_private_key(filename: &str) -> PrivateKeyDer<'static> {
 
 mod danger {
     use pki_types::{CertificateDer, ServerName, UnixTime};
+
     use rustls::client::danger::HandshakeSignatureValid;
-    use rustls::crypto::{verify_tls12_signature, verify_tls13_signature, CryptoProvider};
+    use rustls::crypto::{CryptoProvider, verify_tls12_signature, verify_tls13_signature};
     use rustls::DigitallySignedStruct;
 
     #[derive(Debug)]

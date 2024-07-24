@@ -22,7 +22,7 @@ use ring::digest;
 
 use rustls::crypto::{ring as provider, CryptoProvider};
 
-use rustls::{self, RootCertStore, tcpls};
+use rustls::{self, Error, RootCertStore, tcpls};
 
 use rustls::recvbuf::RecvBufMap;
 use rustls::server::WebPkiClientVerifier;
@@ -102,7 +102,7 @@ impl TlsServer {
 
 
         if ev.is_writable() {
-            self.do_tls_write_and_handle_error();
+            self.do_tls_write_and_handle_error(&token);
         }
 
         if self.closing {
@@ -244,13 +244,14 @@ impl TlsServer {
     }
 
 
-    fn tls_write(&mut self) -> io::Result<usize> {
-        self.tcpls_session.tls_conn.as_mut().unwrap()
-            .write_tls(&mut self.tcpls_session.tcp_connections.get_mut(&0).unwrap().socket, 0)
+    fn tcpls_write(&mut self, token: &Token) -> Result<usize, Error> {
+        let mut conn_ids = Vec::new();
+        conn_ids.push(token.0 as u64);
+        self.tcpls_session.send_on_connection(Some(conn_ids), None, None)
     }
 
-    fn do_tls_write_and_handle_error(&mut self) {
-        let rc = self.tls_write();
+    fn do_tls_write_and_handle_error(&mut self, token: &Token) {
+        let rc = self.tcpls_write(token);
         if rc.is_err() {
             error!("write failed {:?}", rc);
             self.closing = true;

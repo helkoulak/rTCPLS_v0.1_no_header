@@ -25,6 +25,7 @@ use crate::unbuffered::{EncryptError, InsufficientSizeError};
 use crate::vecbuf::ChunkVecBuffer;
 use crate::{quic, record_layer};
 use crate::recvbuf::RecvBufMap;
+use crate::tcpls::DEFAULT_CONNECTION_ID;
 use crate::tcpls::frame::Frame;
 use crate::tcpls::outstanding_conn::OutstandingConnMap;
 use crate::tcpls::stream::{DEFAULT_STREAM_ID, SimpleIdHashMap};
@@ -449,7 +450,14 @@ impl CommonState {
             if !must_encrypt {
                 self.queue_message(m.typ, m.version, m.to_unencrypted_opaque().encode(), DEFAULT_STREAM_ID, must_encrypt);
             }else {
-                self.queue_message(m.typ, m.version, m.payload.to_vec(), DEFAULT_STREAM_ID, must_encrypt);
+                if m.typ == ContentType::Handshake {
+                    self.record_layer.enc_dec_for_connection(DEFAULT_CONNECTION_ID);
+                    self.send_msg_encrypt(m);
+                    self.queue_message(ContentType::Handshake, ProtocolVersion::TLSv1_2, self.encrypted_chunk.clone(), DEFAULT_STREAM_ID, false);
+                }else {
+                    self.queue_message(m.typ, m.version, m.payload.to_vec(), DEFAULT_STREAM_ID, must_encrypt);
+                }
+
             }
         }
     }

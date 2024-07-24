@@ -254,7 +254,7 @@ impl TcplsSession {
                 for conn_id in conn_ids.as_ref().unwrap() {
                     let socket: &mut dyn Write = match wr {
                         Some(ref mut socks) => socks.get_mut(conn_id).unwrap().deref_mut(),
-                        None => &mut self.tcp_connections.get_mut(&conn_id).unwrap().socket,
+                        None => &mut self.tcp_connections.get_mut(&(*conn_id)).unwrap().socket,
                     };
                     let chunk = match tls_conn.record_layer.streams.get_mut(id as u32).unwrap().send.get_chunk(){
                         Some(ch) => ch,
@@ -263,6 +263,7 @@ impl TcplsSession {
                             break
                         },
                     };
+                    let data_len = chunk.data.len();
                     let typ = chunk.typ;
                     let encrypt = chunk.encrypt;
 
@@ -271,6 +272,7 @@ impl TcplsSession {
                           tls_conn.set_connection_in_use(*conn_id as u32);
                           match typ {
                               ContentType::ApplicationData => {
+                                  tls_conn.write_to = id as u16;
                                   tls_conn.writer().write(chunk.data.as_slice()).expect("Could not write data to stream");
                               },
                               _ => {
@@ -289,8 +291,14 @@ impl TcplsSession {
                       },
                     };
 
-                    len -= sent;
-                    done += sent;
+                    if sent > data_len {
+                        len -= data_len;
+                        done += data_len;
+                    }else {
+                        len -= sent;
+                        done += sent;
+                    }
+
 
                     if sent == 0 {
                         return Ok(done);
