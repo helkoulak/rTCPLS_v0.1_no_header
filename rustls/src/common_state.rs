@@ -110,6 +110,7 @@ impl CommonState {
     /// sets the id of the currently active tcp connection
     pub fn set_connection_in_use(&mut self, conn_id: u32) {
         self.conn_in_use = conn_id;
+        self.record_layer.enc_dec_for_connection(conn_id);
     }
 
     /// Returns true if the caller should call [`Connection::write_tls`] as soon as possible.

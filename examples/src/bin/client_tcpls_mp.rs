@@ -32,6 +32,7 @@ struct TlsClient {
     tcpls_session: TcplsSession,
     all_joined: bool,
     sending_ids: SimpleIdHashSet,
+    poll: mio::Poll,
 }
 
 impl TlsClient {
@@ -42,53 +43,39 @@ impl TlsClient {
             tcpls_session: TcplsSession::new(false),
             all_joined: false,
             sending_ids: SimpleIdHashSet::default(),
+            poll: mio::Poll::new().unwrap(),
         }
     }
 
     /// Handles events sent to the TlsClient by mio::Poll
     fn handle_event(&mut self, ev: &mio::event::Event, recv_map: &mut RecvBufMap) {
-
         let token = &ev.token();
 
-        if ev.is_readable()  {
+        if ev.is_readable() {
             self.do_read(recv_map, token.0 as u64);
-            if !self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() && !self.sending_ids.contains(&(token.0 as u64)){
-                let mut id_set = SimpleIdHashSet::default();
+            if !self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() {
+                if self.tcpls_session.tls_conn.as_mut().unwrap().outstanding_tcp_conns.has_otustanding_requests() {
+                    let keys: Vec<u64> = self.tcpls_session.tls_conn.as_mut().unwrap().outstanding_tcp_conns.as_mut_ref().keys().cloned().collect();
+                    for id in keys {
+                        self.register(recv_map, Token(id as usize));
+                        self.join_outstanding(id);
+                    }
+                }
 
-                print!("Client sends on connection {:?} \n", token.0);
-                if token.0 == 0 {
-                    id_set.insert(0);
-                    id_set.insert(1);
-                    id_set.insert(2);
-                    id_set.insert(3);
-                    for id in &id_set{
-                        self.send_data(vec![0u8; 64000].as_slice(), *id as u16).expect("");
-                    }
-                }
-                if token.0 == 1 {
-                    id_set.insert(4);
-                    id_set.insert(5);
-                    id_set.insert(6);
-                    for id in &id_set{
-                        self.send_data(vec![0u8; 64000].as_slice(), *id as u16).expect("");
-                    }
-                }
-                if token.0 == 2 {
-                    id_set.insert(7);
-                    id_set.insert(8);
-                    id_set.insert(9);
-                    for id in &id_set{
-                        self.send_data(vec![0u8; 64000].as_slice(), *id as u16).expect("");
-                    }
+                if !self.sending_ids.contains(&(token.0 as u64)) &&
+                    self.tcpls_session.tcp_connections.len() == 3 {
+                    self.send_data(vec![1u8; 64000].as_slice(), 0).expect("");
 
+                    let mut conn_ids = Vec::new();
+                    conn_ids.push(0);
+                    conn_ids.push(1);
+                    conn_ids.push(2);
+                    self.tcpls_session.send_on_connection(Some(conn_ids), None, None).expect("Sending on connection failed");
+                    self.sending_ids.insert(0);
+                    self.sending_ids.insert(1);
+                    self.sending_ids.insert(2);
                 }
-                let mut conn_ids = Vec::new();
-                conn_ids.push(token.0 as u64);
-                self.tcpls_session.send_on_connection(Some(conn_ids), None, Some(id_set)).expect("Sending on connection failed");
-                self.sending_ids.insert(token.0 as u64);
             }
-
-
         }
 
         if ev.is_writable() {
@@ -155,11 +142,6 @@ impl TlsClient {
 
     fn do_write(&mut self, id: u64) {
 
-        if self.tcpls_session.tls_conn.as_mut().unwrap().outstanding_tcp_conns.as_mut_ref().contains_key(&id) &&
-            !self.tcpls_session.tls_conn.as_mut().unwrap().is_handshaking() {
-            self.join_outstanding(id);
-            return;
-        }
         if self.tcpls_session.tcp_connections.contains_key(&id) {
 
             let mut conn_ids = Vec::new();
@@ -171,20 +153,20 @@ impl TlsClient {
     }
 
     /// Registers self as a 'listener' in mio::Registry
-    fn register(&mut self, registry: &mio::Registry, recv_map: &RecvBufMap, token: Token) {
+    fn register(&mut self, recv_map: &RecvBufMap, token: Token) {
         let interest = self.event_set(recv_map, token.0 as u64);
         let  socket = self.tcpls_session.get_socket(token.0 as u64);
-        registry
+        self.poll.registry()
             .register(socket, token, interest)
             .unwrap();
     }
 
     /// Reregisters self as a 'listener' in mio::Registry.
-    fn reregister(&mut self, registry: &mio::Registry, recv_map: & RecvBufMap, token: Token) {
+    fn reregister(&mut self, recv_map: & RecvBufMap, token: Token) {
 
         let interest = self.event_set(recv_map, token.0 as u64);
         let  socket = self.tcpls_session.get_socket(token.0 as u64);
-        registry
+        self.poll.registry()
             .reregister(socket, token, interest)
             .unwrap();
     }
@@ -611,18 +593,15 @@ fn main() {
     // Create third tcp conection
     client.tcpls_session.tcpls_connect(dest_add3, None, None, false);
 
-
-    let mut poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(50);
-    client.register(poll.registry(), &recv_map, CONNECTION1);
-    client.register(poll.registry(), &recv_map, CONNECTION2);
-    client.register(poll.registry(), &recv_map, CONNECTION3);
+    client.register(&recv_map, CONNECTION1);
+
     loop {
-        poll.poll(&mut events, None).unwrap();
+        client.poll.poll(&mut events, None).unwrap();
 
         for ev in events.iter() {
                 client.handle_event(ev, &mut recv_map);
-                client.reregister(poll.registry(), &recv_map, ev.token());
+                client.reregister(&recv_map, ev.token());
             }
 
     }
