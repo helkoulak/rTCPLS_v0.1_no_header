@@ -15,6 +15,7 @@ extern crate serde_derive;
 extern crate core;
 
 use docopt::Docopt;
+use log::LevelFilter;
 use mio::Token;
 use pki_types::{CertificateDer, CertificateRevocationListDer, PrivateKeyDer};
 
@@ -593,8 +594,9 @@ fn main() {
         .unwrap_or_else(|e| e.exit());
 
     if args.flag_verbose {
-        env_logger::Builder::new()
-            .parse_filters("trace")
+        env_logger::builder()
+            .filter_level(LevelFilter::Trace)   // Set global log level to Trace
+            .filter_module("mio", LevelFilter::Info) // Set specific level for mio
             .init();
     }
 
@@ -615,7 +617,7 @@ fn main() {
     let mut tcpls_server = TlsServer::new(listener, config);
 
     let mut events = mio::Events::with_capacity(256);
-    let ten_seconds = Duration::new(10, 0);
+
     loop {
        match poll.poll(&mut events, None){
             Ok(_) => {}
