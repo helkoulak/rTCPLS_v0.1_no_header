@@ -603,7 +603,14 @@ fn main() {
     client.register(&recv_map, CONNECTION1);
 
     loop {
-        client.poll.poll(&mut events, None).unwrap();
+        match client.poll.poll(&mut events, None){
+            Ok(_) => {}
+            // Polling can be interrupted (e.g. by a debugger) - retry if so.
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => {
+                panic!("poll failed: {:?}", e)
+            }
+        }
 
         for ev in events.iter() {
                 client.handle_event(ev, &mut recv_map);
