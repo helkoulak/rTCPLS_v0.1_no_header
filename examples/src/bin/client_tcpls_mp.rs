@@ -66,6 +66,8 @@ impl TlsClient {
                 if !self.sending_ids.contains(&(token.0 as u64)) &&
                     self.tcpls_session.tcp_connections.len() == 3 {
                     self.send_data(vec![1u8; 64000].as_slice(), 0).expect("");
+                    self.send_data(vec![2u8; 64000].as_slice(), 1).expect("");
+                    self.send_data(vec![3u8; 64000].as_slice(), 2).expect("");
 
                     let mut conn_ids = Vec::new();
                     conn_ids.push(0);
