@@ -12,6 +12,7 @@ extern crate serde_derive;
 extern crate core;
 
 use docopt::Docopt;
+use log::LevelFilter;
 use mio::net::{TcpListener, TcpStream};
 use mio::Token;
 use pki_types::{CertificateDer, CertificateRevocationListDer, PrivateKeyDer};
@@ -162,7 +163,7 @@ impl TlsServer {
             stream.empty_stream();
             recv_map.remove_readable(id);
         }
-        println!("Total received on connection {:?} is {:?} bytes \n", conn_id,  self.tcpls_session.tcp_connections.get_mut(&conn_id).unwrap().nbr_bytes_received)
+
     }
 
     fn calculate_sha256_hash(&mut self, data: &[u8]) -> digest::Digest {
@@ -653,8 +654,9 @@ fn main() {
         .unwrap_or_else(|e| e.exit());
 
     if args.flag_verbose {
-        env_logger::Builder::new()
-            .parse_filters("trace")
+        env_logger::builder()
+            .filter_level(LevelFilter::Trace)   // Set global log level to Trace
+            .filter_module("mio", LevelFilter::Info) // Set specific level for mio
             .init();
     }
 
