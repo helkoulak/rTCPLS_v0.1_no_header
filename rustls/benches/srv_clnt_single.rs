@@ -138,7 +138,7 @@ fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
                                    let mut pipe = OtherSession::new(server);
                                    let mut sent = 0;
                                    while tcpls_client.tls_conn.as_ref().unwrap().wants_write() {
-                                       sent += tcpls_client.send_on_connection(None, Some(&mut pipe), Some(stream_to_flush.clone())).unwrap();
+                                       sent += tcpls_client.send_on_connection(None, Some(stream_to_flush.clone())).unwrap();
                                    }
                                    (pipe, recv_svr)
                                },
