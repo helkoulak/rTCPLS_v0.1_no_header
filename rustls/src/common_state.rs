@@ -795,6 +795,9 @@ impl CommonState {
         self.record_layer.streams.get_or_create(id).unwrap().send.append(typ, version, data, encrypt);
         self.record_layer.streams.insert_flushable(id as u64);
     }
+    pub fn get_encrypted_chunk_as_slice(&self) -> &[u8]{
+        self.encrypted_chunk.as_slice()
+    }
 
 }
 

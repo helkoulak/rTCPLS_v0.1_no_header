@@ -5,8 +5,6 @@ use std::ops::{Deref, DerefMut};
 
 #[path = "../tests/common/mod.rs"]
 mod test_utils;
-use test_utils::*;
-
 struct OtherSession<C, S>
     where
         C: DerefMut + Deref<Target = ConnectionCommon<S>>,
@@ -42,6 +40,22 @@ impl<C, S> OtherSession<C, S>
         let mut os = OtherSession::new(sess);
         os.fail_ok = true;
         os
+    }
+    fn write_all(&mut self, mut buf: &[u8]) -> usize {
+        let mut sent = 0;
+        while !buf.is_empty() {
+            match self.write(buf) {
+                Ok(0) => {
+                    sent = 0;
+                }
+                Ok(n) => {
+                    buf = &buf[n..];
+                    sent += n;
+                },
+                Err(e) => panic!("Something wrong"),
+            }
+        }
+        sent
     }
 }
 
@@ -109,6 +123,8 @@ use rustls::tcpls::TcplsSession;
 use crate::bench_util::CPUTime;
 use rustls::crypto::{ring as provider, CryptoProvider};
 use rustls::server::ServerConnectionData;
+use rustls::tcpls::frame::MAX_TCPLS_FRAGMENT_LEN;
+use crate::test_utils::{do_handshake, KeyType, make_pair, transfer};
 
 mod bench_util;
 fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
@@ -125,21 +141,20 @@ fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
                                        make_pair(KeyType::Rsa);
                                    do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
                                    server.set_deframer_cap(0, 80*16384);
-                                   let mut tcpls_client = TcplsSession::new(false);
-                                   let _ = tcpls_client.tls_conn.insert(Connection::from(client));
-                                   tcpls_client.tls_conn.as_mut().unwrap().set_buffer_limit(None, 1);
-                                   //Encrypt data and buffer it in send buffer
-                                   tcpls_client.stream_send(1, sendbuf.as_slice(), false, None).expect("Buffering in send buffer failed");
 
-                                   let mut stream_to_flush = SimpleIdHashSet::default();
-                                   stream_to_flush.insert(1);
+
+                                   let mut sent: usize = 0;
+                                   let mut pipe = OtherSession::new(server);
+
+                                   client.write_to = 1;
+                                   for chunk in sendbuf.chunks(MAX_TCPLS_FRAGMENT_LEN).map(|chunk| chunk.to_vec()) {
+                                       client.writer().write(chunk.as_slice()).expect("Could not write data to stream");
+                                       sent += pipe.write_all(client.get_encrypted_chunk_as_slice());
+
+                                   }
+
                                    // Create app receive buffer
                                    recv_svr.get_or_create(1, Some(11 * 1024 * 1024));
-                                   let mut pipe = OtherSession::new(server);
-                                   let mut sent = 0;
-                                   while tcpls_client.tls_conn.as_ref().unwrap().wants_write() {
-                                       sent += tcpls_client.send_on_connection(None, Some(stream_to_flush.clone())).unwrap();
-                                   }
                                    (pipe, recv_svr)
                                },
 
