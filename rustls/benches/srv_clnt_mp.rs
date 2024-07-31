@@ -5,8 +5,6 @@ use std::ops::{Deref, DerefMut};
 
 #[path = "../tests/common/mod.rs"]
 mod test_utils;
-use test_utils::*;
-
 struct OtherSession<C, S>
     where
         C: DerefMut + Deref<Target = ConnectionCommon<S>>,
@@ -109,6 +107,7 @@ use rustls::tcpls::TcplsSession;
 use crate::bench_util::CPUTime;
 use rustls::crypto::{ring as provider, CryptoProvider};
 use rustls::server::ServerConnectionData;
+use crate::test_utils::{do_handshake, KeyType, make_pair};
 
 mod bench_util;
 fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
@@ -129,7 +128,7 @@ fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
                                    let _ = tcpls_client.tls_conn.insert(Connection::from(client));
                                    tcpls_client.tls_conn.as_mut().unwrap().set_buffer_limit(None, 1);
                                    //Encrypt data and buffer it in send buffer
-                                   tcpls_client.stream_send(1, sendbuf.as_slice(), false, None).expect("Buffering in send buffer failed");
+                                   tcpls_client.stream_send(1, sendbuf.as_slice(), false).expect("Buffering in send buffer failed");
 
                                    //Change the order of buffered records
                                    tcpls_client.tls_conn.as_mut().unwrap().shuffle_records(1, 20);
@@ -141,7 +140,7 @@ fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
                                    let mut pipe = OtherSession::new(server);
                                    let mut sent = 0;
                                    while tcpls_client.tls_conn.as_ref().unwrap().wants_write() {
-                                       sent += tcpls_client.send_on_connection(None, Some(&mut pipe), Some(stream_to_flush.clone())).unwrap();
+                                       sent += tcpls_client.send_on_connection(None, Some(stream_to_flush.clone())).unwrap();
                                    }
                                    (pipe, recv_svr)
                                },
