@@ -732,7 +732,7 @@ impl CommonState {
         id: u16,
     ) -> usize {
         self.perhaps_write_key_update();
-        self.send_plain(payload, Limit::Yes, Some(sendable_plaintext), id)
+        self.send_plain(payload, Limit::No, Some(sendable_plaintext), id)
     }
 
     pub(crate) fn send_early_plaintext(&mut self, data: &[u8], id: u16) -> usize {
