@@ -264,7 +264,7 @@ impl MessageDeframer {
     ) -> Result<Option<Deframed<'b>>, Error> {
         if let Some(last_err) = self.last_error.clone() {
             return Err(last_err);
-        } else if buffer.is_empty() {
+        } else if buffer.is_empty() && self.records_info.is_empty(){
             return Ok(None);
         }
 
