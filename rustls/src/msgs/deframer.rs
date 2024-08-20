@@ -403,7 +403,7 @@ impl MessageDeframer {
                 }
                 Ok(None) => {
                     buffer.queue_discard(end);
-                    continue;
+                    return Ok(None);
                 }
                 Err(e) => return Err(e),
             };
