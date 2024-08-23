@@ -129,22 +129,28 @@ use crate::test_utils::{do_handshake, KeyType, make_pair, transfer};
 pub(crate) fn process_received(pipe: &mut OtherSession<ServerConnection,
     ServerConnectionData>, app_bufs: &mut RecvBufMap, data_len: u64) {
     let conn_ids: Vec<u32> = vec![0,1,2];
-    loop {
-        for id in &conn_ids {
-            pipe.sess.set_connection_in_use(*id);
-            pipe.sess.process_new_packets(app_bufs).unwrap();
+    let stream_ids: Vec<u32> = vec![1,2];
+    for str_id in stream_ids {
+        loop {
+            for id in &conn_ids {
+                pipe.sess.set_connection_in_use(*id);
+                pipe.sess.process_new_packets(app_bufs).unwrap();
+            }
+            if app_bufs.get(str_id as u16).unwrap().data_length() == data_len { break }
         }
-        if app_bufs.get(1).unwrap().data_length() == data_len { break }
+
     }
+
 }
 
 mod bench_util;
 fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
     let data_len= 200*MAX_TCPLS_FRAGMENT_LEN;
-    let sendbuf = vec![1u8; data_len];
+    let sendbuf1 = vec![1u8; data_len];
+    let sendbuf2 = vec![2u8; data_len];
     let mut group = c.benchmark_group("Data_recv");
-    group.throughput(Throughput::Bytes(data_len as u64));
-    group.bench_with_input(BenchmarkId::new("Data_recv_single_stream_multi_connection", data_len), &sendbuf,
+    group.throughput(Throughput::Bytes((data_len * 2) as u64));
+    group.bench_with_input(BenchmarkId::new("Data_recv_single_stream_multi_connection", data_len+data_len), &sendbuf1,
                            |b, sendbuf| {
 
                                b.iter_batched_ref(|| {
@@ -163,7 +169,19 @@ fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
 
                                    // Write each chunk in a different deframer buffer to simulate multipath. Here we simulate sending
                                    // a single stream over three connections
-                                   for chunk in sendbuf.chunks(MAX_TCPLS_FRAGMENT_LEN).map(|chunk| chunk.to_vec()) {
+                                   for chunk in sendbuf1.chunks(MAX_TCPLS_FRAGMENT_LEN).map(|chunk| chunk.to_vec()) {
+                                       client.set_connection_in_use(conn_id);
+                                       pipe.sess.set_connection_in_use(conn_id);
+                                       client.writer().write(chunk.as_slice()).expect("Could not encrypt data");
+                                       sent += pipe.write_all(client.get_encrypted_chunk_as_slice());
+                                       conn_id += 1;
+                                       if conn_id == 3{
+                                           conn_id = 0;
+                                       }
+                                   }
+                                   client.write_to = 2;
+                                   conn_id = 0;
+                                   for chunk in sendbuf2.chunks(MAX_TCPLS_FRAGMENT_LEN).map(|chunk| chunk.to_vec()) {
                                        client.set_connection_in_use(conn_id);
                                        pipe.sess.set_connection_in_use(conn_id);
                                        client.writer().write(chunk.as_slice()).expect("Could not encrypt data");
@@ -175,6 +193,7 @@ fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
                                    }
                                    // Create app receive buffer
                                    recv_svr.get_or_create(1, Some(11 * 1024 * 1024));
+                                   recv_svr.get_or_create(2, Some(11 * 1024 * 1024));
                                    (pipe, recv_svr)
                                },
 
@@ -198,7 +217,7 @@ criterion_main!(benches);*/
 criterion_group! {
     name = benches;
     config = Criterion::default()
-        .measurement_time(std::time::Duration::from_secs(10))
+        .measurement_time(std::time::Duration::from_secs(20))
         .with_measurement(CPUTime)
         .sample_size(500);
     targets = criterion_benchmark
