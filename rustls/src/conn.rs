@@ -841,8 +841,6 @@ impl<Data> ConnectionCore<Data> {
             };
 
             if msg.typ == ContentType::ApplicationData {
-                deframer_buffer.discard(discard);
-                discard = 0;
                 continue;
             }
 
