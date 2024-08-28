@@ -1,14 +1,14 @@
 use alloc::boxed::Box;
 use std::vec;
 
-use ring::rand::SecureRandom;
+
 
 use crate::crypto;
-use crate::crypto::cipher::{AeadKey, BorrowedPayload, InboundOpaqueMessage, Iv, make_tls13_aad, MessageDecrypter, MessageEncrypter, Nonce, Tls13AeadAlgorithm, UnsupportedOperationError};
+use crate::crypto::cipher::{AeadKey, InboundOpaqueMessage, Iv, make_tls13_aad, MessageDecrypter, MessageEncrypter, Nonce, Tls13AeadAlgorithm, UnsupportedOperationError};
 use crate::crypto::tls13::{Hkdf, HkdfExpander, OkmBlock, OutputLengthError};
 use crate::enums::{CipherSuite, ContentType, ProtocolVersion};
 use crate::error::Error;
-use crate::msgs::codec::Codec;
+
 use crate::msgs::message::{InboundPlainMessage, OutboundOpaqueMessage, OutboundPlainMessage, PrefixedPayload};
 use crate::suites::{CipherSuiteCommon, ConnectionTrafficSecrets, SupportedCipherSuite};
 use crate::tcpls::frame::{Frame, STREAM_FRAME_HEADER_SIZE};
@@ -75,30 +75,6 @@ pub(crate) static TLS13_AES_128_GCM_SHA256_INTERNAL: &Tls13CipherSuite = &Tls13C
     }),
 };
 
-fn unpad_tls13_from_slice(v: &mut [u8]) -> (ContentType, usize) {
-    let mut last = v.len() - 1;
-    loop {
-        match v[last] {
-            0 => last -= 1,
-            content_type => {
-                let typ = ContentType::from(content_type);
-                v[last] = 0x00;
-                return (typ, last)
-            },
-            _ => return (ContentType::Unknown(0), last),
-        }
-    }
-}
-
-fn unpad_tls13_payload(p: &mut BorrowedPayload) -> ContentType {
-    loop {
-        match p.pop() {
-            Some(0) => {}
-            Some(content_type) => return ContentType::from(content_type),
-            None => return ContentType::Unknown(0),
-        }
-    }
-}
 
 struct Chacha20Poly1305Aead(AeadAlgorithm);
 

@@ -30,7 +30,7 @@ impl AddressMap {
     }
 
     pub fn build_local_address_list(&mut self) {
-        let mut v = 0;
+        let mut v;
         match get_if_addrs() {
             Ok(ifaces) => {
                 for iface in ifaces {
@@ -68,7 +68,7 @@ impl AddressMap {
 
 
 
-    fn is_private_ip(ip: &IpAddr) -> bool {
+    fn _is_private_ip(ip: &IpAddr) -> bool {
         match ip {
             IpAddr::V4(v4) => {
                 let octets = v4.octets();

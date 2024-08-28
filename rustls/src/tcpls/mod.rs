@@ -3,10 +3,10 @@
 
 /// This module contains optional APIs for implementing TCPLS.
 use std::{io, u32, vec};
-use std::io::{Read, Write};
-use std::net::{Shutdown, SocketAddr, ToSocketAddrs};
-use std::ops::{Deref, DerefMut};
-use std::prelude::rust_2021::{Box, ToString, Vec};
+use std::io::Write;
+use std::net::{Shutdown, SocketAddr};
+
+use std::prelude::rust_2021::{ToString, Vec};
 use std::sync::Arc;
 use log::trace;
 
@@ -21,7 +21,7 @@ use crate::msgs::codec;
 use crate::msgs::enums::{Compression, ECPointFormat, ExtensionType};
 use crate::msgs::handshake::{ClientExtension, ClientHelloPayload,
                              HandshakeMessagePayload, HandshakePayload,
-                             HasServerExtensions, KeyShareEntry, Random,
+                             KeyShareEntry, Random,
                              ServerExtension, ServerHelloPayload, SessionId};
 use crate::msgs::message::{InboundOpaqueMessage, Message, MessageError, MessagePayload, OutboundChunks, OutboundPlainMessage, PlainMessage};
 use crate::PeerMisbehaved::{InvalidTcplsJoinToken, TcplsJoinExtensionNotFound};
@@ -193,7 +193,7 @@ impl TcplsSession {
         listener: &mut TcpListener,
         config: Arc<ServerConfig>,
     ) -> Result<u32, io::Error> {
-        let mut conn_id= 0;
+        let conn_id;
         let (socket, _remote_add) = match listener.accept() {
             Ok((socket, remote_add)) => (socket, remote_add),
             Err(err) => return Err(err),
@@ -252,7 +252,7 @@ impl TcplsSession {
 
 
             let mut stream_len = tls_conn.record_layer.streams.get_mut(id as u32).unwrap().send.len();
-            let mut sent = 0;
+            let mut sent;
 
             while stream_len > 0 {
                 for conn_id in &conn_ids {
@@ -266,7 +266,7 @@ impl TcplsSession {
                     };
                     let typ = chunk.typ;
                     let encrypt = chunk.encrypt;
-                    let mut to_send_len: usize = 0;
+                    let mut to_send_len;
                     let mut data_to_send: Vec<u8> = Vec::new();
                     loop {
                         match encrypt {

@@ -1,14 +1,9 @@
 use alloc::boxed::Box;
 use alloc::string::ToString;
 use core::fmt;
-use std::vec;
 
-use siphasher::sip::SipHasher;
 use zeroize::Zeroize;
 
-use ring::rand::{SecureRandom, SystemRandom};
-
-use crate::crypto::tls13::HkdfExpander;
 use crate::enums::{ContentType, ProtocolVersion};
 use crate::error::Error;
 use crate::msgs::codec;
@@ -310,80 +305,6 @@ pub fn make_tls12_aad(
     out
 }
 
-
-#[derive(Default)]
-pub(crate) struct HeaderProtector{
-    key: [u8;16],
-    sip_hasher: SipHasher
-}
-
-impl HeaderProtector {
-    pub(crate) fn new(expander: &dyn HkdfExpander, aead_key_len: usize) -> Self {
-
-        let mut derived_key= vec![0; aead_key_len]; // 16 or 32 bytes
-        expander.expand_slice(&[b"tcpls header protection"], derived_key.as_mut_slice()).unwrap();
-        let mut key = [0; 16];
-        key.copy_from_slice(&derived_key[..16]);
-        Self{
-            key,
-            sip_hasher: SipHasher::new_with_key(&key),
-        }
-    }
-
-    /// Adds TCPLS Header Protection.
-    ///
-    /// `input` references the calculated tag bytes
-    ///
-    /// `header` references the header slice of the encrypted TLS record
-    #[inline]
-    pub(crate) fn encrypt_in_place(
-        &mut self,
-        input: &[u8],
-        header: &mut [u8],
-    ) -> Result<(), Error> {
-        self.xor_in_place(input, header)
-    }
-
-    fn xor_in_place(
-        &mut self,
-        input: &[u8],
-        header: &mut [u8],
-    ) -> Result<(), Error> {
-        let out = self.sip_hasher.hash(input).to_be_bytes();
-        for i in 0..header.len() {
-            header[i] ^= out[i];
-        }
-        Ok(())
-    }
-
-
-    #[inline]
-    pub(crate) fn decrypt_in_output(
-        &mut self,
-        input: &[u8],
-        header: &[u8],
-    ) -> Result<[u8; 8], Error> {
-        self.xor_in_output(input, header)
-    }
-
-    fn xor_in_output(
-        &mut self,
-        input: &[u8],
-        header: & [u8],
-    ) -> Result<[u8; 8], Error> {
-        let mut out = self.calculate_hash(&input);
-        for i in 0..header.len() {
-            out[i] ^= header[i];
-        }
-        Ok(out)
-    }
-
-    pub(crate) fn calculate_hash(&mut self, input: &[u8]) -> [u8;8] {
-        self.sip_hasher.hash(input).to_be_bytes()
-    }
-
-}
-
 const TLS12_AAD_SIZE: usize = 8 + 1 + 2 + 2;
 
 /// A key for an AEAD algorithm.
@@ -482,34 +403,5 @@ impl MessageDecrypter for InvalidMessageDecrypter {
         Err(Error::DecryptError)
     }
 }
-#[test]
-fn test_header_enc_dec() {
-    let rng = SystemRandom::new();
-    const INPUT_SIZE: usize = 16;
-    const HEADER_SIZE: usize = 8;
-    let mut input = [0u8; INPUT_SIZE];
-    let mut header = [0u8; HEADER_SIZE];
-    let mut output = [0u8; HEADER_SIZE];
-    let mut key = [0u8; INPUT_SIZE];
-    rng.fill(&mut key).unwrap();
-
-    let mut header_enc_dec = HeaderProtector {
-        key,
-        sip_hasher:SipHasher::new_with_key(&key),
-    };
 
 
-
-
-    for _i in 1..10000 {
-        rng.fill(&mut input).unwrap();
-        rng.fill(&mut header).unwrap();
-
-        output = header_enc_dec.calculate_hash(&input);
-        for i in 0..header.len() {
-            output[i] ^= header[i];
-        }
-      assert_eq!(header_enc_dec.decrypt_in_output(&input, &output).unwrap(), header)
-
-    }
-}

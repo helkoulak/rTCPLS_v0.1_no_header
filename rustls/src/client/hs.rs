@@ -36,9 +36,9 @@ use crate::msgs::handshake::{
 use crate::msgs::message::{Message, MessagePayload};
 use crate::msgs::persist;
 use crate::tls13::key_schedule::KeyScheduleEarly;
-use crate::{NamedGroup, SupportedCipherSuite};
+use crate::SupportedCipherSuite;
 use crate::common_state::Protocol::Tcpls;
-use crate::tcpls::stream::DEFAULT_STREAM_ID;
+
 
 pub(super) type NextState<'a> = Box<dyn State<ClientConnectionData> + 'a>;
 pub(super) type NextStateOrError<'a> = Result<NextState<'a>, Error>;
@@ -92,9 +92,6 @@ fn find_session(
     }
 
     found
-}
-pub(super) fn start_fake_handshake(config: &Arc<ClientConfig>, common: &mut CommonState) -> Result<(), Error>{
-    emit_fake_client_hello(config, common)
 }
 
 pub(super) fn start_handshake(
@@ -194,93 +191,7 @@ struct ClientHelloInput {
     session_id: SessionId,
     server_name: ServerName<'static>,
 }
-fn emit_fake_client_hello(client_config: &Arc<ClientConfig>, common: &mut CommonState) -> Result<(), Error>{
 
-    let support_tls13 = client_config.supports_version(ProtocolVersion::TLSv1_3);
-
-    let mut supported_versions = Vec::new();
-    if support_tls13 {
-        supported_versions.push(ProtocolVersion::TLSv1_3);
-    }
-
-    // should be unreachable thanks to config builder
-    assert!(!supported_versions.is_empty());
-
-    let mut exts = vec![
-        ClientExtension::SupportedVersions(supported_versions),
-        ClientExtension::EcPointFormats(ECPointFormat::SUPPORTED.to_vec()),
-        ClientExtension::NamedGroups(vec![NamedGroup::X25519]),
-        ClientExtension::SignatureAlgorithms(
-            client_config
-                .verifier
-                .supported_verify_schemes(),
-        ),
-        ClientExtension::ExtendedMasterSecretRequest,
-        ClientExtension::CertificateStatusRequest(CertificateStatusRequest::build_ocsp()),
-    ];
-
-
-
-    if client_config.enable_tcpls {
-        if !client_config.supports_version(ProtocolVersion::TLSv1_3) {
-            return Err(Error::General("TLS 1.3 support is required for TCPLS".parse().unwrap()))
-        }
-        let tcpls_token = match common.get_next_tcpls_token() {
-            Some(token) => token,
-            None => return Err(Error::General("No tcpls token found".parse().unwrap())),
-        };
-
-        exts.push(ClientExtension::TcplsJoin(tcpls_token));
-    }
-
-
-    if support_tls13 {
-        // We could support PSK_KE here too. Such connections don't
-        // have forward secrecy, and are similar to TLS1.2 resumption.
-        let psk_modes = vec![PSKKeyExchangeMode::PSK_DHE_KE];
-        exts.push(ClientExtension::PresharedKeyModes(psk_modes));
-
-    }
-
-
-    let mut cipher_suites: Vec<_> = client_config
-        .provider
-        .cipher_suites
-        .iter()
-        .map(|cs| cs.suite())
-        .collect();
-    // We don't do renegotiation at all, in fact.
-    cipher_suites.push(CipherSuite::TLS_EMPTY_RENEGOTIATION_INFO_SCSV);
-
-    let chp = HandshakeMessagePayload {
-        typ: HandshakeType::ClientHello,
-        payload: HandshakePayload::ClientHello(ClientHelloPayload {
-            client_version: ProtocolVersion::TLSv1_2,
-            random: Random::new(client_config.provider.secure_random).unwrap(),
-            session_id: SessionId::empty(),
-            cipher_suites,
-            compression_methods: vec![Compression::Null],
-            extensions: exts,
-        }),
-    };
-
-
-
-    let ch = Message {
-        // "This value MUST be set to 0x0303 for all records generated
-        //  by a TLS 1.3 implementation other than an initial ClientHello
-        //  (i.e., one not generated after a HelloRetryRequest)"
-        version: ProtocolVersion::TLSv1_0,
-        payload: MessagePayload::handshake(chp),
-    };
-
-
-
-    trace!("Sending ClientHello {:#?}", ch);
-    common.send_msg(ch, false);
-    Ok(())
-
-}
 
 fn emit_client_hello_for_retry(
     mut transcript_buffer: HandshakeHashBuffer,

@@ -175,7 +175,7 @@ impl RecvBuf {
     /// and returning how many bytes were written there.
     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
 
-        let mut to_read_length = 0;
+        let to_read_length;
 
         match self.is_empty() {
             true => {

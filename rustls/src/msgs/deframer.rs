@@ -1,20 +1,19 @@
 use alloc::vec::Vec;
 use core::ops::Range;
 use core::slice::SliceIndex;
-use std::collections::{BTreeMap, hash_map};
+use std::collections::{hash_map, BTreeMap};
 #[cfg(feature = "std")]
 use std::io;
-use std::vec;
+
 
 use crate::enums::{ContentType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerMisbehaved};
 use crate::msgs::codec;
-use crate::msgs::message::{InboundOpaqueMessage, InboundPlainMessage, MessageError};
 #[cfg(feature = "std")]
 use crate::msgs::message::MAX_WIRE_SIZE;
+use crate::msgs::message::{InboundOpaqueMessage, InboundPlainMessage, MessageError};
 use crate::record_layer::{Decrypted, RecordLayer};
 use crate::recvbuf::RecvBufMap;
-use crate::tcpls::frame::Frame;
 use crate::tcpls::stream::SimpleIdHashMap;
 
 use super::codec::Codec;
@@ -37,15 +36,6 @@ pub struct MessageDeframer {
 
     /// Info of records delivered for each stream. The key is the stream ID.
     pub(crate) records_info: RecordsInfoMap,
-
-    /// Range of offsets of processed data in deframer buffer.
-    pub(crate) processed_range: Range<u64>,
-
-    ///Indicates if records are received out of order
-    pub(crate) out_of_order: bool,
-
-    ///Range of joined Handshake message in the deframer buffer
-    pub(crate)  joined_messages: Vec<Range<usize>>,
 
 }
 
@@ -644,8 +634,6 @@ impl<'a> AppendPayload<'a> for InternalPayload {
 
 #[derive(Default, Debug)]
 pub struct DeframerVecBuffer {
-    /// Id of related TCP connection
-    id: u64,
     /// Buffer of data read from the socket, in the process of being parsed into messages.
     ///
     /// For buffer size management, checkout out the [`DeframerVecBuffer::prepare_read()`] method.
@@ -661,7 +649,6 @@ pub struct DeframerVecBuffer {
 impl DeframerVecBuffer {
     pub fn new(id: u64) -> DeframerVecBuffer {
         DeframerVecBuffer{
-            id,
             cap: MAX_WIRE_SIZE,
             ..Default::default()
         }
@@ -795,7 +782,7 @@ pub struct DeframerSliceBuffer<'a> {
     // number of bytes to discard from the front of `buf` at a later time
     discard: usize,
     taken: usize,
-    used: usize,
+
 }
 
 impl<'a> DeframerSliceBuffer<'a> {
@@ -804,7 +791,7 @@ impl<'a> DeframerSliceBuffer<'a> {
             buf,
             discard: 0,
             taken: 0,
-            used,
+
         }
     }
 
@@ -982,20 +969,7 @@ impl RecordInfo {
         }
     }
 }
-#[derive(Clone, Debug, Default)]
-pub(crate) struct StreamHeader{
-    pub(crate) len: u16,
-    pub(crate) offset: u64,
-    pub(crate) stream_id: u32,
-}
 
-impl StreamHeader {
-    pub(crate) fn new() -> Self {
-        StreamHeader {
-            ..Default::default()
-        }
-    }
-}
 
 enum HandshakePayloadState {
     /// Waiting for more data.

@@ -1,4 +1,3 @@
-
 use alloc::boxed::Box;
 use core::fmt::Debug;
 use core::mem;
@@ -29,11 +28,10 @@ mod connection {
     use crate::common_state::{CommonState, IoState, PlainBufsMap};
     use crate::error::Error;
     use crate::msgs::message::OutboundChunks;
+    use crate::recvbuf::RecvBufMap;
     use crate::suites::ExtractedSecrets;
     use crate::vecbuf::ChunkVecBuffer;
     use crate::ConnectionCommon;
-    use crate::recvbuf::RecvBufMap;
-    use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
     /// A client or server connection.
     #[derive(Debug)]
@@ -88,12 +86,12 @@ mod connection {
             }
         }
 
-        pub fn get_sendable_plain_bufs(&mut self) -> &mut PlainBufsMap {
+       /* pub(crate) fn get_sendable_plain_bufs(&mut self) -> &mut PlainBufsMap {
             match self {
                 Self::Client(conn) => &mut conn.sendable_plaintext,
                 Self::Server(conn) => &mut conn.sendable_plaintext,
             }
-        }
+        }*/
 
         /// Derives key material from the agreed connection secrets.
         ///
@@ -164,7 +162,7 @@ mod connection {
         }
     }
 
-    /// A structure that implements [`std::io::Read`] for reading plaintext.
+    /// A structure that implements [`io::Read`] for reading plaintext.
     pub struct Reader<'a> {
         pub(super) received_plaintext: &'a mut ChunkVecBuffer,
         pub(super) peer_cleanly_closed: bool,
@@ -355,11 +353,11 @@ https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
     }
 }
 
-#[cfg(feature = "std")]
-pub use connection::{Connection, Reader, Writer};
-use crate::recvbuf::{ReaderAppBufs, RecvBuf, RecvBufMap};
+use crate::recvbuf::{ReaderAppBufs, RecvBufMap};
 use crate::tcpls::frame::{Frame, STREAM_FRAME_HEADER_SIZE};
 use crate::tcpls::stream::DEFAULT_STREAM_ID;
+#[cfg(feature = "std")]
+pub use connection::{Connection, Reader, Writer};
 
 #[derive(Debug)]
 pub(crate) struct ConnectionRandoms {

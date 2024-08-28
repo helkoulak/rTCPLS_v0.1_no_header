@@ -211,12 +211,7 @@ impl ChunkVecBuffer {
         }
     }
 
-    pub(crate) fn consume_chunk(&mut self, mut used: usize, chunk: OutboundTlsMessage) {
-        let mut buf = chunk;
-        if used < buf.data.len() {
-            self.chunks.push_front(OutboundTlsMessage::new(buf.typ, buf.version, buf.data.split_off(used), false));
-        }
-    }
+
 
 
 }

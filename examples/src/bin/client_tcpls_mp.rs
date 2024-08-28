@@ -3,9 +3,9 @@ extern crate serde_derive;
 
 use std::{fs, process};
 use std::io;
-use std::io::{BufReader, Read, Write};
+use std::io::BufReader;
 use std::net::ToSocketAddrs;
-use std::ops::{Deref, DerefMut};
+
 use std::str;
 use std::sync::Arc;
 
@@ -22,9 +22,6 @@ use rustls::tcpls::stream::SimpleIdHashSet;
 use rustls::tcpls::TcplsSession;
 
 const CONNECTION1: mio::Token = mio::Token(0);
-const CONNECTION2: mio::Token = mio::Token(1);
-
-const CONNECTION3: mio::Token = mio::Token(2);
 
 
 struct TlsClient {
@@ -305,8 +302,6 @@ Options:
 
 #[derive(Debug, Deserialize)]
 struct Args {
-    flag_port: Option<u16>,
-    flag_http: bool,
     flag_verbose: bool,
     flag_protover: Vec<String>,
     flag_suite: Vec<String>,

@@ -34,7 +34,6 @@ use crate::tls13::{
     construct_client_verify_message, construct_server_verify_message, Tls13CipherSuite,
 };
 use crate::{rand, verify};
-use crate::tcpls::stream::DEFAULT_STREAM_ID;
 
 mod client_hello {
     use std::prelude::rust_2021::ToString;
@@ -52,7 +51,7 @@ mod client_hello {
     };
     use crate::server::common::ActiveCertifiedKey;
     use crate::sign;
-    use crate::tcpls::stream::DEFAULT_STREAM_ID;
+
     use crate::tls13::key_schedule::{
         KeyScheduleEarly, KeyScheduleHandshake, KeySchedulePreHandshake,
     };

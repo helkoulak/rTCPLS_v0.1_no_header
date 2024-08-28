@@ -1,7 +1,7 @@
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use std::collections::{hash_map, VecDeque};
+use std::collections::hash_map;
 
 use pki_types::CertificateDer;
 
@@ -15,7 +15,7 @@ use crate::msgs::enums::{AlertLevel, KeyUpdateRequest};
 use crate::msgs::fragmenter::MessageFragmenter;
 use crate::msgs::handshake::{CertificateChain, TcplsToken};
 use crate::msgs::message::{
-    Message, MessagePayload, OutboundChunks, OutboundOpaqueMessage, OutboundPlainMessage,
+    Message, OutboundChunks, OutboundPlainMessage,
     PlainMessage,
 };
 use crate::suites::{PartiallyExtractedSecrets, SupportedCipherSuite};
