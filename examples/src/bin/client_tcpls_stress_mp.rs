@@ -31,6 +31,7 @@ struct TlsClient {
     all_joined: bool,
     sending_ids: SimpleIdHashSet,
     poll: mio::Poll,
+    data_sent: bool,
 }
 
 impl TlsClient {
@@ -42,6 +43,7 @@ impl TlsClient {
             all_joined: false,
             sending_ids: SimpleIdHashSet::default(),
             poll: mio::Poll::new().unwrap(),
+            data_sent: false,
         }
     }
 
@@ -60,20 +62,24 @@ impl TlsClient {
                     }
                 }
 
-                if !self.sending_ids.contains(&(token.0 as u64)) &&
-                    self.tcpls_session.tcp_connections.len() == 3 {
-                    self.send_data(vec![1u8; 64000].as_slice(), 0).expect("");
-                    self.send_data(vec![2u8; 64000].as_slice(), 1).expect("");
-                    self.send_data(vec![3u8; 64000].as_slice(), 2).expect("");
+                if self.tcpls_session.tcp_connections.len() == 3 &&
+                    !self.data_sent
+                {
+                    let mut num_of_buf:u32 = 10000;
+                    //Send three byte arrays on three streams
+                    let mut id_set = SimpleIdHashSet::default();
+                    for i in 0..num_of_buf {
+                        self.send_data(vec![0u8; 64000].as_slice(), i as u16).expect("");
+                        id_set.insert(i as u64);
+                    }
 
                     let mut conn_ids = Vec::new();
                     conn_ids.push(0);
                     conn_ids.push(1);
                     conn_ids.push(2);
-                    self.tcpls_session.send_on_connection(conn_ids, None).expect("Sending on connection failed");
-                    self.sending_ids.insert(0);
-                    self.sending_ids.insert(1);
-                    self.sending_ids.insert(2);
+                    self.tcpls_session.send_on_connection(conn_ids, Some(id_set)).expect("Sending on connection failed");
+                    self.data_sent = true;
+
                 }
             }
         }

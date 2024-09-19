@@ -29,6 +29,7 @@ struct TlsClient {
     closing: bool,
     clean_closure: bool,
     tcpls_session: TcplsSession,
+    data_buffered: bool,
 
 }
 
@@ -38,6 +39,7 @@ impl TlsClient {
             closing: false,
             clean_closure: false,
             tcpls_session: TcplsSession::new(false),
+            data_buffered: false,
         }
     }
 
@@ -48,7 +50,7 @@ impl TlsClient {
         if ev.is_readable() {
             self.do_read(recv_map, token.0 as u64);
 
-            if !self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() {
+            if !self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() && !self.data_buffered {
                 //Send three byte arrays on three streams
                 let mut id_set = SimpleIdHashSet::default();
 
@@ -60,11 +62,8 @@ impl TlsClient {
                 id_set.insert(1);
                 id_set.insert(2);
 
+                self.data_buffered = true;
 
-                let mut conn_ids = Vec::new();
-                conn_ids.push(token.0 as u64);
-
-                self.tcpls_session.send_on_connection(conn_ids, Some(id_set)).expect("Sending on connection failed");
             }
         }
 

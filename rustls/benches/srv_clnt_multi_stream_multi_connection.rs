@@ -145,7 +145,7 @@ pub(crate) fn process_received(pipe: &mut OtherSession<ServerConnection,
 
 mod bench_util;
 fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
-    let data_len= 200*MAX_TCPLS_FRAGMENT_LEN;
+    let data_len= 500 * 1024 * 1024;
     let sendbuf1 = vec![1u8; data_len];
     let sendbuf2 = vec![2u8; data_len];
     let mut group = c.benchmark_group("Data_recv");
@@ -158,9 +158,9 @@ fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
                                    let (mut client, mut server, mut recv_svr, mut recv_clnt) =
                                        make_pair(KeyType::Rsa);
                                    do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
-                                   server.set_deframer_cap(0, 150*16384);
-                                   server.set_deframer_cap(1, 150*16384);
-                                   server.set_deframer_cap(2, 150*16384);
+                                   server.set_deframer_cap(0, 600 * 1024 * 1024);
+                                   server.set_deframer_cap(1, 600 * 1024 * 1024);
+                                   server.set_deframer_cap(2, 600 * 1024 * 1024);
 
                                    let mut sent: usize = 0;
                                    let mut pipe = OtherSession::new(server);
@@ -192,8 +192,8 @@ fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
                                        }
                                    }
                                    // Create app receive buffer
-                                   recv_svr.get_or_create(1, Some(11 * 1024 * 1024));
-                                   recv_svr.get_or_create(2, Some(11 * 1024 * 1024));
+                                   recv_svr.get_or_create(1, Some(600 * 1024 * 1024));
+                                   recv_svr.get_or_create(2, Some(600 * 1024 * 1024));
                                    (pipe, recv_svr)
                                },
 
@@ -217,9 +217,9 @@ criterion_main!(benches);*/
 criterion_group! {
     name = benches;
     config = Criterion::default()
-        .measurement_time(std::time::Duration::from_secs(20))
+        .measurement_time(std::time::Duration::from_secs(200))
         .with_measurement(CPUTime)
-        .sample_size(500);
+        .sample_size(10);
     targets = criterion_benchmark
 }
 criterion_main!(benches);

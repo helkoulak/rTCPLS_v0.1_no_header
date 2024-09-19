@@ -665,9 +665,9 @@ fn main() {
 
     let config = make_config(&args, 5);
 
-    let mut listener1 = server_create_listener("0.0.0.0:8443", None);
-    let mut listener2 = server_create_listener("0.0.0.0:8444", None);
-    let mut listener3 = server_create_listener("0.0.0.0:8445", None);
+    let mut listener1 = server_create_listener("0.0.0.0:8443", Some(args.flag_port.unwrap()));
+    let mut listener2 = server_create_listener("0.0.0.0:8444", Some(args.flag_port.unwrap() + 1));
+    let mut listener3 = server_create_listener("0.0.0.0:8445", Some(args.flag_port.unwrap() + 2));
 
     let mut tcpls_server = TlsServer::new(config);
 
