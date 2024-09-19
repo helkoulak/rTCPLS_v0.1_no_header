@@ -16,6 +16,7 @@ use crate::{CipherSuite, ClientConfig, ClientConnection,
             Connection, ContentType, Error, HandshakeType, InvalidMessage, IoState,
             NamedGroup, PeerMisbehaved, ProtocolVersion, ServerConfig, ServerConnection, Side, SignatureScheme};
 use crate::AlertDescription::IllegalParameter;
+use crate::ContentType::ApplicationData;
 use crate::InvalidMessage::{InvalidContentType, InvalidEmptyPayload};
 use crate::msgs::codec;
 use crate::msgs::enums::{Compression, ECPointFormat, ExtensionType};
@@ -266,60 +267,55 @@ impl TcplsSession {
                     };
                     let typ = chunk.typ;
                     let encrypt = chunk.encrypt;
-                    let mut to_send_len;
+                    let to_send_len= chunk.data.len();
                     let mut data_to_send: Vec<u8> = Vec::new();
-                    loop {
-                        match encrypt {
-                            true => {
-                                tls_conn.set_connection_in_use(*conn_id as u32);
-                                match typ {
-                                    ContentType::ApplicationData => {
-                                        tls_conn.write_to = id as u16;
-                                        tls_conn.writer().write(chunk.data.as_slice()).expect("Could not write data to stream");
-                                    },
-                                    _ => {
-                                        let msg = OutboundPlainMessage {
-                                            typ: chunk.typ,
-                                            version: chunk.version,
-                                            payload: OutboundChunks::from(chunk.data.as_slice()),
-                                        };
-                                        tls_conn.send_msg_encrypt(msg);
-                                    },
-                                }
-                                to_send_len = tls_conn.encrypted_chunk.len();
-                                data_to_send = tls_conn.encrypted_chunk.clone();
-                            },
-                            false => {
-                                to_send_len = chunk.data.len();
-                                data_to_send = chunk.data.clone();
-                            },
-                        };
-                        sent = match socket.write(data_to_send.as_slice()) {
-                            Ok(sent) if sent > 0 => sent,
-                            Ok(0) => return Ok(done),
-                            _error => return Err(Error::General("Data sending on socket failed".to_string())),
-                        };
-
-
-                        if sent == to_send_len {
-                            if sent > stream_len {
-                                stream_len = 0;
-                            } else {
-                                stream_len -= sent;
+                    match encrypt {
+                        true => {
+                            tls_conn.set_connection_in_use(*conn_id as u32);
+                            match typ {
+                                ContentType::ApplicationData => {
+                                    tls_conn.write_to = id as u16;
+                                    tls_conn.writer().write(chunk.data.as_slice()).expect("Could not write data to stream");
+                                },
+                                _ => {
+                                    let msg = OutboundPlainMessage {
+                                        typ: chunk.typ,
+                                        version: chunk.version,
+                                        payload: OutboundChunks::from(chunk.data.as_slice()),
+                                    };
+                                    tls_conn.send_msg_encrypt(msg);
+                                },
                             }
-                            done += sent;
-                            break
-                        } else {
-                            stream_len -= sent;
-                            data_to_send = data_to_send.split_off(sent);
-                            done += sent;
-                        }
+                            data_to_send = tls_conn.encrypted_chunk.clone();
+                        },
+                        false => {
+                            data_to_send = chunk.data.clone();
+                        },
+                    };
+                    sent = match socket.write(data_to_send.as_slice()) {
+                        Ok(0) => return Ok(done),
+                        Ok(sent) => sent,
+                        Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => {
+                            tls_conn.record_layer.streams.get_mut(id as u32).unwrap().send.push_front(data_to_send, false, ApplicationData);
+                            return Ok(done)
+                        },
+                        _error => return Err(Error::General("Data sending on socket failed".to_string())),
+                    };
+
+                    if sent > to_send_len {
+                        stream_len -= to_send_len;
+                        done += to_send_len;
+                    } else {
+                        stream_len -= sent;
+                        done += sent;
                     }
+
                 }
             }
 
             if stream_len == 0 {
                 tls_conn.record_layer.streams.reset_stream(id as u32);
+                return Ok(done)
             }
         }
 

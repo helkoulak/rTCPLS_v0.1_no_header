@@ -205,13 +205,16 @@ impl ChunkVecBuffer {
 
    pub(crate) fn get_chunk(&mut self) -> Option<OutboundTlsMessage> {
         if self.is_empty() {
-            return None ;
+            None
         } else {
-            Some(self.chunks.pop_front().unwrap())
+            Some(self.chunks.pop_front()?)
         }
     }
 
-
+    #[inline]
+    pub(crate) fn push_front(&mut self, buf: Vec<u8>, encrypt: bool, typ: ContentType) {
+        self.chunks.push_front(OutboundTlsMessage::new(typ, ProtocolVersion::TLSv1_2, buf, encrypt))
+    }
 
 
 }
