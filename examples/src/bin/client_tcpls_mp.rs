@@ -245,8 +245,8 @@ impl TlsClient {
             Ok(_bytes) => (),
             Err(ref error) => if error.kind() == io::ErrorKind::WouldBlock {
                 return;
-            },
-            Err(error) => panic!("{:?}", error),
+            } else { panic!("{:?}", error) },
+
         }
 
         match self.tcpls_session.process_join_request(id) {

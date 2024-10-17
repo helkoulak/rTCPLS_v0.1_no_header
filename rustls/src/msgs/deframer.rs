@@ -647,7 +647,7 @@ pub struct DeframerVecBuffer {
 }
 
 impl DeframerVecBuffer {
-    pub fn new(id: u64) -> DeframerVecBuffer {
+    pub fn new() -> DeframerVecBuffer {
         DeframerVecBuffer{
             cap: MAX_WIRE_SIZE,
             ..Default::default()
@@ -656,7 +656,7 @@ impl DeframerVecBuffer {
     /// Borrows the initialized contents of this buffer and tracks pending discard operations via
     /// the `discard` reference
     pub fn borrow(&mut self) -> DeframerSliceBuffer {
-        DeframerSliceBuffer::new(&mut self.buf[..self.used], self.used)
+        DeframerSliceBuffer::new(&mut self.buf[..self.used])
     }
 
     /// Discard `taken` bytes from the start of our buffer.
@@ -786,7 +786,7 @@ pub struct DeframerSliceBuffer<'a> {
 }
 
 impl<'a> DeframerSliceBuffer<'a> {
-    pub fn new(buf: &'a mut [u8], used: usize) -> Self {
+    pub fn new(buf: &'a mut [u8]) -> Self {
         Self {
             buf,
             discard: 0,
@@ -915,14 +915,14 @@ pub(crate) struct RecordsInfoMap {
 }
 
 impl RecordsInfoMap {
-    pub(crate) fn create_stream_record_info(&mut self, record: & [u8], len: u16, offset: u64, stream_id: u32, fin: u8) {
+    pub(crate) fn create_stream_record_info(&mut self, record: & [u8], len: u16, offset: u64, stream_id: u32) {
         match self.records.contains_key(&stream_id) {
           true => {
-              self.records.get_mut(&stream_id).unwrap().insert_record(record, len, offset, fin);
+              self.records.get_mut(&stream_id).unwrap().insert_record(record, len, offset);
           },
           false => {
               let mut stream_map = StreamInfoMap::default();
-              stream_map.insert_record(record, len, offset, fin);
+              stream_map.insert_record(record, len, offset);
               self.records.insert(stream_id, stream_map);
           },
         };
@@ -940,8 +940,8 @@ pub(crate) struct StreamInfoMap {
 }
 
 impl StreamInfoMap {
-    pub(crate) fn insert_record(&mut self, record: &[u8], len: u16, offset: u64, fin: u8) {
-        self.stream_records.insert(offset, RecordInfo::from(record.to_vec(), len, fin));
+    pub(crate) fn insert_record(&mut self, record: &[u8], len: u16, offset: u64) {
+        self.stream_records.insert(offset, RecordInfo::from(record.to_vec(), len));
     }
 
 
@@ -954,17 +954,14 @@ pub(crate) struct RecordInfo {
     /// Length of chunk
     pub(crate) len: u16,
 
-    pub(crate) fin: u8,
-
     pub(crate) processed: bool,
 }
 
 impl RecordInfo {
-    pub(crate) fn from(record: Vec<u8>, len: u16, fin: u8) -> RecordInfo {
+    pub(crate) fn from(record: Vec<u8>, len: u16) -> RecordInfo {
         RecordInfo {
             record,
             len,
-            fin,
             processed: false,
         }
     }
@@ -1061,7 +1058,7 @@ impl MessageDeframerMap {
     pub(crate) fn get_or_create_def_vec_buff(&mut self, conn_id: u64) -> &mut DeframerVecBuffer {
         match self.deframers.entry(conn_id) {
             hash_map::Entry::Vacant(v) => {
-                v.insert(DeframerVecBuffer::new(conn_id))
+                v.insert(DeframerVecBuffer::new())
             },
             hash_map::Entry::Occupied(v) => v.into_mut(),
         }
@@ -1324,7 +1321,7 @@ mod tests {
         fn new() -> Self {
             Self {
                 inner: MessageDeframer::default(),
-                buffer: DeframerVecBuffer::new(0)
+                buffer: DeframerVecBuffer::new()
             }
         }
         fn input_bytes(&mut self, bytes: &[u8]) -> io::Result<usize> {

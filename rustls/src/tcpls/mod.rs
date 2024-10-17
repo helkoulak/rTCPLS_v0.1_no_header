@@ -268,7 +268,7 @@ impl TcplsSession {
                     let typ = chunk.typ;
                     let encrypt = chunk.encrypt;
                     let to_send_len= chunk.data.len();
-                    let mut data_to_send: Vec<u8> = Vec::new();
+                    let data_to_send;
                     match encrypt {
                         true => {
                             tls_conn.set_connection_in_use(*conn_id as u32);

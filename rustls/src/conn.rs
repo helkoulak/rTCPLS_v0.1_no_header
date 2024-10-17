@@ -25,7 +25,7 @@ mod connection {
     use core::ops::{Deref, DerefMut};
     use std::io;
 
-    use crate::common_state::{CommonState, IoState, PlainBufsMap};
+    use crate::common_state::{CommonState, IoState};
     use crate::error::Error;
     use crate::msgs::message::OutboundChunks;
     use crate::recvbuf::RecvBufMap;
@@ -354,7 +354,7 @@ https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
 }
 
 use crate::recvbuf::{ReaderAppBufs, RecvBufMap};
-use crate::tcpls::frame::{Frame, STREAM_FRAME_HEADER_SIZE};
+
 use crate::tcpls::stream::DEFAULT_STREAM_ID;
 #[cfg(feature = "std")]
 pub use connection::{Connection, Reader, Writer};
@@ -860,7 +860,7 @@ impl<Data> ConnectionCore<Data> {
 
 
     ///TODO: Add process functionality to other TCPLS control frames
-    fn process_tcpls_payload(&mut self, app_buffers: &mut RecvBufMap) {
+    /*fn process_tcpls_payload(&mut self, app_buffers: &mut RecvBufMap) {
         let app_buffer = app_buffers.get_mut(self.common_state.record_layer.get_conn_id()).unwrap();
         let offset = app_buffer.get_offset();
 
@@ -899,7 +899,7 @@ impl<Data> ConnectionCore<Data> {
                 } => {},
             }
         }
-    }
+    }*/
 
     fn deframe_unbuffered<'b>(
         &mut self,

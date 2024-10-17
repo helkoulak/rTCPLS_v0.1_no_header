@@ -20,7 +20,7 @@ use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
-
+use std::time::Instant;
 use pki_types::{CertificateDer, IpAddr, ServerName, UnixTime};
 use rustls::client::{verify_server_cert_signed_by_trust_anchor, ResolvesClientCert, Resumption};
 use rustls::crypto::{ring as provider, CryptoProvider};
@@ -52,7 +52,7 @@ use provider::cipher_suite;
 use provider::sign::RsaSigningKey;
 use rustls::internal::msgs::fragmenter::MessageFragmenter;
 use rustls::recvbuf::{ReaderAppBufs, RecvBufMap};
-use rustls::tcpls::frame::{MAX_TCPLS_FRAGMENT_LEN, TCPLS_HEADER_SIZE};
+use rustls::tcpls::frame::MAX_TCPLS_FRAGMENT_LEN;
 use rustls::tcpls::TcplsSession;
 
 fn alpn_test_error(
@@ -604,7 +604,7 @@ fn server_allow_any_anonymous_or_authenticated_client() {
 
 fn check_read_and_close(reader: &mut ReaderAppBufs, app_bufs: &mut RecvBufMap, expect: &[u8], id: u16) {
     check_read_app_buff(reader, expect, app_bufs, id);
-    assert!(matches!(app_bufs.get_mut(id).unwrap().read(&mut [0u8; 5]), Ok(0)));
+    assert!(matches!(app_bufs.get_mut(id as u32).unwrap().read(&mut [0u8; 5]), Ok(0)));
 }
 
 #[test]
@@ -1572,12 +1572,12 @@ fn receive_out_of_order_tls_records_multiple_streams() {
 
     tcpls_client.tls_conn = Some(Connection::from(client));
 
-    tcpls_client.stream_send(0, &record_1, false, None);
-    tcpls_client.stream_send(0, &record_2, false, None);
-    tcpls_client.stream_send(1, &record_3, false, None);
-    tcpls_client.stream_send(1, &record_4, false, None);
-    tcpls_client.stream_send(2, &record_5, false, None);
-    tcpls_client.stream_send(2, &record_6, false, None);
+    tcpls_client.stream_send(0, &record_1, false);
+    tcpls_client.stream_send(0, &record_2, false);
+    tcpls_client.stream_send(1, &record_3, false);
+    tcpls_client.stream_send(1, &record_4, false);
+    tcpls_client.stream_send(2, &record_5, false);
+    tcpls_client.stream_send(2, &record_6, false);
 
 
     client = match tcpls_client.tls_conn.unwrap() {
@@ -1596,7 +1596,7 @@ fn receive_out_of_order_tls_records_multiple_streams() {
 
     //Send all data
     loop {
-        match tcpls_client.send_on_connection(Some(0), Some(&mut pipe), None) {
+        match tcpls_client.send_on_connection(vec![0], None) {
             Ok(sent) => if sent == 0 {break},
             Err(err) => {}, // Process what has been received if buffer is full
         }
@@ -1642,9 +1642,9 @@ fn send_fragmented_records_on_two_connections() {
 
     tcpls_client.tls_conn = Some(Connection::from(client));
 
-    tcpls_client.stream_send(0, &record_1, false, None);
-    tcpls_client.stream_send(1, &record_2, false, None);
-    tcpls_client.stream_send(2, &record_3, false, None);
+    tcpls_client.stream_send(0, &record_1, false);
+    tcpls_client.stream_send(1, &record_2, false);
+    tcpls_client.stream_send(2, &record_3, false);
 
 
 
@@ -1665,7 +1665,7 @@ fn send_fragmented_records_on_two_connections() {
     // The receiving side will read a maximum of 4096 bytes in one shot. This will force fragmentation of records while sending.
     // Send part of the data on one tcp connection
     loop {
-        sent += tcpls_client.send_on_connection(Some(0), Some(&mut pipe), None).unwrap();
+        sent += tcpls_client.send_on_connection(vec![0], None).unwrap();
         pipe.sess.process_new_packets(&mut recv_svr).unwrap();
         if sent >= 30000 {break}
     }
@@ -1675,7 +1675,7 @@ fn send_fragmented_records_on_two_connections() {
     //Send the rest of data on the second connection
 
     loop {
-        sent = tcpls_client.send_on_connection(Some(0), Some(&mut pipe2), None).unwrap();
+        sent = tcpls_client.send_on_connection(vec![0], None).unwrap();
         pipe2.sess.process_new_packets(&mut recv_svr).unwrap();
         if sent == 0 {break}
     }
@@ -2327,6 +2327,22 @@ where
         self.writevs.push(lengths);
         Ok(total)
     }
+    fn write_all(&mut self, mut buf: &[u8]) -> usize {
+        let mut sent = 0;
+        while !buf.is_empty() {
+            match self.write(buf) {
+                Ok(0) => {
+                    sent = 0;
+                }
+                Ok(n) => {
+                    buf = &buf[n..];
+                    sent += n;
+                },
+                Err(e) => panic!("Something wrong"),
+            }
+        }
+        sent
+    }
 }
 
 impl<'a, C, S> io::Read for OtherSession<'a, C, S>
@@ -2528,6 +2544,72 @@ fn client_complete_io_for_read() {
         }
         check_read_app_buff(&mut client.reader_app_bufs(), b"01234567890123456789", &mut recv_clnt, 0);
     }
+}
+
+#[test]
+fn single_stream_multipath() {
+
+    let data_len= 200 * 1024 * 1024;
+    let sendbuf = vec![1u8; data_len];
+    // Finish handshake
+   let (mut client, mut server, mut recv_svr, mut recv_clnt) =
+       make_pair(KeyType::Rsa);
+   do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
+   server.set_deframer_cap(0, 600 * 1024 * 1024);
+   server.set_deframer_cap(1, 600 * 1024 * 1024);
+   server.set_deframer_cap(2, 600 * 1024 * 1024);
+
+   let mut sent: usize = 0;
+   let mut pipe = OtherSession::new(&mut server);
+   let mut conn_id: u32 = 0;
+   client.write_to = 1;
+
+   // Write each chunk in a different deframer buffer to simulate multipath. Here we simulate sending
+   // a single stream over three connections
+   for chunk in sendbuf.chunks(MAX_TCPLS_FRAGMENT_LEN).map(|chunk| chunk.to_vec()) {
+       client.set_connection_in_use(conn_id);
+       pipe.sess.set_connection_in_use(conn_id);
+       client.writer().write(chunk.as_slice()).expect("Could not encrypt data");
+       sent += pipe.write_all(client.get_encrypted_chunk_as_slice());
+       conn_id += 1;
+       if conn_id == 3{
+           conn_id = 0;
+       }
+   }
+
+    client.write_to = 2;
+    conn_id = 0;
+    for chunk in sendbuf.chunks(MAX_TCPLS_FRAGMENT_LEN).map(|chunk| chunk.to_vec()) {
+        client.set_connection_in_use(conn_id);
+        pipe.sess.set_connection_in_use(conn_id);
+        client.writer().write(chunk.as_slice()).expect("Could not encrypt data");
+        sent += pipe.write_all(client.get_encrypted_chunk_as_slice());
+        conn_id += 1;
+        if conn_id == 3{
+            conn_id = 0;
+        }
+    }
+
+    recv_svr.get_or_create(1, Some(600 * 1024 * 1024));
+    recv_svr.get_or_create(2, Some(600 * 1024 * 1024));
+
+    let conn_ids: Vec<u32> = vec![0,1,2];
+    let stream_ids: Vec<u32> = vec![1,2];
+
+    let start = Instant::now();
+    for str_id in stream_ids {
+        loop {
+            for id in &conn_ids {
+                pipe.sess.set_connection_in_use(*id);
+                pipe.sess.process_new_packets(&mut recv_svr).unwrap();
+            }
+            if recv_svr.get(str_id as u16).unwrap().data_length() == data_len as u64 { break }
+        }
+
+    }
+    let duration = start.elapsed();
+    print!("\nLength of data received {}", recv_svr.get(1).unwrap().data_length());
+    println!("\nTime taken: {:?}", duration);
 }
 
 #[test]
@@ -5583,7 +5665,7 @@ fn test_server_mtu_reduction() {
         .write_all(&big_data)
         .unwrap();
 
-    let encryption_overhead = 20 + TCPLS_HEADER_SIZE; // FIXME: see issue #991
+    let encryption_overhead = 20 ; // FIXME: see issue #991
 
     transfer(&mut client, &mut server, None);
     server.process_new_packets(&mut recv_srv).unwrap();

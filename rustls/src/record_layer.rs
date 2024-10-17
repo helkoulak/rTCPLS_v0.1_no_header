@@ -172,11 +172,10 @@ impl RecordLayer {
                         } => {
                             recv_map.get_or_create(stream_id as u64, None);
                             if recv_map.get_mut(stream_id).unwrap().offset != offset {
-                                records_info_map.create_stream_record_info( plaintext.payload.iter().as_slice(),
-                                                                             length,
-                                                                             offset,
-                                                                             stream_id,
-                                                                             0);
+                                records_info_map.create_stream_record_info(plaintext.payload.iter().as_slice(),
+                                                                           length,
+                                                                           offset,
+                                                                           stream_id);
                                 return Ok(None);
                             } else {
                                 if recv_map.get_mut(stream_id).unwrap().capacity() < plaintext.payload.len(){
@@ -396,21 +395,21 @@ pub(crate) struct Decrypted<'a> {
     pub(crate) plaintext: InboundPlainMessage<'a>,
 }
 #[derive(Default)]
-pub(crate) struct WriteSeqMap {
+pub struct WriteSeqMap {
     map: SimpleIdHashMap<WriteSeq>,
 }
 
 impl WriteSeqMap {
-    pub(crate) fn get_or_create(&mut self, stream_id: u64) -> &mut WriteSeq {
+    pub fn get_or_create(&mut self, stream_id: u64) -> &mut WriteSeq {
         match self.map.entry(stream_id) {
             hash_map::Entry::Vacant(v) => {
-                v.insert(WriteSeq::new(stream_id))
+                v.insert(WriteSeq::new())
             },
             hash_map::Entry::Occupied(v) => v.into_mut(),
         }
     }
 
-    pub(crate) fn get(&self, stream_id: u64) -> & WriteSeq {
+    pub fn get(&self, stream_id: u64) -> & WriteSeq {
         self.map.get(&stream_id).unwrap()
     }
 
@@ -423,25 +422,25 @@ impl WriteSeqMap {
 }
 
 #[derive(Default)]
-pub(crate) struct ReadSeqMap {
+pub struct ReadSeqMap {
     map: SimpleIdHashMap<ReadSeq>,
 }
 
 impl ReadSeqMap {
-    pub(crate) fn get_or_create(&mut self, stream_id: u64) -> &mut ReadSeq {
+    pub fn get_or_create(&mut self, stream_id: u64) -> &mut ReadSeq {
         match self.map.entry(stream_id) {
             hash_map::Entry::Vacant(v) => {
-                v.insert(ReadSeq::new(stream_id))
+                v.insert(ReadSeq::new())
             },
             hash_map::Entry::Occupied(v) => v.into_mut(),
         }
     }
 
-    pub(crate) fn get(&self, stream_id: u64) -> & ReadSeq {
+    pub fn get(&self, stream_id: u64) -> & ReadSeq {
         self.map.get(&stream_id).unwrap()
     }
 
-    pub(crate) fn reset_read_seq(&mut self) {
+    pub fn reset_read_seq(&mut self) {
         for seq in self.map.iter_mut() {
             seq.1.read_seq = 0;
         }
@@ -449,29 +448,25 @@ impl ReadSeqMap {
 
 }
 #[derive(Default)]
-pub(crate) struct WriteSeq {
-    id: u64,
+pub struct WriteSeq {
     write_seq: u64,
 }
 
 impl WriteSeq {
-    pub(crate) fn new(id: u64) -> Self {
+    pub fn new() -> Self {
         Self {
-            id,
             write_seq: 0,
         }
     }
 
 }
-pub(crate) struct ReadSeq {
-    id: u64,
+pub struct ReadSeq {
     read_seq: u64,
 }
 
 impl ReadSeq {
-    pub(crate) fn new(id: u64) -> Self {
+    pub fn new() -> Self {
         Self {
-            id,
             read_seq: 0,
         }
     }

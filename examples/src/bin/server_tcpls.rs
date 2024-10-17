@@ -8,7 +8,7 @@ extern crate log;
 use std::{fs, io};
 use std::io::{BufReader, Read, Write};
 use std::net;
-use std::time::Duration;
+
 
 #[macro_use]
 extern crate serde_derive;
@@ -23,7 +23,7 @@ use ring::digest;
 
 use rustls::crypto::{ring as provider, CryptoProvider};
 
-use rustls::{self, Error, RootCertStore, tcpls};
+use rustls::{self, Error, RootCertStore};
 
 use rustls::recvbuf::RecvBufMap;
 use rustls::server::WebPkiClientVerifier;
@@ -43,7 +43,6 @@ struct TlsServer {
     closing: bool,
     closed: bool,
     back: Option<TcpStream>,
-    sent_http_response: bool,
     tcpls_session: TcplsSession,
 
 }
@@ -54,8 +53,6 @@ impl TlsServer {
             listener,
             tls_config: cfg,
             back: None,
-            sent_http_response: false,
-
             closing: false,
             closed: false,
             tcpls_session: TcplsSession::new(true),
@@ -124,11 +121,11 @@ impl TlsServer {
 
     pub fn verify_received(&mut self, recv_map: &mut RecvBufMap ) {
 
-        let mut hash_index= 0;
+        let mut hash_index;
 
 
         for id in recv_map.readable() {
-            let mut stream = recv_map.get_mut(id as u32).unwrap();
+            let stream = recv_map.get_mut(id as u32).unwrap();
 
             let received_len: usize = u16::from_be_bytes([stream.as_ref_consumed()[0], stream.as_ref_consumed()[1]]) as usize;
             let unprocessed_len = stream.as_ref_consumed()[2..].len();
@@ -310,9 +307,9 @@ impl TlsServer {
         }
     }
 
-    fn is_closed(&self) -> bool {
+    /*fn is_closed(&self) -> bool {
         self.closed
-    }
+    }*/
 }
 
 pub fn find_pattern(data: &[u8], pattern: &[u8]) -> Option<usize> {
@@ -398,7 +395,6 @@ struct Args {
     flag_require_auth: bool,
     flag_resumption: bool,
     flag_tickets: bool,
-    arg_fport: Option<u16>,
 }
 
 

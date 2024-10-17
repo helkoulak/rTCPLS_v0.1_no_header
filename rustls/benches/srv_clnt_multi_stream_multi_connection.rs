@@ -136,7 +136,7 @@ pub(crate) fn process_received(pipe: &mut OtherSession<ServerConnection,
                 pipe.sess.set_connection_in_use(*id);
                 pipe.sess.process_new_packets(app_bufs).unwrap();
             }
-            if app_bufs.get(str_id as u16).unwrap().data_length() == data_len { break }
+            if app_bufs.get(str_id as u16).unwrap().data_length() >= data_len { break }
         }
 
     }
