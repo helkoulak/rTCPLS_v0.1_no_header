@@ -231,8 +231,11 @@ pub(crate) const HEADER_SIZE: usize = 1 + 2 + 2;
 
 /// Maximum message payload size.
 /// That's 2^14 payload bytes and a 2KB allowance for ciphertext overheads.
-const MAX_PAYLOAD: u16 = 16_384 + 2048;
+pub(crate) const MAX_PAYLOAD: u16 = 16_384 + 2048;
 
 /// Maximum on-the-wire message size.
 #[cfg(feature = "std")]
 pub(crate) const MAX_WIRE_SIZE: usize = MAX_PAYLOAD as usize + HEADER_SIZE;
+
+pub(crate) const MAX_RECORDS: usize = 300;
+pub(crate) const MAX_DEFRAMER_CAP: usize = MAX_WIRE_SIZE * MAX_RECORDS;

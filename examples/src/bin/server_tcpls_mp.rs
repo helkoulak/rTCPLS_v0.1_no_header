@@ -131,17 +131,16 @@ impl TlsServer {
         }
     }
 
-    pub fn verify_received(&mut self, recv_map: &mut RecvBufMap, conn_id: u64) {
+    pub fn verify_received(&mut self, recv_map: &mut RecvBufMap) {
         let mut hash_index;
 
 
         for id in recv_map.readable() {
             let stream = recv_map.get_mut(id as u32).unwrap();
 
-            let received_len: usize = u16::from_be_bytes([stream.as_ref_consumed()[0], stream.as_ref_consumed()[1]]) as usize;
-            let unprocessed_len = stream.as_ref_consumed()[2..].len();
 
-            if received_len != unprocessed_len {
+
+            if !stream.complete {
                 continue
             }
 
@@ -151,12 +150,12 @@ impl TlsServer {
                 None => panic!("hash prefix does not exist"),
             };
 
-            self.tcpls_session.tcp_connections.get_mut(&conn_id).unwrap().nbr_bytes_received += unprocessed_len as u32;
-            assert_eq!(&stream.as_ref_consumed()[hash_index..], self.calculate_sha256_hash(&stream.as_ref_consumed()[2..hash_index - 4]).as_ref());
+
+            assert_eq!(&stream.as_ref_consumed()[hash_index..], self.calculate_sha256_hash(&stream.as_ref_consumed()[..hash_index - 4]).as_ref());
             print!("\n \n Bytes received on stream {:?} : \n \n SHA-256 Hash {:?} \n Total length: {:?} \n",
                 id,
                 &stream.as_ref_consumed()[hash_index..].iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>(),
-                unprocessed_len);
+                   stream.as_ref_consumed()[..hash_index - 4].len());
             stream.empty_stream();
             recv_map.remove_readable(id);
         }
@@ -706,7 +705,7 @@ fn main() {
                 _ => {
                     tcpls_server.conn_event(event, &mut recv_map);
                     if !tcpls_server.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking(){
-                        tcpls_server.verify_received(&mut recv_map, event.token().0 as u64);
+                        tcpls_server.verify_received(&mut recv_map);
                     }
                 },
             }

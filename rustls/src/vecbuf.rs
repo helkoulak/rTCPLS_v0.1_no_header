@@ -25,6 +25,8 @@ pub(crate) struct ChunkVecBuffer {
     /// The offset immediately behind "current_offset"
     previous_offset: u64,
 
+    pub(crate) fin: bool,
+
 }
 
 impl ChunkVecBuffer {
@@ -75,6 +77,10 @@ impl ChunkVecBuffer {
             len += ch.data.len();
         }
         len
+    }
+
+    pub(crate) fn chunk_number(&self) -> usize {
+        self.chunks.len()
     }
 
     /// For a proposed append of `len` bytes, how many

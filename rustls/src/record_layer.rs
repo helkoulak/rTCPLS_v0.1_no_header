@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 use core::num::NonZeroU64;
-use std::collections::hash_map;
-
+use std::collections::{hash_map, BTreeMap};
+use std::prelude::rust_2015::ToString;
 use octets::Octets;
 
 use crate::ContentType;
@@ -9,8 +9,8 @@ use crate::crypto::cipher::{InboundOpaqueMessage, MessageDecrypter, MessageEncry
 use crate::error::Error;
 #[cfg(feature = "logging")]
 use crate::log::trace;
-use crate::msgs::deframer::RecordsInfoMap;
-use crate::msgs::message::{InboundPlainMessage, OutboundOpaqueMessage, OutboundPlainMessage};
+use crate::msgs::deframer::{RangeBufInfo, RecordsInfoMap};
+use crate::msgs::message::{InboundPlainMessage, OutboundOpaqueMessage, OutboundPlainMessage, HEADER_SIZE};
 use crate::recvbuf::RecvBufMap;
 use crate::tcpls::frame::Frame;
 use crate::tcpls::stream::{SimpleIdHashMap, StreamMap};
@@ -53,7 +53,6 @@ pub struct RecordLayer {
     // of message size this is allowed for.
     trial_decryption_len: Option<usize>,
 
-
     early_data_requested: bool,
 }
 
@@ -66,7 +65,7 @@ impl RecordLayer {
             streams: StreamMap::new(),
             /*is_handshaking: true,*/
             has_decrypted: false,
-            write_seq_map: WriteSeqMap::default() ,
+            write_seq_map: WriteSeqMap::default(),
             encrypt_state: DirectionState::Invalid,
             decrypt_state: DirectionState::Invalid,
             conn_in_use: 0,
@@ -134,7 +133,9 @@ impl RecordLayer {
         &mut self,
         encr: InboundOpaqueMessage<'a>,
         recv_map: &'a mut RecvBufMap,
-        records_info_map: &mut RecordsInfoMap,
+        records_info_map: &mut SimpleIdHashMap<BTreeMap<usize, RangeBufInfo>>,
+        start: usize,
+        end: usize,
     ) -> Result<Option<Decrypted<'a>>, Error> {
         if self.decrypt_state != DirectionState::Active {
             return Ok(Some(Decrypted {
@@ -168,28 +169,30 @@ impl RecordLayer {
                         Frame::Stream {
                             length,
                             offset,
-                            stream_id, ..
+                            stream_id,
+                            fin,
                         } => {
                             recv_map.get_or_create(stream_id as u64, None);
                             if recv_map.get_mut(stream_id).unwrap().offset != offset {
-                                records_info_map.create_stream_record_info(plaintext.payload.iter().as_slice(),
-                                                                           length,
-                                                                           offset,
-                                                                           stream_id);
-                                return Ok(None);
+                                records_info_map.entry(self.conn_in_use as u64)
+                                    .or_insert_with(BTreeMap::new)
+                                    .insert(start + HEADER_SIZE, RangeBufInfo::from(offset, stream_id as u16,
+                                                                      length as usize, end - start, true, if fin == 1 { true } else { false },
+                                    ));
+
+                                return Err(Error::General("Record out of order".to_string()));
                             } else {
-                                if recv_map.get_mut(stream_id).unwrap().capacity() < plaintext.payload.len(){
+                                if recv_map.get_mut(stream_id).unwrap().capacity() < plaintext.payload.len() {
                                     return Err(Error::BufferTooShort);
                                 }
                                 recv_map.get_mut(stream_id).unwrap().clone_buffer(plaintext.payload);
                                 recv_map.insert_readable(stream_id as u64);
                                 recv_map.get_mut(stream_id).unwrap().offset += length as u64;
+                                recv_map.get_mut(stream_id).unwrap().complete =  if fin == 1 { true } else { false };
                             }
-                        },
+                        }
                         _ => {}
                     };
-
-
                 }
                 if !self.has_decrypted {
                     self.has_decrypted = true;
@@ -232,7 +235,7 @@ impl RecordLayer {
     pub(crate) fn encrypt_outgoing_tcpls(
         &mut self,
         plain: OutboundPlainMessage,
-        frame_header: Option<Frame>
+        frame_header: Option<Frame>,
     ) -> OutboundOpaqueMessage {
         debug_assert!(self.encrypt_state == DirectionState::Active);
         assert!(!self.encrypt_exhausted());
@@ -334,28 +337,27 @@ impl RecordLayer {
     }
 
 
-
     /// Return true if we have ever decrypted a message. This is used in place
     /// of checking the read_seq since that will be reset on key updates.
     pub(crate) fn has_decrypted(&self) -> bool {
         self.has_decrypted
     }
 
-    pub(crate) fn write_seq(& self) -> u64 {
+    pub(crate) fn write_seq(&self) -> u64 {
         self.write_seq_map.get(self.conn_in_use as u64).write_seq
     }
     ///Get id of TCP connection in use
-    pub fn get_conn_id(& self) -> u32 {
+    pub fn get_conn_id(&self) -> u32 {
         self.conn_in_use
     }
     /// Returns the number of remaining write sequences
     pub(crate) fn remaining_write_seq(&mut self) -> Option<NonZeroU64> {
         SEQ_SOFT_LIMIT
-            .checked_sub( self.write_seq_map.get_or_create(self.conn_in_use as u64).write_seq)
+            .checked_sub(self.write_seq_map.get_or_create(self.conn_in_use as u64).write_seq)
             .and_then(NonZeroU64::new)
     }
 
-    pub(crate) fn read_seq(& self) -> u64 {
+    pub(crate) fn read_seq(&self) -> u64 {
         self.read_seq_map.get(self.conn_in_use as u64).read_seq
     }
 
@@ -377,9 +379,9 @@ impl RecordLayer {
         }
     }
 
-   /* pub(crate) fn set_not_handshaking(&mut self) {
-        self.is_handshaking = false;
-    }*/
+    /* pub(crate) fn set_not_handshaking(&mut self) {
+         self.is_handshaking = false;
+     }*/
 
     pub(crate) fn enc_dec_for_connection(&mut self, conn_id: u32) {
         self.conn_in_use = conn_id;
@@ -404,12 +406,12 @@ impl WriteSeqMap {
         match self.map.entry(stream_id) {
             hash_map::Entry::Vacant(v) => {
                 v.insert(WriteSeq::new())
-            },
+            }
             hash_map::Entry::Occupied(v) => v.into_mut(),
         }
     }
 
-    pub fn get(&self, stream_id: u64) -> & WriteSeq {
+    pub fn get(&self, stream_id: u64) -> &WriteSeq {
         self.map.get(&stream_id).unwrap()
     }
 
@@ -418,7 +420,6 @@ impl WriteSeqMap {
             seq.1.write_seq = 0;
         }
     }
-
 }
 
 #[derive(Default)]
@@ -431,12 +432,12 @@ impl ReadSeqMap {
         match self.map.entry(stream_id) {
             hash_map::Entry::Vacant(v) => {
                 v.insert(ReadSeq::new())
-            },
+            }
             hash_map::Entry::Occupied(v) => v.into_mut(),
         }
     }
 
-    pub fn get(&self, stream_id: u64) -> & ReadSeq {
+    pub fn get(&self, stream_id: u64) -> &ReadSeq {
         self.map.get(&stream_id).unwrap()
     }
 
@@ -445,7 +446,6 @@ impl ReadSeqMap {
             seq.1.read_seq = 0;
         }
     }
-
 }
 #[derive(Default)]
 pub struct WriteSeq {
@@ -458,7 +458,6 @@ impl WriteSeq {
             write_seq: 0,
         }
     }
-
 }
 pub struct ReadSeq {
     read_seq: u64,
@@ -470,7 +469,6 @@ impl ReadSeq {
             read_seq: 0,
         }
     }
-
 }
 
 #[cfg(test)]
@@ -494,13 +492,12 @@ mod tests {
             }
 
             fn decrypt_tcpls<'a, 'b>(&mut self, _msg: InboundOpaqueMessage<'a>, _seq: u64, _conn_id: u32) -> Result<InboundPlainMessage<'a>, Error> {
-                Ok(InboundPlainMessage{
+                Ok(InboundPlainMessage {
                     version: ProtocolVersion::TLSv1_3,
                     payload: &[],
                     typ: ApplicationData,
                 })
             }
-
         }
 
         let mut app_buffs = RecvBufMap::new();
@@ -537,7 +534,8 @@ mod tests {
                 ContentType::Handshake,
                 ProtocolVersion::TLSv1_2,
                 &mut [0xC0, 0xFF, 0xEE],
-            ), &mut app_buffs, &mut RecordsInfoMap::default())
+            ), &mut app_buffs, &mut SimpleIdHashMap::default(), 0, 0,
+            )
             .unwrap();
         assert!(matches!(record_layer.decrypt_state, DirectionState::Active));
         assert_eq!(record_layer.read_seq_map.get_or_create(0).read_seq, 1);

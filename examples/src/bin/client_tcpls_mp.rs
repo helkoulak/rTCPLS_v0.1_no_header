@@ -29,7 +29,7 @@ struct TlsClient {
     clean_closure: bool,
     tcpls_session: TcplsSession,
     all_joined: bool,
-    sending_ids: SimpleIdHashSet,
+    data_sent: bool,
     poll: mio::Poll,
 }
 
@@ -40,7 +40,7 @@ impl TlsClient {
             clean_closure: false,
             tcpls_session: TcplsSession::new(false),
             all_joined: false,
-            sending_ids: SimpleIdHashSet::default(),
+            data_sent: false,
             poll: mio::Poll::new().unwrap(),
         }
     }
@@ -60,7 +60,7 @@ impl TlsClient {
                     }
                 }
 
-                if !self.sending_ids.contains(&(token.0 as u64)) &&
+                if !self.data_sent &&
                     self.tcpls_session.tcp_connections.len() == 3 {
                     self.send_data(vec![1u8; 64000].as_slice(), 0).expect("");
                     self.send_data(vec![2u8; 64000].as_slice(), 1).expect("");
@@ -71,9 +71,7 @@ impl TlsClient {
                     conn_ids.push(1);
                     conn_ids.push(2);
                     self.tcpls_session.send_on_connection(conn_ids, None).expect("Sending on connection failed");
-                    self.sending_ids.insert(0);
-                    self.sending_ids.insert(1);
-                    self.sending_ids.insert(2);
+                    self.data_sent = true;
                 }
             }
         }
@@ -201,16 +199,12 @@ impl TlsClient {
 
     fn send_data(&mut self, input: &[u8], stream: u16) -> io::Result<()> {
         let mut data = Vec::new();
-        // Total length to send
-        let mut len:u16 = 0;
 
-        len += input.len() as u16;
+
+
         // Calculate the hash of input using SHA-256
         let hash = TlsClient::calculate_sha256_hash(input);
-        len += hash.algorithm().output_len() as u16;
-        len += 4;
-        // Append total length and hash value to the input to be sent to the peer
-        data.extend_from_slice( [((len >> 8) & 0xFF) as u8, ((len & 0xFF) as u8)].as_slice());
+
         data.extend_from_slice(input);
         data.extend(vec![0x0F, 0x0F, 0x0F, 0x0F]);
         data.extend(hash.as_ref());

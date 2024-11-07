@@ -253,13 +253,16 @@ impl TcplsSession {
 
 
             let mut stream_len = tls_conn.record_layer.streams.get_mut(id as u32).unwrap().send.len();
+            let mut number_of_chunks = tls_conn.record_layer.streams.get_mut(id as u32).unwrap().send.chunk_number();
             let mut sent;
 
             while stream_len > 0 {
                 for conn_id in &conn_ids {
                     let socket = &mut self.tcp_connections.get_mut(conn_id).unwrap().socket;
                     let chunk = match tls_conn.record_layer.streams.get_mut(id as u32).unwrap().send.get_chunk() {
-                        Some(ch) => ch,
+                        Some(ch) => {
+                            ch
+                        },
                         None => {
                             stream_len = 0;
                             break
@@ -274,6 +277,10 @@ impl TcplsSession {
                             tls_conn.set_connection_in_use(*conn_id as u32);
                             match typ {
                                 ContentType::ApplicationData => {
+                                    number_of_chunks -= 1;
+                                    if number_of_chunks == 0 {
+                                        tls_conn.record_layer.streams.get_mut(id as u32).unwrap().send.fin = true;
+                                    }
                                     tls_conn.write_to = id as u16;
                                     tls_conn.writer().write(chunk.data.as_slice()).expect("Could not write data to stream");
                                 },
@@ -315,7 +322,6 @@ impl TcplsSession {
 
             if stream_len == 0 {
                 tls_conn.record_layer.streams.reset_stream(id as u32);
-                return Ok(done)
             }
         }
 
@@ -339,15 +345,24 @@ impl TcplsSession {
         conn_id: u32,
     ) -> Result<IoState, Error> {
 
-        let tls_conn = self.tls_conn.as_mut().unwrap();
-        // Set deframer buffer to use
-        tls_conn.set_connection_in_use(conn_id);
-
-        let io_state = match tls_conn.process_new_packets(app_buffers) {
-                Ok(io_state) => io_state,
-                Err(err) => return Err(err),
-            };
-
+        let mut io_state = IoState::new();
+        let def_ids: Vec<u64> = self.tls_conn.as_mut().unwrap().get_deframer_ids();
+        // Loop over deframer buffers that have data received
+        loop {
+            for def_id in &def_ids {
+                self.tls_conn.as_mut().unwrap().set_connection_in_use(*def_id as u32);
+                io_state = match self.tls_conn.as_mut().unwrap().process_new_packets(app_buffers) {
+                    Ok(io_state) => io_state,
+                    Err(err) => return Err(err),
+                };
+            }
+            if self.tls_conn.as_mut().unwrap().received_data_processed {
+                self.tls_conn.as_mut().unwrap().received_data_processed = false;
+                continue
+            } else {
+                break
+            }
+        }
 
         Ok(io_state)
     }

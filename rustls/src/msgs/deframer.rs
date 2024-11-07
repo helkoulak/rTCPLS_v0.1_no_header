@@ -4,14 +4,13 @@ use core::slice::SliceIndex;
 use std::collections::{hash_map, BTreeMap};
 #[cfg(feature = "std")]
 use std::io;
-
-
+use std::{ptr, vec};
 use crate::enums::{ContentType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerMisbehaved};
 use crate::msgs::codec;
 #[cfg(feature = "std")]
 use crate::msgs::message::MAX_WIRE_SIZE;
-use crate::msgs::message::{InboundOpaqueMessage, InboundPlainMessage, MessageError};
+use crate::msgs::message::{InboundOpaqueMessage, InboundPlainMessage, MessageError, HEADER_SIZE, MAX_DEFRAMER_CAP, MAX_PAYLOAD};
 use crate::record_layer::{Decrypted, RecordLayer};
 use crate::recvbuf::RecvBufMap;
 use crate::tcpls::stream::SimpleIdHashMap;
@@ -34,9 +33,18 @@ pub struct MessageDeframer {
     /// If we're in the middle of joining a handshake payload, this is the metadata.
     joining_hs: Option<HandshakePayloadMeta>,
 
-    /// Info of records delivered for each stream. The key is the stream ID.
-    pub(crate) records_info: RecordsInfoMap,
+    pub(crate) record_info: SimpleIdHashMap<BTreeMap<usize, RangeBufInfo>>,
 
+    pub(crate) current_conn_id: u64,
+
+    pub(crate) processed_ranges: SimpleIdHashMap<Vec<Range<usize>>>,
+
+    /// Range of dicard area in deframer buffer.
+    pub(crate) discard_range: Range<usize>,
+
+    pub(crate) discard_threshold: usize,
+
+    pub(crate) used: usize,
 }
 
 impl MessageDeframer {
@@ -194,7 +202,7 @@ impl MessageDeframer {
             // If we don't know the payload size yet or if the payload size is larger
             // than the currently buffered payload, we need to wait for more data.
             let src = buffer.raw_slice_to_filled_range(plain_payload_slice);
-            match self.append_hs(version, InternalPayload(src), end, buffer)? {
+            match self.append_hs(version, InternalPayload(src), end, 0, buffer)? {
                 HandshakePayloadState::Blocked => return Ok(None),
                 HandshakePayloadState::Complete(len) => break len,
                 HandshakePayloadState::Continue => continue,
@@ -254,58 +262,74 @@ impl MessageDeframer {
     ) -> Result<Option<Deframed<'b>>, Error> {
         if let Some(last_err) = self.last_error.clone() {
             return Err(last_err);
-        } else if buffer.is_empty() && self.records_info.is_empty(){
+        } else if buffer.used == 0{
             return Ok(None);
         }
+
+        let conn_id = self.current_conn_id;
+        let mut start: usize;
+        let mut end: usize;
 
         // We loop over records we've received but not processed yet.
         // For records that decrypt as `Handshake`, we keep the current state of the joined
         // handshake message payload in `self.joining_hs`, appending to it as we see records.
         let expected_len = loop {
-            let start = match &self.joining_hs {
-                Some(meta) => {
-                    match meta.expected_len {
-                        // We're joining a handshake payload, and we've seen the full payload.
-                        Some(len) if len <= meta.payload.len() => break len,
-                        // Not enough data, and we can't parse any more out of the buffer (QUIC).
-                        _ if meta.quic => return Ok(None),
-                        // Try parsing some more of the encrypted buffered data.
-                        _ => meta.message.end,
-                    }
+            start = match self.record_info.get_mut(&conn_id) {
+                // If no records exist for conn_id
+                None  => {
+                    self.processed_ranges
+                        .get(&conn_id)
+                        .and_then(|ranges| ranges.last())
+                        .map(|range| range.end)
+                        .unwrap_or(0)
                 }
-                None => 0,
-            };
 
-            if !self.records_info.is_empty() {
-                //Remove processed entries
-                for (_stream_id, records_info) in self.records_info.records.iter_mut() {
-                    let offsets_to_remove: Vec<_> = records_info
-                        .stream_records
-                        .iter()
-                        .filter_map(|(offset, record_info)| if record_info.processed { Some(*offset) } else { None })
-                        .collect();
-
-                    for offset in offsets_to_remove {
-                        records_info.stream_records.remove(&offset);
-                    }
+                Some(records) if records.is_empty() => {
+                    self.processed_ranges
+                        .get(&conn_id)
+                        .and_then(|ranges| ranges.last())
+                        .map(|range| range.end)
+                        .unwrap_or(0)
                 }
-                for (stream_id, records_info) in self.records_info.records.iter_mut() {
-                    for (offset, record_info) in records_info.stream_records.iter_mut() {
-                        if app_buffers.get_or_create(*stream_id as u64, None).offset == *offset {
-                            app_buffers.get_mut(*stream_id).unwrap().clone_buffer(&record_info.record);
-                            app_buffers.insert_readable(*stream_id as u64);
-                            app_buffers.get_mut(*stream_id).unwrap().offset += record_info.len as u64;
-                            record_info.processed = true;
+
+                // If records exist and are non-empty, check for a match or fallback to the last range's end
+                Some(records) => {
+
+                    let mut next: usize = 0;
+                    for (offset, info) in records.iter_mut() {
+                        if let Some(recv_buf) = app_buffers.get_mut(info.id as u32) {
+                            if recv_buf.offset == info.offset {
+
+                                recv_buf.clone_buffer(buffer.get_slice(*offset, info.plain_len));
+                                self.processed_ranges.entry(conn_id)
+                                    .or_insert_with(Vec::new)
+                                    .push(info.offset as usize..info.offset as usize+ info.plain_len);
+                                recv_buf.offset += info.plain_len as u64;
+                                if info.fin == true {recv_buf.complete = true};
+
+                            }
+                            next = (*offset - HEADER_SIZE) + info.enc_len;
+
                         }
                     }
+
+                    let last_processed_end = self.processed_ranges
+                        .get(&conn_id)
+                        .and_then(|ranges| ranges.last())
+                        .map(|range| range.end)
+                        .unwrap_or(0);
+
+
+                    core::cmp::max(next, last_processed_end)
+
                 }
-            }
+            };
 
 
             // Does our `buf` contain a full message?  It does if it is big enough to
             // contain a header, and that header has a length which falls within `buf`.
             // If so, deframe it and place the message onto the frames output queue.
-            let mut rd = codec::ReaderMut::init(buffer.filled_get_mut(start..));
+            let mut rd = codec::ReaderMut::init(buffer.get_mut(start));
             let m = match InboundOpaqueMessage::read(&mut rd) {
                 Ok(m) => m,
                 Err(msg_err) => {
@@ -326,7 +350,7 @@ impl MessageDeframer {
             };
 
             // Return CCS messages and early plaintext alerts immediately without decrypting.
-            let end = start + rd.used();
+            end = start + rd.used();
             let version_is_tls13 = matches!(negotiated_version, Some(ProtocolVersion::TLSv1_3));
             let allowed_plaintext = match m.typ {
                 // CCS messages are always plaintext.
@@ -354,13 +378,17 @@ impl MessageDeframer {
                     payload,
                 } = m;
                 let raw_payload_slice = RawSlice::from(&*payload);
-                // This is unencrypted. We check the contents later.
-                buffer.queue_discard(end);
+
                 let message = InboundPlainMessage {
                     typ,
                     version,
                     payload: buffer.take(raw_payload_slice),
                 };
+                // This is unencrypted. We check the contents later.
+                self.record_info.get_mut(&conn_id).map(|records| records.remove(&start));
+                self.processed_ranges.entry(conn_id)
+                    .or_insert_with(Vec::new)
+                    .push(start..end);
                 return Ok(Some(Deframed {
                     want_close_before_decrypt: false,
                     aligned: true,
@@ -370,7 +398,7 @@ impl MessageDeframer {
             }
 
             // Decrypt the encrypted message (if necessary).
-            let (typ, version, plain_payload_slice) = match record_layer.decrypt_incoming_tcpls(m, app_buffers, &mut self.records_info) {
+            let (typ, version, plain_payload_slice) = match record_layer.decrypt_incoming_tcpls(m, app_buffers, &mut self.record_info, start, end) {
                 Ok(Some(decrypted)) => {
                     let Decrypted {
                         want_close_before_decrypt,
@@ -392,10 +420,20 @@ impl MessageDeframer {
                     ));
                 }
                 Ok(None) => {
-                    buffer.queue_discard(end);
+                    self.record_info.get_mut(&conn_id).map(|records| records.remove(&start));
+                    self.processed_ranges.entry(conn_id)
+                        .or_insert_with(Vec::new)
+                        .push(start..end);
                     continue;
                 }
-                Err(e) => return Err(e),
+                Err(e) => match e {
+                    Error::General(ref msg) if msg == "Record out of order" => {
+                    continue;
+                    },
+                    _ => {
+                    return Err(e)
+                    },
+                },
             };
 
             if self.joining_hs.is_some() && typ != ContentType::Handshake {
@@ -408,7 +446,11 @@ impl MessageDeframer {
 
             // If it's not a handshake message, just return it -- no joining necessary.
             if typ != ContentType::Handshake {
-                buffer.queue_discard(end);
+                self.record_info.get_mut(&conn_id).map(|records| records.remove(&start));
+                self.processed_ranges.entry(conn_id)
+                    .or_insert_with(Vec::new)
+                    .push(start..end);
+
                 let message = InboundPlainMessage {
                     typ,
                     version,
@@ -425,10 +467,16 @@ impl MessageDeframer {
             // If we don't know the payload size yet or if the payload size is larger
             // than the currently buffered payload, we need to wait for more data.
             let src = buffer.raw_slice_to_filled_range(plain_payload_slice);
-            match self.append_hs(version, InternalPayload(src), end, buffer)? {
+            match self.append_hs(version, InternalPayload(src), end, start, buffer)? {
                 HandshakePayloadState::Blocked => return Ok(None),
                 HandshakePayloadState::Complete(len) => break len,
-                HandshakePayloadState::Continue => continue,
+                HandshakePayloadState::Continue => {
+                    self.processed_ranges
+                        .entry(conn_id)
+                        .or_insert_with(Vec::new)
+                        .push(start..end);
+                    continue
+                },
             }
         };
 
@@ -452,9 +500,13 @@ impl MessageDeframer {
         } else {
             // Otherwise, we've yielded the last handshake payload in the buffer, so we can
             // discard all the bytes that we're previously buffered as handshake data.
-            let end = meta.message.end;
+
+
+            self.processed_ranges
+                .entry(conn_id)
+                .or_insert_with(Vec::new)
+                .push(meta.message.start..meta.message.end);
             self.joining_hs = None;
-            buffer.queue_discard(end);
         }
 
         let message = InboundPlainMessage {
@@ -489,6 +541,7 @@ impl MessageDeframer {
         version: ProtocolVersion,
         payload: P,
         end: usize,
+        start: usize,
         buffer: &mut B,
     ) -> Result<HandshakePayloadState, Error> {
         let meta = match &mut self.joining_hs {
@@ -518,7 +571,7 @@ impl MessageDeframer {
                 buffer.copy(&payload, 0);
                 self.joining_hs
                     .insert(HandshakePayloadMeta {
-                        message: Range { start: 0, end },
+                        message: Range { start, end },
                         payload: Range {
                             start: 0,
                             end: payload.len(),
@@ -539,8 +592,116 @@ impl MessageDeframer {
         })
     }
 
+    pub fn calculate_discard_range(&mut self) {
+        if self.used < self.discard_threshold {
+            return;
+        }
+        let conn_id = self.current_conn_id;
+        if !self.processed_ranges.contains_key(&conn_id){
+            return;
+        }
+        let mut initial_discard_range: Range::<usize> = { self.discard_range.start.. self.discard_range.end};
+        loop {
+            for range in self.processed_ranges.get(&conn_id).unwrap().iter() {
+                let entry_start = range.start;
+                let entry_end = range.end;
+
+                // Initiate range with first processed entry found and build upon
+                if self.discard_range.start == 0 && self.discard_range.end == 0 {
+                    self.discard_range.start = entry_start;
+                    self.discard_range.end = entry_end;
+                    continue
+                }
+                // expand to the right
+                if entry_start == self.discard_range.end  {
+                    self.discard_range.end = entry_end;
+                    continue
+                }
+                // expand to the left
+                if entry_end == self.discard_range.start {
+                    self.discard_range.start = entry_start;
+                    continue
+                }
+            }
+            if initial_discard_range.start == self.discard_range.start && initial_discard_range.end == self.discard_range.end {
+                break
+            }else {
+                initial_discard_range.start = self.discard_range.start;
+                initial_discard_range.end = self.discard_range.end;
+
+            }
+        }
+
+    }
+
+    pub fn rearrange_record_info(&mut self) {
+        let conn_id = self.current_conn_id;
+        let discard_len = self.discard_range.end - self.discard_range.start;
+        let mut record_info_new: BTreeMap<usize, RangeBufInfo> = BTreeMap::default();
+        let mut processed_ranges_new: Vec<Range<usize>> = Vec::new();
+        if let Some(record_map) = self.record_info.get_mut(&conn_id) {
+            for (offset, info) in record_map.iter().filter(|(&offset, _)| offset < self.discard_range.start || offset >= self.discard_range.end) {
+                record_info_new.insert(
+                    match *offset >= self.discard_range.end {
+                        true => { *offset - discard_len },
+                        false => *offset,
+                    },
+                    RangeBufInfo {
+                        offset: info.offset,
+                        plain_len: info.plain_len,
+                        id: info.id,
+                        processed: info.processed,
+                        enc_len: info.enc_len,
+                        fin: info.fin,
+                    },
+                );
+            }
+            *record_map = record_info_new;
+        }
+
+
+
+        if let Some(ranges) = self.processed_ranges.get_mut(&conn_id) {
+            for range in ranges.iter().filter(|&x| x.end <= self.discard_range.start || x.start >= self.discard_range.end){
+                processed_ranges_new.push(match range.end <= self.discard_range.start {
+                    true => range.start..range.end,
+                    false => range.start - discard_len..range.end - discard_len,
+                })
+            }
+            *ranges = processed_ranges_new
+        }
+
+
+        self.discard_range.start = 0;
+        self.discard_range.end   = 0;
+    }
+
+
+
     pub fn currently_joining_hs(&self) -> bool {
         self.joining_hs.is_some()
+    }
+
+    pub fn discard_range_is_empty(&self) -> bool {
+        self.discard_range.is_empty()
+    }
+
+    pub fn delete_processed(&mut self) {
+        let conn_id = self.current_conn_id;
+        match self.record_info.get_mut(&conn_id) {
+            Some(records) => {
+                match self.processed_ranges.get(&conn_id) {
+                    Some(ranges) => {
+                        for range in ranges {
+                            records.remove(&range.start);
+                        }
+                    },
+                    None => return,
+                };
+
+            },
+            None => return,
+        }
     }
 
 }
@@ -563,7 +724,7 @@ impl MessageDeframer {
         }
 
         let end = buffer.len() + payload.len();
-        self.append_hs(version, ExternalPayload(payload), end, buffer)?;
+        self.append_hs(version, ExternalPayload(payload), end, 0, buffer)?;
         Ok(())
     }
 
@@ -634,6 +795,8 @@ impl<'a> AppendPayload<'a> for InternalPayload {
 
 #[derive(Default, Debug)]
 pub struct DeframerVecBuffer {
+    /// Id of related TCP connection
+    id: u64,
     /// Buffer of data read from the socket, in the process of being parsed into messages.
     ///
     /// For buffer size management, checkout out the [`DeframerVecBuffer::prepare_read()`] method.
@@ -647,20 +810,22 @@ pub struct DeframerVecBuffer {
 }
 
 impl DeframerVecBuffer {
-    pub fn new() -> DeframerVecBuffer {
+    pub fn new(id: u64) -> DeframerVecBuffer {
         DeframerVecBuffer{
-            cap: MAX_WIRE_SIZE,
+            id,
+            cap: MAX_DEFRAMER_CAP,
+            buf: vec![0u8; MAX_DEFRAMER_CAP],
             ..Default::default()
         }
     }
     /// Borrows the initialized contents of this buffer and tracks pending discard operations via
     /// the `discard` reference
     pub fn borrow(&mut self) -> DeframerSliceBuffer {
-        DeframerSliceBuffer::new(&mut self.buf[..self.used])
+        DeframerSliceBuffer::new(&mut self.buf[..self.used], self.used)
     }
-
     /// Discard `taken` bytes from the start of our buffer.
-    pub fn discard(&mut self, taken: usize) {
+    pub fn discard(&mut self, start: usize, taken: usize) {
+
         #[allow(clippy::comparison_chain)]
         if taken < self.used {
             /* Before:
@@ -676,16 +841,33 @@ impl DeframerVecBuffer {
              * 0          ^ self.used
              */
 
-            self.buf
-                .copy_within(taken..self.used, 0);
-            self.used -= taken;
+            if (start + taken) == self.used {
+                self.used = start;
+            } else {
+                Self::copy_within(self.buf.as_mut_slice(), start + taken ,start, (start + taken..self.used).len());
+                // self.buf.copy_within(start + taken..self.used, start);
+                self.used -= taken;
+            }
+
         } else if taken == self.used {
             self.used = 0;
         }
     }
 
     pub fn set_deframer_cap(&mut self, cap: usize) {
+        self.buf.resize(cap, 0);
         self.cap = cap;
+    }
+    fn copy_within<T>(slice: &mut [T], src: usize, dst: usize, count: usize) {
+        assert!(src + count <= slice.len());
+        assert!(dst + count <= slice.len());
+
+        unsafe {
+            ptr::copy(slice.as_ptr().add(src), slice.as_mut_ptr().add(dst), count);
+        }
+    }
+    pub fn calculate_discard_threshold(&self) -> usize {
+        self.cap - MAX_PAYLOAD as usize
     }
 }
 
@@ -697,34 +879,11 @@ impl DeframerVecBuffer {
     }
 
     /// Resize the internal `buf` if necessary for reading more bytes.
-    fn prepare_read(&mut self, is_joining_hs: bool) -> Result<(), &'static str> {
-        // We allow a maximum of 64k of buffered data for handshake messages only. Enforce this
-        // by varying the maximum allowed buffer size here based on whether a prefix of a
-        // handshake payload is currently being buffered. Given that the first read of such a
-        // payload will only ever be 4k bytes, the next time we come around here we allow a
-        // larger buffer size. Once the large message and any following handshake messages in
-        // the same flight have been consumed, `pop()` will call `discard()` to reset `used`.
-        // At this point, the buffer resizing logic below should reduce the buffer size.
-        let allow_max = match is_joining_hs {
-            true => MAX_HANDSHAKE_SIZE as usize,
-            false => self.cap,
-        };
+    fn prepare_read(&mut self, _is_joining_hs: bool) -> Result<(), &'static str> {
+        let allow_max = self.buf.len();
 
         if self.used >= allow_max {
             return Err("message buffer full");
-        }
-
-        // If we can and need to increase the buffer size to allow a 4k read, do so. After
-        // dealing with a large handshake message (exceeding `OutboundOpaqueMessage::MAX_WIRE_SIZE`),
-        // make sure to reduce the buffer size again (large messages should be rare).
-        // Also, reduce the buffer size if there are neither full nor partial messages in it,
-        // which usually means that the other side suspended sending data.
-        let need_capacity = Ord::min(allow_max, self.used + READ_SIZE);
-        if need_capacity > self.buf.len() {
-            self.buf.resize(need_capacity, 0);
-        } else if self.used == 0 || self.buf.len() > allow_max {
-            self.buf.resize(need_capacity, 0);
-            self.buf.shrink_to(need_capacity);
         }
 
         Ok(())
@@ -756,6 +915,10 @@ impl FilledDeframerBuffer for DeframerVecBuffer {
     fn get_mut(&mut self, index: usize) -> &mut [u8] {
         &mut self.buf[index..]
     }
+
+    fn get_slice(&self, start: usize, len: usize) -> &[u8] {
+        &self.buf[start..start+len]
+    }
 }
 
 #[cfg(feature = "std")]
@@ -782,16 +945,17 @@ pub struct DeframerSliceBuffer<'a> {
     // number of bytes to discard from the front of `buf` at a later time
     discard: usize,
     taken: usize,
+    used: usize,
 
 }
 
 impl<'a> DeframerSliceBuffer<'a> {
-    pub fn new(buf: &'a mut [u8]) -> Self {
+    pub fn new(buf: &'a mut [u8], used: usize) -> Self {
         Self {
             buf,
             discard: 0,
             taken: 0,
-
+            used,
         }
     }
 
@@ -803,6 +967,10 @@ impl<'a> DeframerSliceBuffer<'a> {
     /// Returns the number of bytes that need to be discarded
     pub fn pending_discard(&self) -> usize {
         self.discard
+    }
+
+    pub fn get_used(&self) -> usize {
+        self.used
     }
 
     pub fn is_empty(&self) -> bool {
@@ -850,6 +1018,10 @@ impl FilledDeframerBuffer for DeframerSliceBuffer<'_> {
 
     fn get_mut(&mut self, index: usize) -> &mut [u8] {
         &mut self.buf[index..]
+    }
+
+    fn get_slice(&self, start: usize, len: usize) -> &[u8] {
+        & self.buf[start..start+len]
     }
 }
 
@@ -906,6 +1078,8 @@ trait FilledDeframerBuffer {
     fn filled(&self) -> &[u8];
 
     fn get_mut(&mut self, index: usize) -> &mut [u8];
+
+    fn get_slice(&self, start: usize, len: usize) -> &[u8];
 
 }
 
@@ -1058,13 +1232,56 @@ impl MessageDeframerMap {
     pub(crate) fn get_or_create_def_vec_buff(&mut self, conn_id: u64) -> &mut DeframerVecBuffer {
         match self.deframers.entry(conn_id) {
             hash_map::Entry::Vacant(v) => {
-                v.insert(DeframerVecBuffer::new())
+                v.insert(DeframerVecBuffer::new(conn_id))
             },
             hash_map::Entry::Occupied(v) => v.into_mut(),
         }
     }
+    /// Return ids of deframer buffers that have data received from socket
+    pub(crate) fn get_keys(&self) -> Vec<u64> {
+        let mut keys: Vec<u64> = Vec::new();
+        for d in &self.deframers{
+            if d.1.used > 0 {
+                keys.push(d.1.id)
+            }
+        }
+        keys
+    }
 
+}
 
+#[derive(Clone, Debug, Default)]
+pub(crate) struct RangeBufInfo {
+    /// The id of the stream this record belongs to
+    pub(crate) id: u16,
+
+    /// The chunk number of record.
+    pub(crate) offset: u64,
+
+    /// Length of chunk
+    pub(crate) plain_len: usize,
+
+    /// Length of chunk encrypted
+    pub(crate) enc_len: usize,
+
+    ///Whether copied in app buffers
+    pub(crate) processed: bool,
+
+    pub(crate) fin: bool,
+
+}
+
+impl RangeBufInfo {
+    pub(crate) fn from(offset: u64, id: u16, plain_len: usize, enc_len: usize, processed: bool, fin: bool) -> Self {
+        Self {
+            id,
+            offset,
+            plain_len,
+            enc_len,
+            processed,
+            fin,
+        }
+    }
 }
 
 
@@ -1321,7 +1538,7 @@ mod tests {
         fn new() -> Self {
             Self {
                 inner: MessageDeframer::default(),
-                buffer: DeframerVecBuffer::new()
+                buffer: DeframerVecBuffer::new(0)
             }
         }
         fn input_bytes(&mut self, bytes: &[u8]) -> io::Result<usize> {
@@ -1368,7 +1585,7 @@ mod tests {
                 .message
                 .into_owned();
             let discard = deframer_buffer.pending_discard();
-            self.buffer.discard(discard);
+            self.buffer.discard(discard, 0);
             m
         }
 

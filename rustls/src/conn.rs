@@ -4,7 +4,7 @@ use core::mem;
 use core::ops::{Deref, DerefMut};
 #[cfg(feature = "std")]
 use std::io;
-
+use std::prelude::rust_2015::Vec;
 use crate::common_state::{CommonState, Context, IoState, PlainBufsMap, State};
 use crate::enums::{AlertDescription, ContentType};
 use crate::error::{Error, PeerMisbehaved};
@@ -83,6 +83,13 @@ mod connection {
             match self {
                 Self::Client(conn) => conn.process_new_packets(app_buffers),
                 Self::Server(conn) => conn.process_new_packets(app_buffers),
+            }
+        }
+
+        pub fn get_deframer_ids(&mut self) -> Vec<u64> {
+            match self {
+                Self::Client(conn) => conn.get_deframer_ids(),
+                Self::Server(conn) => conn.get_deframer_ids(),
             }
         }
 
@@ -413,6 +420,12 @@ impl<Data> ConnectionCommon<Data> {
                                  &mut self.sendable_plaintext, app_buffers)
     }
 
+    /// Get ids of deframer buffers that have data received from socket
+    #[inline]
+    pub fn get_deframer_ids(&self) -> Vec<u64> {
+        self.deframers_map.get_keys()
+    }
+
     /// Derives key material from the agreed connection secrets.
     ///
     /// This function fills in `output` with `output.len()` bytes of key
@@ -665,7 +678,7 @@ impl<Data> ConnectionCommon<Data> {
             .deframe(None, &mut deframer_buffer, Some(recv_buf))
             .map(|opt| opt.map(|pm| Message::try_from(pm).map(|m| m.into_owned())));
         let discard = deframer_buffer.pending_discard();
-        self.deframers_map.get_or_create_def_vec_buff(DEFAULT_STREAM_ID as u64).discard(discard);
+        self.deframers_map.get_or_create_def_vec_buff(DEFAULT_STREAM_ID as u64).discard(0, discard);
 
         match res? {
             Some(Ok(msg)) => Ok(Some(msg)),
@@ -813,29 +826,38 @@ impl<Data> ConnectionCore<Data> {
                 return Err(e);
             }
         };
-
-
-        let mut discard = 0;
+        self.common_state.record_layer.enc_dec_for_connection(self.common_state.conn_in_use);
+        self.message_deframer.current_conn_id = self.common_state.conn_in_use as u64;
+        self.message_deframer.delete_processed();
+        self.message_deframer.discard_threshold = deframer_buffer.calculate_discard_threshold();
         loop {
-            self.common_state.record_layer.enc_dec_for_connection(self.common_state.conn_in_use);
-            let mut borrowed_buffer = deframer_buffer.borrow();
-            borrowed_buffer.queue_discard(discard);
 
+            let mut borrowed_buffer = deframer_buffer.borrow();
+            self.message_deframer.used = borrowed_buffer.get_used();
             let res = self.deframe(Some(&*state), &mut borrowed_buffer, Some(app_buffers));
-            discard = borrowed_buffer.pending_discard();
 
             let opt_msg = match res {
                 Ok(opt_msg) => opt_msg,
                 Err(e) => {
                     self.state = Err(e.clone());
-                    deframer_buffer.discard(discard);
+                    self.message_deframer.calculate_discard_range();
+                    deframer_buffer
+                        .discard(self.message_deframer.discard_range.start,
+                                 self.message_deframer.discard_range.end - self.message_deframer.discard_range.start);
+                    self.message_deframer.rearrange_record_info();
                     return Err(e);
                 }
             };
 
             let msg = match opt_msg {
-                Some(msg) => msg,
-                None => break,
+                Some(msg) => {
+                    self.common_state.received_data_processed |= true;
+                    msg
+                },
+                None => {
+                    self.common_state.received_data_processed |= false;
+                    break
+                },
             };
 
             if msg.typ == ContentType::ApplicationData {
@@ -847,13 +869,25 @@ impl<Data> ConnectionCore<Data> {
                 Ok(new) => state = new,
                 Err(e) => {
                     self.state = Err(e.clone());
-                    deframer_buffer.discard(discard);
+                    self.message_deframer.calculate_discard_range();
+                    if !self.message_deframer.discard_range_is_empty() {
+                        deframer_buffer
+                            .discard(self.message_deframer.discard_range.start,
+                                     self.message_deframer.discard_range.end - self.message_deframer.discard_range.start);
+                        self.message_deframer.rearrange_record_info();
+                    }
                     return Err(e);
                 }
             }
         }
 
-        deframer_buffer.discard(discard);
+        self.message_deframer.calculate_discard_range();
+        if !self.message_deframer.discard_range_is_empty() {
+            deframer_buffer
+                .discard(self.message_deframer.discard_range.start,
+                         self.message_deframer.discard_range.end - self.message_deframer.discard_range.start);
+            self.message_deframer.rearrange_record_info();
+        }
         self.state = Ok(state);
         Ok(self.common_state.current_io_state(Some(app_buffers)))
     }

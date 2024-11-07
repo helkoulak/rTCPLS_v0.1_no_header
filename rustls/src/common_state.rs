@@ -60,7 +60,7 @@ pub struct CommonState {
 
     ///Id of stream to write to
     pub write_to: u16,
-
+    pub received_data_processed: bool,
 
     queued_key_update_message: Option<Vec<u8>>,
 
@@ -99,6 +99,7 @@ impl CommonState {
             conn_in_use: 0,
             write_to: 0,
 
+            received_data_processed: false,
             queued_key_update_message: None,
 
             protocol: Protocol::Tcp,
@@ -375,7 +376,10 @@ impl CommonState {
                     length: m.payload.len() as u16,
                     offset: current_offset  ,
                     stream_id: id.unwrap(),
-                    fin: 0,
+                    fin: match self.record_layer.streams.get_or_create(id.unwrap()).unwrap().send.fin {
+                        true => 1,
+                        false => 0,
+                    },
                 })
             },
             _ => None,
@@ -844,6 +848,14 @@ pub struct IoState {
 }
 
 impl IoState {
+
+    pub fn new() -> Self {
+        Self {
+            tls_bytes_to_write: 0,
+            plaintext_bytes_to_read: 0,
+            peer_has_closed: false,
+        }
+    }
     /// How many bytes could be written by [`Connection::write_tls`] if called
     /// right now.  A non-zero value implies [`CommonState::wants_write`].
     ///
