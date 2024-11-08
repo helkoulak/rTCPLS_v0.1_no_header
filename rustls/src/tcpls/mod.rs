@@ -272,12 +272,13 @@ impl TcplsSession {
                     let encrypt = chunk.encrypt;
                     let to_send_len= chunk.data.len();
                     let data_to_send;
+                    number_of_chunks -= 1;
                     match encrypt {
                         true => {
                             tls_conn.set_connection_in_use(*conn_id as u32);
                             match typ {
                                 ContentType::ApplicationData => {
-                                    number_of_chunks -= 1;
+
                                     if number_of_chunks == 0 {
                                         tls_conn.record_layer.streams.get_mut(id as u32).unwrap().send.fin = true;
                                     }
@@ -342,7 +343,6 @@ impl TcplsSession {
     pub fn process_received(
         &mut self,
         app_buffers: &mut RecvBufMap,
-        conn_id: u32,
     ) -> Result<IoState, Error> {
 
         let mut io_state = IoState::new();

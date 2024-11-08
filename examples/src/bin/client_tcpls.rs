@@ -29,7 +29,7 @@ struct TlsClient {
     closing: bool,
     clean_closure: bool,
     tcpls_session: TcplsSession,
-    data_buffered: bool,
+    data_sent: bool,
 
 }
 
@@ -39,7 +39,7 @@ impl TlsClient {
             closing: false,
             clean_closure: false,
             tcpls_session: TcplsSession::new(false),
-            data_buffered: false,
+            data_sent: false,
         }
     }
 
@@ -50,7 +50,7 @@ impl TlsClient {
         if ev.is_readable() {
             self.do_read(recv_map, token.0 as u64);
 
-            if !self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() && !self.data_buffered {
+            if !self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() && !self.data_sent {
                 //Send three byte arrays on three streams
                 let mut id_set = SimpleIdHashSet::default();
 
@@ -58,11 +58,10 @@ impl TlsClient {
                 self.send_data(vec![1u8; 60000].as_slice(), 1).expect("");
                 self.send_data(vec![2u8; 60000].as_slice(), 2).expect("");
 
-                id_set.insert(0);
-                id_set.insert(1);
-                id_set.insert(2);
-
-                self.data_buffered = true;
+                let mut conn_ids = Vec::new();
+                conn_ids.push(0);
+                self.tcpls_session.send_on_connection(conn_ids, None).expect("Sending on connection failed");
+                self.data_sent = true;
 
             }
         }
@@ -108,7 +107,7 @@ impl TlsClient {
         // Reading some TLS data might have yielded new TLS
         // messages to process.  Errors from this indicate
         // TLS protocol problems and are fatal.
-        let io_state = match self.tcpls_session.process_received(app_buffers, id as u32) {
+        let io_state = match self.tcpls_session.process_received(app_buffers) {
             Ok(io_state) => io_state,
             Err(err) => {
                 println!("TLS error: {:?}", err);
@@ -170,27 +169,24 @@ impl TlsClient {
 
     fn send_data(&mut self, input: &[u8], stream: u16) -> io::Result<()> {
         let mut data = Vec::new();
-        // Total length to send
-        let mut len: u16 = 0;
 
-        len += input.len() as u16;
+
+
         // Calculate the hash of input using SHA-256
         let hash = TlsClient::calculate_sha256_hash(input);
-        len += hash.algorithm().output_len() as u16;
-        len += 4;
-        // Append total length and hash value to the input to be sent to the peer
-        data.extend_from_slice([((len >> 8) & 0xFF) as u8, ((len & 0xFF) as u8)].as_slice());
+
         data.extend_from_slice(input);
         data.extend(vec![0x0F, 0x0F, 0x0F, 0x0F]);
         data.extend(hash.as_ref());
 
         // Print the hash as a hexadecimal string
-        println!("\n \n File bytes on stream {:?} : \n \n SHA-256 Hash {:?} \n Total length: {:?} \n", stream, hash, len);
+        // println!("\n \n File bytes on stream {:?} : \n {:?} \n \n SHA-256 Hash {:?} \n Total length: {:?} \n", stream, file_contents, hash, len);
 
         self.tcpls_session.stream_send(stream, data.as_ref(), false);
 
 
         Ok(())
+
     }
 
 

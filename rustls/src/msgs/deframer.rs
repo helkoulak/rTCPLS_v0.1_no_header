@@ -9,7 +9,7 @@ use crate::enums::{ContentType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerMisbehaved};
 use crate::msgs::codec;
 #[cfg(feature = "std")]
-use crate::msgs::message::MAX_WIRE_SIZE;
+
 use crate::msgs::message::{InboundOpaqueMessage, InboundPlainMessage, MessageError, HEADER_SIZE, MAX_DEFRAMER_CAP, MAX_PAYLOAD};
 use crate::record_layer::{Decrypted, RecordLayer};
 use crate::recvbuf::RecvBufMap;
@@ -303,7 +303,7 @@ impl MessageDeframer {
                                 recv_buf.clone_buffer(buffer.get_slice(*offset, info.plain_len));
                                 self.processed_ranges.entry(conn_id)
                                     .or_insert_with(Vec::new)
-                                    .push(info.offset as usize..info.offset as usize+ info.plain_len);
+                                    .push(*offset - HEADER_SIZE..(*offset - HEADER_SIZE) + info.enc_len);
                                 recv_buf.offset += info.plain_len as u64;
                                 if info.fin == true {recv_buf.complete = true};
 

@@ -119,21 +119,18 @@ impl TlsServer {
         }
     }
 
-    pub fn verify_received(&mut self, recv_map: &mut RecvBufMap ) {
-
+    pub fn verify_received(&mut self, recv_map: &mut RecvBufMap) {
         let mut hash_index;
 
 
         for id in recv_map.readable() {
             let stream = recv_map.get_mut(id as u32).unwrap();
 
-            let received_len: usize = u16::from_be_bytes([stream.as_ref_consumed()[0], stream.as_ref_consumed()[1]]) as usize;
-            let unprocessed_len = stream.as_ref_consumed()[2..].len();
 
-            if received_len != unprocessed_len {
+
+            if !stream.complete {
                 continue
             }
-
 
 
             hash_index = match find_pattern(&stream.as_ref_consumed(), vec![0x0f, 0x0f, 0x0f, 0x0f].as_slice()) {
@@ -141,14 +138,16 @@ impl TlsServer {
                 None => panic!("hash prefix does not exist"),
             };
 
-            assert_eq!(&stream.as_ref_consumed()[hash_index..], self.calculate_sha256_hash(&stream.as_ref_consumed()[2..hash_index - 4]).as_ref());
+
+            assert_eq!(&stream.as_ref_consumed()[hash_index..], self.calculate_sha256_hash(&stream.as_ref_consumed()[..hash_index - 4]).as_ref());
             print!("\n \n Bytes received on stream {:?} : \n \n SHA-256 Hash {:?} \n Total length: {:?} \n",
-                id,
-                &stream.as_ref_consumed()[hash_index..].iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>(),
-                unprocessed_len);
+                   id,
+                   &stream.as_ref_consumed()[hash_index..].iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>(),
+                   stream.as_ref_consumed()[..hash_index - 4].len());
             stream.empty_stream();
             recv_map.remove_readable(id);
         }
+
     }
 
     fn calculate_sha256_hash(&mut self, data: &[u8]) -> digest::Digest {
@@ -190,7 +189,7 @@ impl TlsServer {
         // Reading some TLS data might have yielded new TLS
         // messages to process.  Errors from this indicate
         // TLS protocol problems and are fatal.
-        match self.tcpls_session.process_received(app_buffers, id as u32 ) {
+        match self.tcpls_session.process_received(app_buffers) {
             Ok(io_state) => io_state,
             Err(err) => {
                 println!("TLS error: {:?}", err);
