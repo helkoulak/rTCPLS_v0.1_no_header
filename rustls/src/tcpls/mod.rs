@@ -16,9 +16,11 @@ use crate::{CipherSuite, ClientConfig, ClientConnection,
             Connection, ContentType, Error, HandshakeType, InvalidMessage, IoState,
             NamedGroup, PeerMisbehaved, ProtocolVersion, ServerConfig, ServerConnection, Side, SignatureScheme};
 use crate::AlertDescription::IllegalParameter;
+use crate::common_state::OutboundTlsMessage;
 use crate::ContentType::ApplicationData;
 use crate::InvalidMessage::{InvalidContentType, InvalidEmptyPayload};
 use crate::msgs::codec;
+use crate::msgs::codec::Codec;
 use crate::msgs::enums::{Compression, ECPointFormat, ExtensionType};
 use crate::msgs::handshake::{ClientExtension, ClientHelloPayload,
                              HandshakeMessagePayload, HandshakePayload,
@@ -27,7 +29,7 @@ use crate::msgs::handshake::{ClientExtension, ClientHelloPayload,
 use crate::msgs::message::{InboundOpaqueMessage, Message, MessageError, MessagePayload, OutboundChunks, OutboundPlainMessage, PlainMessage};
 use crate::PeerMisbehaved::{InvalidTcplsJoinToken, TcplsJoinExtensionNotFound};
 use crate::recvbuf::RecvBufMap;
-use crate::tcpls::frame::MAX_TCPLS_FRAGMENT_LEN;
+use crate::tcpls::frame::{Frame, MAX_TCPLS_FRAGMENT_LEN};
 use crate::tcpls::network_address::AddressMap;
 use crate::tcpls::outstanding_conn::OutstandingTcpConn;
 use crate::tcpls::stream::{SimpleIdHashMap, SimpleIdHashSet, StreamIter};
@@ -253,32 +255,65 @@ impl TcplsSession {
 
 
             let mut stream_len = tls_conn.record_layer.streams.get_mut(id as u32).unwrap().send.len();
+
             let mut number_of_chunks = tls_conn.record_layer.streams.get_mut(id as u32).unwrap().send.chunk_number();
             let mut sent;
 
             while stream_len > 0 {
                 for conn_id in &conn_ids {
-                    let socket = &mut self.tcp_connections.get_mut(conn_id).unwrap().socket;
-                    let chunk = match tls_conn.record_layer.streams.get_mut(id as u32).unwrap().send.get_chunk() {
-                        Some(ch) => {
-                            ch
-                        },
-                        None => {
-                            stream_len = 0;
-                            break
-                        },
+                    let last_stream = self.tcp_connections.get(conn_id).unwrap().last_stream.clone();
+                    let next_type = tls_conn.record_layer.streams.get_mut(id as u32).unwrap().send.peek_next_type();
+                    let chunk = match last_stream {
+                        Some(last_id) if id != last_id as u64 && !tls_conn.is_handshaking() && next_type.is_some_and(|t| t == ApplicationData) => {
+                            stream_len += 13; //length of stream change frame
+                            self.tcp_connections.get_mut(conn_id).unwrap().last_stream = Some(id as u32);
+                            OutboundTlsMessage::new(
+                                ContentType::TcplsControl,
+                                ProtocolVersion::TLSv1_2,
+                                Self::send_stream_change_frame(
+                                    id as u32,
+                                    tls_conn.record_layer.streams.get_mut(id as u32).unwrap().send.get_current_offset(),
+                                ),
+                                true,
+                            )
+                        }
+
+                        None if !tls_conn.is_handshaking() && next_type.is_some_and(|t| t == ApplicationData) => {
+                            stream_len += 13;
+                            self.tcp_connections.get_mut(conn_id).unwrap().last_stream = Some(id as u32);
+                            OutboundTlsMessage::new(
+                                ContentType::TcplsControl,
+                                ProtocolVersion::TLSv1_2,
+                                Self::send_stream_change_frame(
+                                    id as u32,
+                                    tls_conn.record_layer.streams.get_mut(id as u32).unwrap().send.get_current_offset(),
+                                ),
+                                true,
+                            )
+                        }
+                        Some(_) | None => {
+                            if let Some(chunk) = tls_conn.record_layer.streams.get_mut(id as u32).unwrap().send.get_chunk() {
+                                number_of_chunks -= 1;
+                                chunk
+                            } else {
+                                // End of the stream, break out of the loop if no chunk
+                                stream_len = 0;
+                                break;
+                            }
+                        }
                     };
+
+                    let socket = &mut self.tcp_connections.get_mut(conn_id).unwrap().socket;
                     let typ = chunk.typ;
                     let encrypt = chunk.encrypt;
-                    let to_send_len= chunk.data.len();
+                    let to_send_len = chunk.data.len();
                     let data_to_send;
-                    number_of_chunks -= 1;
+
                     match encrypt {
                         true => {
                             tls_conn.set_connection_in_use(*conn_id as u32);
                             match typ {
                                 ContentType::ApplicationData => {
-
                                     if number_of_chunks == 0 {
                                         tls_conn.record_layer.streams.get_mut(id as u32).unwrap().send.fin = true;
                                     }
@@ -317,7 +352,6 @@ impl TcplsSession {
                         stream_len -= sent;
                         done += sent;
                     }
-
                 }
             }
 
@@ -448,6 +482,7 @@ impl TcplsSession {
             nbr_records_received: 0,
             is_primary: false,
             state: TcplsConnectionState::CONNECTED,
+            last_stream: None,
         });
     }
     fn handle_fake_client_hello(&mut self,  m: &Message, id: u64) -> Result<(), Error>{
@@ -541,6 +576,16 @@ impl TcplsSession {
         }
     }
 
+    pub fn send_stream_change_frame(stream_id: u32, offset: u64) -> Vec<u8> {
+        let mut buffer = vec![0u8; 13];
+        let mut b = octets::OctetsMut::with_slice(&mut buffer);
+        Frame::StreamChange {
+            next_record_stream_id: stream_id,
+            next_offset: offset,
+        }.encode(&mut b).unwrap();
+        buffer
+    }
+
 }
 
 
@@ -575,6 +620,7 @@ pub struct TcpConnection {
     pub is_primary: bool,
     // Is this connection the default one?
     pub state: TcplsConnectionState,
+    pub last_stream: Option<u32>,
 }
 
 impl TcpConnection {
@@ -588,6 +634,7 @@ impl TcpConnection {
             nbr_records_received: 0,
             is_primary: false,
             state,
+            last_stream: None,
         }
     }
 }

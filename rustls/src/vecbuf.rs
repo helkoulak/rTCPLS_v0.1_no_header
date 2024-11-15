@@ -83,6 +83,13 @@ impl ChunkVecBuffer {
         self.chunks.len()
     }
 
+    pub(crate) fn peek_next_type(&self) -> Option<ContentType> {
+        match self.chunks.front() {
+            Some(ch) => Some(ch.typ),
+            None => None
+        }
+    }
+
     /// For a proposed append of `len` bytes, how many
     /// bytes should we actually append to adhere to the
     /// currently set `limit`?

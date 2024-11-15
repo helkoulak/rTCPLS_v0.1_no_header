@@ -2,18 +2,21 @@ use alloc::boxed::Box;
 use core::fmt::Debug;
 use core::mem;
 use core::ops::{Deref, DerefMut};
+use std::collections::BTreeMap;
 #[cfg(feature = "std")]
 use std::io;
+use std::io::Read;
 use std::prelude::rust_2015::Vec;
+use std::println;
 use crate::common_state::{CommonState, Context, IoState, PlainBufsMap, State};
 use crate::enums::{AlertDescription, ContentType};
 use crate::error::{Error, PeerMisbehaved};
 #[cfg(feature = "logging")]
 use crate::log::trace;
 
-use crate::msgs::deframer::{Deframed, DeframerSliceBuffer, DeframerVecBuffer, MessageDeframer, MessageDeframerMap};
+use crate::msgs::deframer::{Deframed, DeframerSliceBuffer, DeframerVecBuffer, MessageDeframer, MessageDeframerMap, RangeBufInfo};
 use crate::msgs::handshake::Random;
-use crate::msgs::message::{InboundPlainMessage, Message, MessagePayload};
+use crate::msgs::message::{InboundPlainMessage, Message, MessagePayload, HEADER_SIZE};
 use crate::suites::{ExtractedSecrets, PartiallyExtractedSecrets};
 
 pub(crate) mod unbuffered;
@@ -365,6 +368,7 @@ use crate::recvbuf::{ReaderAppBufs, RecvBufMap};
 use crate::tcpls::stream::DEFAULT_STREAM_ID;
 #[cfg(feature = "std")]
 pub use connection::{Connection, Reader, Writer};
+use crate::tcpls::frame::{Frame, STREAM_FRAME_HEADER_SIZE};
 
 #[derive(Debug)]
 pub(crate) struct ConnectionRandoms {
@@ -591,7 +595,7 @@ impl<Data> ConnectionCommon<Data> {
     pub fn complete_io<T>(&mut self, io: &mut T, recv_map: Option<&mut RecvBufMap>) -> Result<(usize, usize), io::Error>
         where
             Self: Sized,
-            T: io::Read + io::Write,
+            T: Read + io::Write,
     {
 
         let empty_map = &mut RecvBufMap::new();
@@ -675,7 +679,7 @@ impl<Data> ConnectionCommon<Data> {
         let mut deframer_buffer = self.deframers_map.get_or_create_def_vec_buff(DEFAULT_STREAM_ID as u64).borrow();
         let res = self
             .core
-            .deframe(None, &mut deframer_buffer, Some(recv_buf))
+            .deframe(None, &mut deframer_buffer)
             .map(|opt| opt.map(|pm| Message::try_from(pm).map(|m| m.into_owned())));
         let discard = deframer_buffer.pending_discard();
         self.deframers_map.get_or_create_def_vec_buff(DEFAULT_STREAM_ID as u64).discard(0, discard);
@@ -712,7 +716,7 @@ impl<Data> ConnectionCommon<Data> {
     /// [`process_new_packets()`]: ConnectionCommon::process_new_packets
 
     /// [`reader()`]: ConnectionCommon::reader
-    pub fn read_tls(&mut self, rd: &mut dyn io::Read) -> Result<usize, io::Error> {
+    pub fn read_tls(&mut self, rd: &mut dyn Read) -> Result<usize, io::Error> {
         let active_conn = self.conn_in_use;
         if self.received_plaintext.is_full() {
             return Err(io::Error::new(
@@ -828,13 +832,13 @@ impl<Data> ConnectionCore<Data> {
         };
         self.common_state.record_layer.enc_dec_for_connection(self.common_state.conn_in_use);
         self.message_deframer.current_conn_id = self.common_state.conn_in_use as u64;
-        self.message_deframer.delete_processed();
+        self.message_deframer.delete_proc_record_info();
         self.message_deframer.discard_threshold = deframer_buffer.calculate_discard_threshold();
         loop {
 
             let mut borrowed_buffer = deframer_buffer.borrow();
             self.message_deframer.used = borrowed_buffer.get_used();
-            let res = self.deframe(Some(&*state), &mut borrowed_buffer, Some(app_buffers));
+            let res = self.deframe(Some(&*state), &mut borrowed_buffer);
 
             let opt_msg = match res {
                 Ok(opt_msg) => opt_msg,
@@ -849,9 +853,14 @@ impl<Data> ConnectionCore<Data> {
                 }
             };
 
+            self.process_tcpls_payload(app_buffers, &opt_msg, borrowed_buffer);
+
             let msg = match opt_msg {
                 Some(msg) => {
                     self.common_state.received_data_processed |= true;
+                    if msg.typ == ContentType::ApplicationData{
+                        continue
+                    }
                     msg
                 },
                 None => {
@@ -859,10 +868,6 @@ impl<Data> ConnectionCore<Data> {
                     break
                 },
             };
-
-            if msg.typ == ContentType::ApplicationData {
-                continue;
-            }
 
 
             match self.process_msg(msg, state, Some(sendable_plaintext)) {
@@ -893,47 +898,120 @@ impl<Data> ConnectionCore<Data> {
     }
 
 
-    ///TODO: Add process functionality to other TCPLS control frames
-    /*fn process_tcpls_payload(&mut self, app_buffers: &mut RecvBufMap) {
-        let app_buffer = app_buffers.get_mut(self.common_state.record_layer.get_conn_id()).unwrap();
-        let offset = app_buffer.get_offset();
+    fn process_tcpls_payload(&mut self, recv_map: &mut RecvBufMap, msg: &Option<InboundPlainMessage>, buffer: DeframerSliceBuffer) {
+        let conn_in_use = self.common_state.record_layer.get_conn_id() as u64;
+        let mut s: usize = 0;
+        let start = self.message_deframer.conn_current_off.get(&conn_in_use).unwrap().start;
+        let end = self.message_deframer.conn_current_off.get(&conn_in_use).unwrap().end;
 
-        let mut b = octets::Octets::with_slice_at_offset(app_buffer.as_ref(), offset as usize);
-        loop {
-            let decoded_frame = Frame::parse(&mut b).unwrap();
-            match decoded_frame {
-                Frame::Padding => {},
-                Frame::Ping => {},
-                Frame::Stream {
-                    length: _,
-                    offset: _,
-                    stream_id: _,
-                    fin: _,
-                } => {
-                    app_buffer.offset -= STREAM_FRAME_HEADER_SIZE as u64;
-                    app_buffer.total_decrypted = 0;
-                    break
-                },
-                Frame::ACK {
-                    highest_record_sn_received: _,
-                    connection_id: _,
-                } => {},
-                Frame::NewToken { token: _, sequence: _ } => {},
-                Frame::ConnectionReset { connection_id: _ } => {},
-                Frame::NewAddress {
-                    port: _,
-                    address: _,
-                    address_version: _,
-                    address_id: _,
-                } => {},
-                Frame::RemoveAddress { address_id: _ } => {},
-                Frame::StreamChange {
-                    next_record_stream_id: _,
-                    next_offset: _,
-                } => {},
+        if msg.is_some() && msg.as_ref().unwrap().typ == ContentType::ApplicationData {
+            let mut b = octets::Octets::with_slice_at_offset(msg.as_ref().unwrap().payload, msg.as_ref().unwrap().payload.len());
+            while b.off() > 0 {
+                let decoded_frame = Frame::parse(&mut b).unwrap();
+                match decoded_frame {
+                    Frame::Padding => {}
+                    Frame::Ping => {}
+                    Frame::Stream {
+                        length,
+                        offset,
+                        stream_id,
+                        fin,
+                    } => {
+                        recv_map.get_or_create(stream_id as u64, None);
+                        if recv_map.get_mut(stream_id).unwrap().offset != offset {
+                            self.message_deframer.record_info.entry(conn_in_use)
+                                .or_insert_with(BTreeMap::new)
+                                .insert(start + HEADER_SIZE, RangeBufInfo::from(offset, stream_id as u16,
+                                                                                length as usize, end - start, true, if fin == 1 { true } else { false },
+                                ));
+                        } else {
+                            recv_map.get_mut(stream_id).unwrap().clone_buffer(msg.as_ref().unwrap().payload);
+                            recv_map.insert_readable(stream_id as u64);
+                            recv_map.get_mut(stream_id).unwrap().offset += length as u64;
+                            recv_map.get_mut(stream_id).unwrap().complete = if fin == 1 { true } else { false };
+                            self.message_deframer.processed_ranges.entry(conn_in_use)
+                                .or_insert_with(Vec::new)
+                                .push(start..end);
+                        }
+                        break
+                    }
+                    Frame::ACK {
+                        highest_record_sn_received: _,
+                        connection_id: _,
+                    } => {}
+                    Frame::NewToken { token: _, sequence: _ } => {}
+                    Frame::ConnectionReset { connection_id: _ } => {}
+                    Frame::NewAddress {
+                        port: _,
+                        address: _,
+                        address_version: _,
+                        address_id: _,
+                    } => {}
+                    Frame::RemoveAddress { address_id: _ } => {}
+                    Frame::StreamChange {
+                        next_record_stream_id: _,
+                        next_offset: _,
+                    } => {
+                        self.message_deframer.processed_ranges.entry(conn_in_use)
+                        .or_insert_with(Vec::new)
+                        .push(start..end);
+                    }
+                }
+
             }
         }
-    }*/
+
+        s = match self.message_deframer.record_info.get_mut(&conn_in_use) {
+            // If no records exist for conn_id
+            None => {
+                self
+                    .message_deframer
+                    .processed_ranges
+                    .get(&conn_in_use)
+                    .map(|ranges| ranges.iter().map(|range| range.end).max().unwrap_or(0))
+                    .unwrap_or(0)
+            }
+
+            Some(records) if records.is_empty() => {
+                self
+                    .message_deframer
+                    .processed_ranges
+                    .get(&conn_in_use)
+                    .map(|ranges| ranges.iter().map(|range| range.end).max().unwrap_or(0))
+                    .unwrap_or(0)
+            }
+
+            // If records exist and are non-empty, check for a match or fallback to the last range's end
+            Some(records) => {
+                let mut next: usize = 0;
+                for (offset, info) in records.iter_mut() {
+                    if let Some(recv_buf) = recv_map.get_mut(info.id as u32) {
+                        if recv_buf.offset == info.offset {
+                            recv_buf.clone_buffer(buffer.get_slice(*offset, info.plain_len));
+                            self.message_deframer.processed_ranges.entry(conn_in_use)
+                                .or_insert_with(Vec::new)
+                                .push(*offset - HEADER_SIZE..(*offset - HEADER_SIZE) + info.enc_len);
+                            recv_buf.offset += info.plain_len as u64;
+                            if info.fin == true { recv_buf.complete = true };
+                        }
+                        next = (*offset - HEADER_SIZE) + info.enc_len;
+                    }
+                }
+
+                let last_processed_end = self
+                    .message_deframer
+                    .processed_ranges
+                    .get(&conn_in_use)
+                    .map(|ranges| ranges.iter().map(|range| range.end).max().unwrap_or(0))
+                    .unwrap_or(0);
+
+
+
+                core::cmp::max(next, last_processed_end)
+            }
+        };
+        self.message_deframer.conn_current_off.get_mut(&conn_in_use).unwrap().start = s;
+    }
 
     fn deframe_unbuffered<'b>(
         &mut self,
@@ -997,13 +1075,11 @@ impl<Data> ConnectionCore<Data> {
         &mut self,
         state: Option<&dyn State<Data>>,
         deframer_buffer: &mut DeframerSliceBuffer<'b>,
-        app_buffers: Option<&'b mut RecvBufMap>,
     ) -> Result<Option<InboundPlainMessage<'b>>, Error> {
         match self.message_deframer.pop(
             &mut self.common_state.record_layer,
             self.common_state.negotiated_version,
             deframer_buffer,
-            app_buffers.unwrap(),
         ) {
             Ok(Some(Deframed {
                 want_close_before_decrypt,

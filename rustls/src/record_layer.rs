@@ -132,10 +132,6 @@ impl RecordLayer {
     pub(crate) fn decrypt_incoming_tcpls<'a>(
         &mut self,
         encr: InboundOpaqueMessage<'a>,
-        recv_map: &'a mut RecvBufMap,
-        records_info_map: &mut SimpleIdHashMap<BTreeMap<usize, RangeBufInfo>>,
-        start: usize,
-        end: usize,
     ) -> Result<Option<Decrypted<'a>>, Error> {
         if self.decrypt_state != DirectionState::Active {
             return Ok(Some(Decrypted {
@@ -162,38 +158,7 @@ impl RecordLayer {
         {
             Ok(plaintext) => {
                 self.read_seq_map.get_or_create(self.conn_in_use as u64).read_seq += 1;
-                if plaintext.typ == ContentType::ApplicationData {
-                    let mut b = Octets::with_slice_reverse(plaintext.payload);
-                    let strm_hdr = Frame::parse(&mut b).unwrap();
-                    match strm_hdr {
-                        Frame::Stream {
-                            length,
-                            offset,
-                            stream_id,
-                            fin,
-                        } => {
-                            recv_map.get_or_create(stream_id as u64, None);
-                            if recv_map.get_mut(stream_id).unwrap().offset != offset {
-                                records_info_map.entry(self.conn_in_use as u64)
-                                    .or_insert_with(BTreeMap::new)
-                                    .insert(start + HEADER_SIZE, RangeBufInfo::from(offset, stream_id as u16,
-                                                                      length as usize, end - start, true, if fin == 1 { true } else { false },
-                                    ));
 
-                                return Err(Error::General("Record out of order".to_string()));
-                            } else {
-                                if recv_map.get_mut(stream_id).unwrap().capacity() < plaintext.payload.len() {
-                                    return Err(Error::BufferTooShort);
-                                }
-                                recv_map.get_mut(stream_id).unwrap().clone_buffer(plaintext.payload);
-                                recv_map.insert_readable(stream_id as u64);
-                                recv_map.get_mut(stream_id).unwrap().offset += length as u64;
-                                recv_map.get_mut(stream_id).unwrap().complete =  if fin == 1 { true } else { false };
-                            }
-                        }
-                        _ => {}
-                    };
-                }
                 if !self.has_decrypted {
                     self.has_decrypted = true;
                 }
@@ -534,8 +499,7 @@ mod tests {
                 ContentType::Handshake,
                 ProtocolVersion::TLSv1_2,
                 &mut [0xC0, 0xFF, 0xEE],
-            ), &mut app_buffs, &mut SimpleIdHashMap::default(), 0, 0,
-            )
+            ))
             .unwrap();
         assert!(matches!(record_layer.decrypt_state, DirectionState::Active));
         assert_eq!(record_layer.read_seq_map.get_or_create(0).read_seq, 1);

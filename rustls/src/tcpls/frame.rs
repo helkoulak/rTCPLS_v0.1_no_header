@@ -53,7 +53,7 @@ pub enum Frame {
     },
 
     StreamChange {
-        next_record_stream_id: u64,
+        next_record_stream_id: u32,
         next_offset: u64,
     },
 }
@@ -156,8 +156,8 @@ impl Frame {
                 next_record_stream_id,
                 next_offset,
             } => {
-                b.put_varint_reverse(*next_record_stream_id).unwrap();
-                b.put_varint_reverse(*next_offset).unwrap();
+                b.put_u32(*next_record_stream_id).unwrap();
+                b.put_u64(*next_offset).unwrap();
                 b.put_varint(0x09).unwrap();
             }
 
@@ -301,13 +301,13 @@ fn parse_remove_address_frame(b: &mut octets::Octets) -> octets::Result<Frame> {
 }
 
 fn parse_stream_change_frame(b: &mut octets::Octets) -> octets::Result<Frame> {
-    let next_offset = b.get_varint_reverse().unwrap();
+    let offset = b.get_u64_reverse().unwrap();
+    let stream_id = b.get_u32_reverse().unwrap();
 
-    let next_record_stream_id = b.get_varint_reverse().unwrap();
 
     Ok(Frame::StreamChange {
-        next_record_stream_id,
-        next_offset,
+        next_record_stream_id: stream_id,
+        next_offset: offset,
     })
 }
 #[derive(Default, PartialEq, Debug)]

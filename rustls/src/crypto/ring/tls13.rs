@@ -260,8 +260,14 @@ impl MessageEncrypter for Tls13MessageEncrypter {
                 ()
             },
             None => {
-                payload.extend_from_slice(&msg.typ.to_array());
-                ()
+                if msg.typ == ContentType::TcplsControl{
+                    payload.extend_from_slice(&ContentType::ApplicationData.to_array());
+                    ()
+                } else {
+                    payload.extend_from_slice(&msg.typ.to_array());
+                    ()
+                }
+
             },
         }
 
