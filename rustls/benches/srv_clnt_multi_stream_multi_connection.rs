@@ -114,16 +114,28 @@ where
     }
 }
 
+pub fn send_stream_change_frame(stream_id: u32, offset: u64) -> Vec<u8> {
+    let mut buffer = vec![0u8; 13];
+    let mut b = octets::OctetsMut::with_slice(&mut buffer);
+    Frame::StreamChange {
+        next_record_stream_id: stream_id,
+        next_offset: offset,
+    }.encode(&mut b).unwrap();
+    buffer
+}
+
 use criterion::{criterion_group, criterion_main, Criterion, Throughput, BenchmarkId, BatchSize};
 use pprof::criterion::{Output, PProfProfiler};
-use rustls::{Connection, ConnectionCommon, IoState, ServerConnection, SideData};
+use rustls::{Connection, ConnectionCommon, ContentType, IoState, ProtocolVersion, ServerConnection, SideData};
+
 use rustls::recvbuf::RecvBufMap;
 use rustls::tcpls::stream::SimpleIdHashSet;
 use rustls::tcpls::TcplsSession;
 use crate::bench_util::CPUTime;
 use rustls::crypto::{ring as provider, CryptoProvider};
+use rustls::crypto::cipher::{OutboundChunks, OutboundPlainMessage};
 use rustls::server::ServerConnectionData;
-use rustls::tcpls::frame::MAX_TCPLS_FRAGMENT_LEN;
+use rustls::tcpls::frame::{Frame, MAX_TCPLS_FRAGMENT_LEN};
 use crate::test_utils::{do_handshake, KeyType, make_pair, transfer};
 
 pub(crate) fn process_received(pipe: &mut OtherSession<ServerConnection,
@@ -151,7 +163,7 @@ fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
     let sendbuf2 = vec![2u8; data_len];
     let mut group = c.benchmark_group("Data_recv");
     group.throughput(Throughput::Bytes((data_len * 2) as u64));
-    group.bench_with_input(BenchmarkId::new("Data_recv_single_stream_multi_connection", data_len+data_len), &sendbuf1,
+    group.bench_with_input(BenchmarkId::new("Data_recv_multi_stream_multi_connection", data_len+data_len), &sendbuf1,
                            |b, sendbuf| {
 
                                b.iter_batched_ref(|| {
@@ -167,24 +179,54 @@ fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
                                    let mut pipe = OtherSession::new(server);
                                    let mut conn_id: u32 = 0;
                                    client.write_to = 1;
+                                   let mut last_stream: Vec<Option<u32>> = Vec::default();
+                                   let mut buf: Vec<u8> = Vec::default();
+
 
                                    // Write each chunk in a different deframer buffer to simulate multipath. Here we simulate sending
                                    // a single stream over three connections
                                    for chunk in sendbuf1.chunks(MAX_TCPLS_FRAGMENT_LEN).map(|chunk| chunk.to_vec()) {
                                        client.set_connection_in_use(conn_id);
                                        pipe.sess.set_connection_in_use(conn_id);
+                                       if last_stream.get(conn_id as usize).is_none() || last_stream.get(conn_id as usize).unwrap().unwrap() != 1 {
+                                           buf = send_stream_change_frame(1, 0);
+                                           let msg = OutboundPlainMessage {
+                                               typ: ContentType::TcplsControl,
+                                               version: ProtocolVersion::TLSv1_2,
+                                               payload: OutboundChunks::from(
+                                                   buf.as_slice()
+                                               ),
+                                           };
+                                           client.send_msg_enc_benchmark(msg);
+                                           pipe.write_all(client.get_encrypted_chunk_as_slice());
+                                           last_stream.insert(conn_id as usize, Some(1));
+                                       }
                                        client.writer().write(chunk.as_slice()).expect("Could not encrypt data");
                                        sent += pipe.write_all(client.get_encrypted_chunk_as_slice());
                                        conn_id += 1;
-                                       if conn_id == 3{
+                                       if conn_id == 3 {
                                            conn_id = 0;
                                        }
+
                                    }
                                    client.write_to = 2;
                                    conn_id = 0;
                                    for chunk in sendbuf2.chunks(MAX_TCPLS_FRAGMENT_LEN).map(|chunk| chunk.to_vec()) {
                                        client.set_connection_in_use(conn_id);
                                        pipe.sess.set_connection_in_use(conn_id);
+                                       if last_stream.get(conn_id as usize).is_none() || last_stream.get(conn_id as usize).unwrap().unwrap() != 1 {
+                                           buf = send_stream_change_frame(1, 0);
+                                           let msg = OutboundPlainMessage {
+                                               typ: ContentType::TcplsControl,
+                                               version: ProtocolVersion::TLSv1_2,
+                                               payload: OutboundChunks::from(
+                                                  buf.as_slice()
+                                               ),
+                                           };
+                                           client.send_msg_enc_benchmark(msg);
+                                           pipe.write_all(client.get_encrypted_chunk_as_slice());
+                                           last_stream.insert(conn_id as usize, Some(1));
+                                       }
                                        client.writer().write(chunk.as_slice()).expect("Could not encrypt data");
                                        sent += pipe.write_all(client.get_encrypted_chunk_as_slice());
                                        conn_id += 1;
@@ -223,4 +265,16 @@ criterion_group! {
         .sample_size(5000);
     targets = criterion_benchmark
 }
+
+/*criterion_group!{
+    name = benches;
+    config = Criterion::default()
+    .with_measurement(CPUTime)
+    .sample_size(5000)
+    .with_profiler({
+        let mut options = pprof::flamegraph::Options::default();
+        PProfProfiler::new(200, Output::Flamegraph(Some(options)))
+    });
+    targets = criterion_benchmark
+}*/
 criterion_main!(benches);

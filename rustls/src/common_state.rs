@@ -298,6 +298,10 @@ impl CommonState {
     }
 
 
+    pub fn send_msg_enc_benchmark(&mut self, m: OutboundPlainMessage) {
+        self.send_msg_encrypt(m);
+    }
+
     /// Fragment `m`, encrypt the fragments, and then queue
     /// the encrypted fragments for sending.
     pub(crate) fn send_msg_encrypt(&mut self, m: OutboundPlainMessage) {

@@ -760,7 +760,6 @@ impl DeframerVecBuffer {
         DeframerVecBuffer{
             id,
             cap: MAX_DEFRAMER_CAP,
-            buf: vec![0u8; MAX_DEFRAMER_CAP],
             ..Default::default()
         }
     }
@@ -790,8 +789,7 @@ impl DeframerVecBuffer {
             if (start + taken) == self.used {
                 self.used = start;
             } else {
-                Self::copy_within(self.buf.as_mut_slice(), start + taken ,start, (start + taken..self.used).len());
-                // self.buf.copy_within(start + taken..self.used, start);
+                self.buf.copy_within(start + taken..self.used, start);
                 self.used -= taken;
             }
 
@@ -801,7 +799,6 @@ impl DeframerVecBuffer {
     }
 
     pub fn set_deframer_cap(&mut self, cap: usize) {
-        self.buf.resize(cap, 0);
         self.cap = cap;
     }
     fn copy_within<T>(slice: &mut [T], src: usize, dst: usize, count: usize) {
@@ -826,10 +823,18 @@ impl DeframerVecBuffer {
 
     /// Resize the internal `buf` if necessary for reading more bytes.
     fn prepare_read(&mut self, _is_joining_hs: bool) -> Result<(), &'static str> {
-        let allow_max = self.buf.len();
 
-        if self.used >= allow_max {
+
+        if self.used >= self.cap {
             return Err("message buffer full");
+        }
+
+        let need_capacity = Ord::min(self.cap, self.used + READ_SIZE);
+        if need_capacity > self.buf.len() {
+            self.buf.resize(need_capacity, 0);
+        } else if self.used == 0 || self.buf.len() > self.cap {
+            self.buf.resize(need_capacity, 0);
+            self.buf.shrink_to(need_capacity);
         }
 
         Ok(())

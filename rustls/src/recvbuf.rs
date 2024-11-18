@@ -79,9 +79,9 @@ impl RecvBuf {
         & self.data[offset.. offset + self.last_decrypted]
     }
 
-    pub fn clone_buffer(&mut self, buffer: &[u8]){
+    pub fn copy_buffer(&mut self, buffer: &[u8]){
         let at = self.offset as usize;
-        self.data[at..at + buffer.len()].clone_from_slice(buffer);
+        self.data[at..at + buffer.len()].copy_from_slice(buffer);
     }
 
 

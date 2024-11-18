@@ -925,7 +925,7 @@ impl<Data> ConnectionCore<Data> {
                                                                                 length as usize, end - start, true, if fin == 1 { true } else { false },
                                 ));
                         } else {
-                            recv_map.get_mut(stream_id).unwrap().clone_buffer(msg.as_ref().unwrap().payload);
+                            recv_map.get_mut(stream_id).unwrap().copy_buffer(msg.as_ref().unwrap().payload);
                             recv_map.insert_readable(stream_id as u64);
                             recv_map.get_mut(stream_id).unwrap().offset += length as u64;
                             recv_map.get_mut(stream_id).unwrap().complete = if fin == 1 { true } else { false };
@@ -987,7 +987,7 @@ impl<Data> ConnectionCore<Data> {
                 for (offset, info) in records.iter_mut() {
                     if let Some(recv_buf) = recv_map.get_mut(info.id as u32) {
                         if recv_buf.offset == info.offset {
-                            recv_buf.clone_buffer(buffer.get_slice(*offset, info.plain_len));
+                            recv_buf.copy_buffer(buffer.get_slice(*offset, info.plain_len));
                             self.message_deframer.processed_ranges.entry(conn_in_use)
                                 .or_insert_with(Vec::new)
                                 .push(*offset - HEADER_SIZE..(*offset - HEADER_SIZE) + info.enc_len);
