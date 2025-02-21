@@ -3,10 +3,9 @@ extern crate serde_derive;
 
 use std::{fs, process};
 use std::io;
-use std::io::{BufReader, Read, Write};
+use std::io::BufReader;
 use std::net::ToSocketAddrs;
 use rustls::crypto::{ring as provider, CryptoProvider};
-use std::ops::{Deref, DerefMut};
 use std::str;
 use std::sync::Arc;
 use docopt::Docopt;
@@ -44,7 +43,7 @@ impl TlsClient {
     /// Handles events sent to the TlsClient by mio::Poll
     fn handle_event(&mut self, ev: &mio::event::Event, recv_map: &mut RecvBufMap) {
         let token = &ev.token();
-        let mut num_of_buf:u32 = 10000;
+        let num_of_buf:u32 = 10000;
         if ev.is_readable() {
             self.do_read(recv_map, token.0 as u64);
 
@@ -235,7 +234,6 @@ Options:
 #[derive(Debug, Deserialize)]
 struct Args {
     flag_port: Option<u16>,
-    flag_http: bool,
     flag_verbose: bool,
     flag_protover: Vec<String>,
     flag_suite: Vec<String>,

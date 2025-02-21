@@ -18,7 +18,7 @@ use ring::digest;
 use rustls::crypto::{CryptoProvider, ring as provider};
 use rustls::recvbuf::RecvBufMap;
 use rustls::RootCertStore;
-use rustls::tcpls::stream::SimpleIdHashSet;
+
 use rustls::tcpls::TcplsSession;
 
 const CONNECTION1: mio::Token = mio::Token(0);

@@ -114,7 +114,10 @@ impl ChunkVecBuffer {
     /// Take one of the chunks from this object.  This
     /// function panics if the object `is_empty`.
     pub(crate) fn pop(&mut self) -> Option<Vec<u8>> {
-        self.chunks.pop_front().unwrap().get_payload()
+        match self.chunks.pop_front(){
+            Some(mut chunk) => chunk.get_payload(),
+            None => None,
+        }
     }
 
     pub(crate) fn reset(&mut self) {

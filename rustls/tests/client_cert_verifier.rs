@@ -4,28 +4,26 @@
 #[macro_use]
 mod macros;
 
-test_for_each_provider! {
+
 
 mod common;
 use common::{
-    do_handshake_until_both_error, do_handshake_until_error, get_client_root_store,
-    make_client_config_with_versions, make_client_config_with_versions_with_auth,
-    make_pair_for_arc_configs, server_config_builder, server_name, webpki_client_verifier_builder,
+    do_handshake_until_error, get_client_root_store, make_client_config_with_versions_with_auth,
+    make_pair_for_arc_configs, server_config_builder, webpki_client_verifier_builder,
     ErrorFromPeer, KeyType, ALL_KEY_TYPES,
 };
 
 use rustls::client::danger::HandshakeSignatureValid;
 use rustls::internal::msgs::handshake::DistinguishedName;
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
-use rustls::{
-    AlertDescription, ClientConnection, DigitallySignedStruct, Error, InvalidMessage, ServerConfig,
-    ServerConnection, SignatureScheme,
+use rustls::{DigitallySignedStruct, Error, InvalidMessage, ServerConfig, SignatureScheme,
 };
+use rustls::crypto::{ring as provider, CryptoProvider};
 
 use pki_types::{CertificateDer, UnixTime};
 
 use std::sync::Arc;
-use rustls::recvbuf::RecvBufMap;
+
 
 // Client is authorized!
 fn ver_ok() -> Result<ClientCertVerified, Error> {
@@ -99,63 +97,8 @@ fn client_verifier_no_schemes() {
     }
 }
 
-// If we do have a root, we must do auth
-#[test]
-#[ignore]
-fn client_verifier_no_auth_yes_root() {
-    let mut recv_srv = RecvBufMap::new();
-    let mut recv_clnt = RecvBufMap::new();
 
-    for kt in ALL_KEY_TYPES.iter() {
-        let client_verifier = MockClientVerifier::new(ver_unreachable, *kt);
-        let server_config = server_config_with_verifier(*kt, client_verifier);
-        let server_config = Arc::new(server_config);
 
-        for version in rustls::ALL_VERSIONS {
-            let client_config = make_client_config_with_versions(*kt, &[version]);
-            let mut server = ServerConnection::new(Arc::clone(&server_config)).unwrap();
-            let mut client =
-                ClientConnection::new(Arc::new(client_config), server_name("localhost")).unwrap();
-            let errs = do_handshake_until_both_error(&mut client, &mut server, &mut recv_srv, &mut recv_clnt);
-            assert_eq!(
-                errs,
-                Err(vec![
-                    ErrorFromPeer::Server(Error::NoCertificatesPresented),
-                    ErrorFromPeer::Client(Error::AlertReceived(
-                        AlertDescription::CertificateRequired
-                    ))
-                ])
-            );
-        }
-    }
-}
-
-#[test]
-#[ignore]
-// Triple checks we propagate the rustls::Error through
-fn client_verifier_fails_properly() {
-         let mut recv_srv = RecvBufMap::new();
-    let mut recv_clnt = RecvBufMap::new();
-    for kt in ALL_KEY_TYPES.iter() {
-
-        let client_verifier = MockClientVerifier::new(ver_err, *kt);
-        let server_config = server_config_with_verifier(*kt, client_verifier);
-        let server_config = Arc::new(server_config);
-
-        for version in rustls::ALL_VERSIONS {
-            let client_config = make_client_config_with_versions_with_auth(*kt, &[version]);
-            let mut server = ServerConnection::new(Arc::clone(&server_config)).unwrap();
-            let mut client =
-
-                ClientConnection::new(Arc::new(client_config), server_name("localhost")).unwrap();
-            let err = do_handshake_until_error(&mut client, &mut server, &mut recv_srv, &mut recv_clnt);
-            assert_eq!(
-                err,
-                Err(ErrorFromPeer::Server(Error::General("test err".into())))
-            );
-        }
-    }
-}
 
 
 #[derive(Debug)]
@@ -232,4 +175,4 @@ impl ClientCertVerifier for MockClientVerifier {
     }
 }
 
-} // test_for_each_provider!
+

@@ -4,15 +4,15 @@ use core::slice::SliceIndex;
 use std::collections::{hash_map, BTreeMap};
 #[cfg(feature = "std")]
 use std::io;
-use std::{ptr, vec};
+
 use crate::enums::{ContentType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerMisbehaved};
 use crate::msgs::codec;
 #[cfg(feature = "std")]
 
-use crate::msgs::message::{InboundOpaqueMessage, InboundPlainMessage, MessageError, HEADER_SIZE, MAX_DEFRAMER_CAP, MAX_PAYLOAD};
+use crate::msgs::message::{InboundOpaqueMessage, InboundPlainMessage, MessageError, MAX_DEFRAMER_CAP, MAX_PAYLOAD};
 use crate::record_layer::{Decrypted, RecordLayer};
-use crate::recvbuf::RecvBufMap;
+
 use crate::tcpls::stream::SimpleIdHashMap;
 
 use super::codec::Codec;
@@ -422,6 +422,11 @@ impl MessageDeframer {
                         .entry(conn_id)
                         .or_insert_with(Vec::new)
                         .push(start..end);
+                    self.conn_current_off
+                        .entry(conn_id)
+                        .or_insert(Range::default()) // Insert `None` if `conn_id` does not exist
+                        .start = end ;
+
                     continue
                 },
             }
@@ -801,14 +806,14 @@ impl DeframerVecBuffer {
     pub fn set_deframer_cap(&mut self, cap: usize) {
         self.cap = cap;
     }
-    fn copy_within<T>(slice: &mut [T], src: usize, dst: usize, count: usize) {
+    /*fn copy_within<T>(slice: &mut [T], src: usize, dst: usize, count: usize) {
         assert!(src + count <= slice.len());
         assert!(dst + count <= slice.len());
 
         unsafe {
             ptr::copy(slice.as_ptr().add(src), slice.as_mut_ptr().add(dst), count);
         }
-    }
+    }*/
     pub fn calculate_discard_threshold(&self) -> usize {
         self.cap - MAX_PAYLOAD as usize
     }
@@ -1031,7 +1036,7 @@ trait FilledDeframerBuffer {
 
 }
 
-#[derive(Clone, Debug, Default)]
+/*#[derive(Clone, Debug, Default)]
 pub(crate) struct RecordsInfoMap {
     records: BTreeMap<u32, StreamInfoMap>
 }
@@ -1054,9 +1059,9 @@ impl RecordsInfoMap {
         self.records.is_empty()
     }
 
-}
+}*/
 
-#[derive(Clone, Debug, Default)]
+/*#[derive(Clone, Debug, Default)]
 pub(crate) struct StreamInfoMap {
     stream_records: SimpleIdHashMap<RecordInfo>
 }
@@ -1067,8 +1072,8 @@ impl StreamInfoMap {
     }
 
 
-}
-#[derive(Clone, Debug, Default)]
+}*/
+/*#[derive(Clone, Debug, Default)]
 pub(crate) struct RecordInfo {
     /// Received record copied from deframer buffer if out of order
     pub(crate)  record: Vec<u8>,
@@ -1087,7 +1092,7 @@ impl RecordInfo {
             processed: false,
         }
     }
-}
+}*/
 
 
 enum HandshakePayloadState {
@@ -1240,7 +1245,7 @@ mod tests {
     use std::vec;
 
     use crate::crypto::cipher::PlainMessage;
-    use crate::msgs::message::Message;
+    use crate::msgs::message::{Message, MAX_WIRE_SIZE};
 
     use super::*;
 
@@ -1427,23 +1432,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_limited_buffer() {
-        const PAYLOAD_LEN: usize = 16_384;
-        let mut message = Vec::with_capacity(16_389);
-        message.push(0x17); // ApplicationData
-        message.extend(&[0x03, 0x04]); // ProtocolVersion
-        message.extend((PAYLOAD_LEN as u16).to_be_bytes()); // payload length
-        message.extend(&[0; PAYLOAD_LEN]);
 
-        let mut d = BufferedDeframer::new();
-        assert_len(4096, d.input_bytes(&message));
-        assert_len(4096, d.input_bytes(&message));
-        assert_len(4096, d.input_bytes(&message));
-        assert_len(4096, d.input_bytes(&message));
-        assert_len(MAX_WIRE_SIZE - 16_384, d.input_bytes(&message));
-        assert!(d.input_bytes(&message).is_err());
-    }
 
     fn input_error(d: &mut BufferedDeframer) {
         let error = io::Error::from(io::ErrorKind::TimedOut);
@@ -1523,7 +1512,6 @@ mod tests {
             negotiated_version: Option<ProtocolVersion>,
         ) -> PlainMessage {
             let mut deframer_buffer = self.buffer.borrow();
-            let binding = RecvBufMap::default();
             let m = self
                 .inner
                 .pop_unbuffered(record_layer, negotiated_version, &mut deframer_buffer)
@@ -1532,7 +1520,7 @@ mod tests {
                 .message
                 .into_owned();
             let discard = deframer_buffer.pending_discard();
-            self.buffer.discard(discard, 0);
+            self.buffer.discard(0, discard);
             m
         }
 

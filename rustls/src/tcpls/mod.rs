@@ -20,7 +20,6 @@ use crate::common_state::OutboundTlsMessage;
 use crate::ContentType::ApplicationData;
 use crate::InvalidMessage::{InvalidContentType, InvalidEmptyPayload};
 use crate::msgs::codec;
-use crate::msgs::codec::Codec;
 use crate::msgs::enums::{Compression, ECPointFormat, ExtensionType};
 use crate::msgs::handshake::{ClientExtension, ClientHelloPayload,
                              HandshakeMessagePayload, HandshakePayload,

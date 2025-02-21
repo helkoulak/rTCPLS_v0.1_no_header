@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::io;
 use std::io::Read;
 use std::prelude::rust_2015::Vec;
-use std::println;
+
 use crate::common_state::{CommonState, Context, IoState, PlainBufsMap, State};
 use crate::enums::{AlertDescription, ContentType};
 use crate::error::{Error, PeerMisbehaved};
@@ -368,7 +368,7 @@ use crate::recvbuf::{ReaderAppBufs, RecvBufMap};
 use crate::tcpls::stream::DEFAULT_STREAM_ID;
 #[cfg(feature = "std")]
 pub use connection::{Connection, Reader, Writer};
-use crate::tcpls::frame::{Frame, STREAM_FRAME_HEADER_SIZE};
+use crate::tcpls::frame::Frame;
 
 #[derive(Debug)]
 pub(crate) struct ConnectionRandoms {
@@ -675,7 +675,7 @@ impl<Data> ConnectionCommon<Data> {
     /// This is a shortcut to the `process_new_packets()` -> `process_msg()` ->
     /// `process_handshake_messages()` path, specialized for the first handshake message.
 
-    pub(crate) fn first_handshake_message(&mut self, recv_buf: &mut RecvBufMap) -> Result<Option<Message<'static>>, Error> {
+    pub(crate) fn first_handshake_message(&mut self, _recv_buf: &mut RecvBufMap) -> Result<Option<Message<'static>>, Error> {
         let mut deframer_buffer = self.deframers_map.get_or_create_def_vec_buff(DEFAULT_STREAM_ID as u64).borrow();
         let res = self
             .core
@@ -900,9 +900,12 @@ impl<Data> ConnectionCore<Data> {
 
     fn process_tcpls_payload(&mut self, recv_map: &mut RecvBufMap, msg: &Option<InboundPlainMessage>, buffer: DeframerSliceBuffer) {
         let conn_in_use = self.common_state.record_layer.get_conn_id() as u64;
-        let mut s: usize = 0;
-        let start = self.message_deframer.conn_current_off.get(&conn_in_use).unwrap().start;
-        let end = self.message_deframer.conn_current_off.get(&conn_in_use).unwrap().end;
+        let s;
+        let r = match self.message_deframer.conn_current_off.get_mut(&conn_in_use) {
+            Some(ra) => ra,
+            None => return,
+        };
+
 
         if msg.is_some() && msg.as_ref().unwrap().typ == ContentType::ApplicationData {
             let mut b = octets::Octets::with_slice_at_offset(msg.as_ref().unwrap().payload, msg.as_ref().unwrap().payload.len());
@@ -921,8 +924,8 @@ impl<Data> ConnectionCore<Data> {
                         if recv_map.get_mut(stream_id).unwrap().offset != offset {
                             self.message_deframer.record_info.entry(conn_in_use)
                                 .or_insert_with(BTreeMap::new)
-                                .insert(start + HEADER_SIZE, RangeBufInfo::from(offset, stream_id as u16,
-                                                                                length as usize, end - start, true, if fin == 1 { true } else { false },
+                                .insert(r.start + HEADER_SIZE, RangeBufInfo::from(offset, stream_id as u16,
+                                                                                length as usize, r.end - r.start, true, if fin == 1 { true } else { false },
                                 ));
                         } else {
                             recv_map.get_mut(stream_id).unwrap().copy_buffer(msg.as_ref().unwrap().payload);
@@ -931,7 +934,7 @@ impl<Data> ConnectionCore<Data> {
                             recv_map.get_mut(stream_id).unwrap().complete = if fin == 1 { true } else { false };
                             self.message_deframer.processed_ranges.entry(conn_in_use)
                                 .or_insert_with(Vec::new)
-                                .push(start..end);
+                                .push(r.start..r.end);
                         }
                         break
                     }
@@ -954,7 +957,7 @@ impl<Data> ConnectionCore<Data> {
                     } => {
                         self.message_deframer.processed_ranges.entry(conn_in_use)
                         .or_insert_with(Vec::new)
-                        .push(start..end);
+                        .push(r.start..r.end);
                     }
                 }
 
@@ -1010,7 +1013,7 @@ impl<Data> ConnectionCore<Data> {
                 core::cmp::max(next, last_processed_end)
             }
         };
-        self.message_deframer.conn_current_off.get_mut(&conn_in_use).unwrap().start = s;
+        r.start = s;
     }
 
     fn deframe_unbuffered<'b>(

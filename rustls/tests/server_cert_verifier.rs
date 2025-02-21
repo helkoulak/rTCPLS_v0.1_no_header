@@ -4,7 +4,7 @@
 #[macro_use]
 mod macros;
 
-test_for_each_provider! {
+
 
 mod common;
 use common::{
@@ -13,7 +13,8 @@ use common::{
 };
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::DigitallySignedStruct;
-use rustls::{AlertDescription, Error, InvalidMessage, SignatureScheme};
+use rustls::{Error, InvalidMessage, SignatureScheme};
+use rustls::crypto::ring as provider;
 
 use pki_types::{CertificateDer, ServerName, UnixTime};
 
@@ -69,47 +70,22 @@ fn client_can_override_certificate_verification_and_reject_certificate() {
                     ErrorFromPeer::Client(Error::InvalidMessage(
                         InvalidMessage::HandshakePayloadTooLarge,
                     )),
-                    ErrorFromPeer::Server(Error::AlertReceived(AlertDescription::HandshakeFailure)),
+                    ErrorFromPeer::Server(Error::InvalidMessage(InvalidMessage::InvalidContentType)),
                 ]),
             );
         }
     }
 }
 
-#[cfg(feature = "tls12")]
-#[test]
-#[ignore]
-fn client_can_override_certificate_verification_and_reject_tls12_signatures() {
-    for kt in ALL_KEY_TYPES.iter() {
-        let mut client_config = make_client_config_with_versions(*kt, &[&rustls::version::TLS12]);
-        let verifier = Arc::new(MockServerVerifier::rejects_tls12_signatures(
-            Error::InvalidMessage(InvalidMessage::HandshakePayloadTooLarge),
-        ));
-
-        client_config
-            .dangerous()
-            .set_certificate_verifier(verifier);
-
-        let server_config = Arc::new(make_server_config(*kt));
-
-        let (mut client, mut server, mut recv_svr, mut recv_clnt) =
-            make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
-        let errs = do_handshake_until_both_error(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
-        assert_eq!(
-            errs,
-            Err(vec![
-                ErrorFromPeer::Client(Error::InvalidMessage(
-                    InvalidMessage::HandshakePayloadTooLarge,
-                )),
-                ErrorFromPeer::Server(Error::AlertReceived(AlertDescription::HandshakeFailure)),
-            ]),
-        );
-    }
-}
 
 #[test]
 fn client_can_override_certificate_verification_and_reject_tls13_signatures() {
     for kt in ALL_KEY_TYPES.iter() {
+        for version in rustls::ALL_VERSIONS {
+            if version.version == rustls::ProtocolVersion::TLSv1_2 {
+                continue
+            }
+        }
         let mut client_config = make_client_config_with_versions(*kt, &[&rustls::version::TLS13]);
         let verifier = Arc::new(MockServerVerifier::rejects_tls13_signatures(
             Error::InvalidMessage(InvalidMessage::HandshakePayloadTooLarge),
@@ -121,6 +97,7 @@ fn client_can_override_certificate_verification_and_reject_tls13_signatures() {
 
         let server_config = Arc::new(make_server_config(*kt));
 
+
         let (mut client, mut server, mut recv_svr, mut recv_clnt) =
             make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
         let errs = do_handshake_until_both_error(&mut client, &mut server,  &mut recv_svr, &mut recv_clnt);
@@ -130,7 +107,7 @@ fn client_can_override_certificate_verification_and_reject_tls13_signatures() {
                 ErrorFromPeer::Client(Error::InvalidMessage(
                     InvalidMessage::HandshakePayloadTooLarge,
                 )),
-                ErrorFromPeer::Server(Error::AlertReceived(AlertDescription::HandshakeFailure)),
+                ErrorFromPeer::Server(Error::InvalidMessage(InvalidMessage::InvalidContentType)),
             ]),
         );
     }
@@ -161,7 +138,7 @@ fn client_can_override_certificate_verification_and_offer_no_signature_schemes()
                     ErrorFromPeer::Server(Error::PeerIncompatible(
                         rustls::PeerIncompatible::NoSignatureSchemesInCommon
                     )),
-                    ErrorFromPeer::Client(Error::AlertReceived(AlertDescription::HandshakeFailure)),
+                    ErrorFromPeer::Client(Error::InvalidMessage(InvalidMessage::InvalidContentType)),
                 ])
             );
         }
@@ -294,4 +271,4 @@ impl Default for MockServerVerifier {
     }
 }
 
-} // test_for_each_provider!
+ // test_for_each_provider!

@@ -1,17 +1,15 @@
 use alloc::boxed::Box;
 use core::num::NonZeroU64;
-use std::collections::{hash_map, BTreeMap};
-use std::prelude::rust_2015::ToString;
-use octets::Octets;
+use std::collections::hash_map;
 
-use crate::ContentType;
+
 use crate::crypto::cipher::{InboundOpaqueMessage, MessageDecrypter, MessageEncrypter};
 use crate::error::Error;
 #[cfg(feature = "logging")]
 use crate::log::trace;
-use crate::msgs::deframer::{RangeBufInfo, RecordsInfoMap};
-use crate::msgs::message::{InboundPlainMessage, OutboundOpaqueMessage, OutboundPlainMessage, HEADER_SIZE};
-use crate::recvbuf::RecvBufMap;
+
+use crate::msgs::message::{InboundPlainMessage, OutboundOpaqueMessage, OutboundPlainMessage};
+
 use crate::tcpls::frame::Frame;
 use crate::tcpls::stream::{SimpleIdHashMap, StreamMap};
 
@@ -439,7 +437,7 @@ impl ReadSeq {
 #[cfg(test)]
 mod tests {
     use crate::ContentType::ApplicationData;
-    use crate::recvbuf::RecvBufMap;
+
     use super::*;
 
     #[test]
@@ -465,7 +463,6 @@ mod tests {
             }
         }
 
-        let mut app_buffs = RecvBufMap::new();
 
         // A record layer starts out invalid, having never decrypted.
         let mut record_layer = RecordLayer::new();

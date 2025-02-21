@@ -4,13 +4,11 @@ use std::net;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process;
+
 use std::str;
 use std::thread;
 use std::time;
 
-use self::regex::Regex;
-use regex;
 
 use ring::rand::SecureRandom;
 
@@ -262,7 +260,7 @@ impl TlsClient {
         self
     }
 
-    pub fn go(&mut self) -> Option<()> {
+    /*pub fn go(&mut self) -> Option<()> {
         let fragstring;
         let portstring = self.port.to_string();
         let mut args = Vec::<&str>::new();
@@ -351,5 +349,5 @@ impl TlsClient {
         }
 
         Some(())
-    }
+    }*/
 }

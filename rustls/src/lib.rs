@@ -322,7 +322,6 @@
     unreachable_pub,
     unused_import_braces,
     unused_extern_crates,
-    unused_qualifications
 )]
 // Relax these clippy lints:
 // - ptr_arg: this triggers on references to type aliases that are Vec
@@ -339,7 +338,8 @@
     clippy::new_ret_no_self,
     clippy::ptr_arg,
     clippy::single_component_path_imports,
-    clippy::new_without_default
+    clippy::new_without_default,
+    unexpected_cfgs
 )]
 // Enable documentation for all features on docs.rs
 

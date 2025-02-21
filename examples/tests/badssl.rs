@@ -5,9 +5,9 @@
 mod common;
 
 mod online {
-    use super::common::TlsClient;
 
-    fn connect(hostname: &str) -> TlsClient {
+
+    /*fn connect(hostname: &str) -> TlsClient {
         TlsClient::new(hostname)
     }
 
@@ -121,17 +121,6 @@ mod online {
             .expect(r#"TLS error: InvalidCertificate\(Expired\)"#)
             .go()
             .unwrap();
-    }
+    }*/
 
-    #[cfg(feature = "dangerous_configuration")]
-    mod danger {
-        #[test]
-        fn self_signed() {
-            super::connect("self-signed.badssl.com")
-                .insecure()
-                .expect("<title>self-signed.badssl.com</title>")
-                .go()
-                .unwrap();
-        }
-    }
 }

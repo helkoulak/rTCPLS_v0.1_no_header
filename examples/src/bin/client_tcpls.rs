@@ -18,7 +18,6 @@ use ring::digest;
 use rustls::crypto::{CryptoProvider, ring as provider};
 use rustls::recvbuf::RecvBufMap;
 use rustls::RootCertStore;
-use rustls::tcpls::stream::SimpleIdHashSet;
 use rustls::tcpls::TcplsSession;
 
 const CLIENT: Token = Token(0);
@@ -52,7 +51,6 @@ impl TlsClient {
 
             if !self.tcpls_session.tls_conn.as_ref().unwrap().is_handshaking() && !self.data_sent {
                 //Send three byte arrays on three streams
-                let mut id_set = SimpleIdHashSet::default();
 
                 self.send_data(vec![0u8; 60000].as_slice(), 0).expect("");
                 self.send_data(vec![1u8; 60000].as_slice(), 1).expect("");

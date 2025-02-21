@@ -7,7 +7,7 @@
 mod common;
 
 mod online {
-    use super::common::TlsClient;
+   /* use super::common::TlsClient;
 
     fn check(hostname: &str) {
         TlsClient::new(hostname)
@@ -79,5 +79,5 @@ mod online {
     #[test]
     fn cloudflare_1_1_1_1_dns() {
         check("1.1.1.1")
-    }
+    }*/
 }

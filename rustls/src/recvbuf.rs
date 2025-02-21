@@ -184,7 +184,7 @@ impl RecvBuf {
         match self.is_empty() {
             true => {
                 to_read_length = cmp::min(buf.len(), self.get_last_decrypted().len());
-                buf[..to_read_length].copy_from_slice(&self.get_last_decrypted()[..to_read_length]);
+                 buf[..to_read_length].copy_from_slice(&self.get_last_decrypted()[..to_read_length]);
             },
 
             false => {

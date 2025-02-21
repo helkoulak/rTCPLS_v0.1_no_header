@@ -2,7 +2,6 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use std::collections::hash_map;
-
 use pki_types::CertificateDer;
 
 use crate::enums::{AlertDescription, ContentType, HandshakeType, ProtocolVersion};
@@ -131,6 +130,10 @@ impl CommonState {
     /// [`Connection::process_new_packets()`]: crate::Connection::process_new_packets
     pub fn is_handshaking(&self) -> bool {
         !(self.may_send_application_data && self.may_receive_application_data)
+    }
+
+    pub fn buffer_encrypted_chunk(&mut self, id: u32) {
+        self.queue_message(ContentType::ApplicationData, ProtocolVersion::TLSv1_2, self.encrypted_chunk.clone(), id, false);
     }
 
     /// Retrieves the certificate chain used by the peer to authenticate.

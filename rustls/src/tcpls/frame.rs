@@ -372,7 +372,7 @@ impl TcplsHeader {
 
 #[test]
 fn test_encode_decode_stream_frame() {
-    let mut buf = [0; 3];
+    let mut buf = [0; 15];
 
     let stream_frame = Frame::Stream {
         length: 24,
@@ -438,17 +438,11 @@ fn test_parse_new_address_frame() {
 
     let v4_frame = Frame::NewAddress {
         port: 9874,
-        address: vec![0x0A, 0x00, 0x00, 0x0C],
+        address: std::vec![0x0A, 0x00, 0x00, 0x0C],
         address_version: 0x04,
         address_id: 47854755,
     };
 
-    #[test]
-    fn test_reduce_offset_size() {
-
-
-
-    }
 
     let mut d = octets::OctetsMut::with_slice(&mut v4);
 
@@ -464,7 +458,7 @@ fn test_parse_new_address_frame() {
 
     let v6_frame = Frame::NewAddress {
         port: 987455,
-        address: vec![
+        address: std::vec![
             0x0A, 0x00, 0x00, 0x0C, 0x0A, 0x00, 0x00, 0x0C, 0x0A, 0x00, 0x00, 0x0C, 0x0A, 0x00,
             0x00, 0x0C,
         ],

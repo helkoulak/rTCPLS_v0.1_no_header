@@ -29,7 +29,6 @@ struct TlsClient {
     clean_closure: bool,
     tcpls_session: TcplsSession,
     all_joined: bool,
-    sending_ids: SimpleIdHashSet,
     poll: mio::Poll,
     data_sent: bool,
 }
@@ -41,7 +40,6 @@ impl TlsClient {
             clean_closure: false,
             tcpls_session: TcplsSession::new(false),
             all_joined: false,
-            sending_ids: SimpleIdHashSet::default(),
             poll: mio::Poll::new().unwrap(),
             data_sent: false,
         }
@@ -65,7 +63,7 @@ impl TlsClient {
                 if self.tcpls_session.tcp_connections.len() == 3 &&
                     !self.data_sent
                 {
-                    let mut num_of_buf:u32 = 10000;
+                    let num_of_buf:u32 = 10000;
                     //Send three byte arrays on three streams
                     let mut id_set = SimpleIdHashSet::default();
                     for i in 0..num_of_buf {
@@ -252,7 +250,7 @@ impl TlsClient {
             Err(ref error) => if error.kind() == io::ErrorKind::WouldBlock {
                 return;
             },
-            Err(error) => panic!("{:?}", error),
+           /* Err(error) => panic!("{:?}", error),*/
         }
 
         match self.tcpls_session.process_join_request(id) {
