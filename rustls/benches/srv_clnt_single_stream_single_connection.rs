@@ -13,10 +13,9 @@ struct OtherSession<C, S>
     sess: C,
     pub reads: usize,
     pub writevs: Vec<Vec<usize>>,
-    fail_ok: bool,
+
     pub short_writes: bool,
-    pub last_error: Option<rustls::Error>,
-    pub recv_map: RecvBufMap,
+
 }
 
 impl<C, S> OtherSession<C, S>
@@ -29,18 +28,13 @@ impl<C, S> OtherSession<C, S>
             sess,
             reads: 0,
             writevs: vec![],
-            fail_ok: false,
+
             short_writes: false,
-            last_error: None,
-            recv_map: RecvBufMap::new(),
+
         }
     }
 
-    fn new_fails(sess: C) -> OtherSession<C, S> {
-        let mut os = OtherSession::new(sess);
-        os.fail_ok = true;
-        os
-    }
+
     fn write_all(&mut self, mut buf: &[u8]) -> usize {
         let mut sent = 0;
         while !buf.is_empty() {
@@ -52,7 +46,7 @@ impl<C, S> OtherSession<C, S>
                     buf = &buf[n..];
                     sent += n;
                 },
-                Err(e) => panic!("Something wrong"),
+                Err(_e) => panic!("Something wrong"),
             }
         }
         sent
@@ -76,7 +70,7 @@ impl<C, S> io::Write for OtherSession<C, S>
         S: SideData,
 {
     fn write(&mut self, input: &[u8]) -> io::Result<usize> {
-        let mut buf = input.clone();
+        let mut buf = input;
         self.sess.read_tls(&mut buf)
 
     }
@@ -115,20 +109,17 @@ impl<C, S> io::Write for OtherSession<C, S>
 }
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput, BenchmarkId, BatchSize};
-use pprof::criterion::{Output, PProfProfiler};
-use rustls::{Connection, ConnectionCommon, IoState, ServerConnection, SideData};
-use rustls::recvbuf::RecvBufMap;
-use rustls::tcpls::stream::SimpleIdHashSet;
-use rustls::tcpls::TcplsSession;
+use rustls::{ ConnectionCommon, SideData};
+
+
 use crate::bench_util::CPUTime;
-use rustls::crypto::{ring as provider, CryptoProvider};
-use rustls::server::ServerConnectionData;
+use rustls::crypto::ring as provider;
 use rustls::tcpls::frame::MAX_TCPLS_FRAGMENT_LEN;
-use crate::test_utils::{do_handshake, KeyType, make_pair, transfer};
+use crate::test_utils::{do_handshake, KeyType, make_pair};
 
 mod bench_util;
 fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
-    let data_len= 1024 * 1024 * 1024;
+    let data_len= 600 * MAX_TCPLS_FRAGMENT_LEN;
     let sendbuf = vec![1u8; data_len];
     let mut group = c.benchmark_group("Data_recv");
     group.throughput(Throughput::Bytes(data_len as u64));
@@ -140,21 +131,19 @@ fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
                                    let (mut client, mut server, mut recv_svr, mut recv_clnt) =
                                        make_pair(KeyType::Rsa);
                                    do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
-                                   server.set_deframer_cap(0, 2 * 1024 * 1024 * 1024);
+                                   server.set_deframer_cap(0, 700 * MAX_TCPLS_FRAGMENT_LEN);
 
-
-                                   let mut sent: usize = 0;
                                    let mut pipe = OtherSession::new(server);
 
                                    client.write_to = 1;
                                    for chunk in sendbuf.chunks(MAX_TCPLS_FRAGMENT_LEN).map(|chunk| chunk.to_vec()) {
                                        client.writer().write(chunk.as_slice()).expect("Could not write data to stream");
-                                       sent += pipe.write_all(client.get_encrypted_chunk_as_slice());
+                                       pipe.write_all(client.get_encrypted_chunk_as_slice());
 
                                    }
 
                                    // Create app receive buffer
-                                   recv_svr.get_or_create(1, Some(2 * 1024 * 1024 * 1024));
+                                   recv_svr.get_or_create(1, Some(700 * MAX_TCPLS_FRAGMENT_LEN));
                                    (pipe, recv_svr)
                                },
 

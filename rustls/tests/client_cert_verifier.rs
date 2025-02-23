@@ -18,7 +18,7 @@ use rustls::internal::msgs::handshake::DistinguishedName;
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
 use rustls::{DigitallySignedStruct, Error, InvalidMessage, ServerConfig, SignatureScheme,
 };
-use rustls::crypto::{ring as provider, CryptoProvider};
+use rustls::crypto::ring as provider;
 
 use pki_types::{CertificateDer, UnixTime};
 
@@ -31,14 +31,14 @@ fn ver_ok() -> Result<ClientCertVerified, Error> {
 }
 
 // Use when we shouldn't even attempt verification
-fn ver_unreachable() -> Result<ClientCertVerified, Error> {
+/*fn ver_unreachable() -> Result<ClientCertVerified, Error> {
     unreachable!()
-}
+}*/
 
 // Verifier that returns an error that we can expect
-fn ver_err() -> Result<ClientCertVerified, Error> {
+/*fn ver_err() -> Result<ClientCertVerified, Error> {
     Err(Error::General("test err".to_string()))
-}
+}*/
 
 fn server_config_with_verifier(
     kt: KeyType,

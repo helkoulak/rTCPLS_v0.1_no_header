@@ -1,5 +1,5 @@
 use std::io;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::ops::{Deref, DerefMut};
 
 
@@ -13,10 +13,7 @@ where
     sess: C,
     pub reads: usize,
     pub writevs: Vec<Vec<usize>>,
-    fail_ok: bool,
     pub short_writes: bool,
-    pub last_error: Option<rustls::Error>,
-    pub recv_map: RecvBufMap,
 }
 
 impl<C, S> OtherSession<C, S>
@@ -29,18 +26,13 @@ where
             sess,
             reads: 0,
             writevs: vec![],
-            fail_ok: false,
+
             short_writes: false,
-            last_error: None,
-            recv_map: RecvBufMap::new(),
+
         }
     }
 
-    fn new_fails(sess: C) -> OtherSession<C, S> {
-        let mut os = OtherSession::new(sess);
-        os.fail_ok = true;
-        os
-    }
+
     fn write_all(&mut self, mut buf: &[u8]) -> usize {
         let mut sent = 0;
         while !buf.is_empty() {
@@ -52,7 +44,7 @@ where
                     buf = &buf[n..];
                     sent += n;
                 },
-                Err(e) => panic!("Something wrong"),
+                Err(_e) => panic!("Something wrong"),
             }
         }
         sent
@@ -76,7 +68,7 @@ where
     S: SideData,
 {
     fn write(&mut self, input: &[u8]) -> io::Result<usize> {
-        let mut buf = input.clone();
+        let mut buf = input;
         self.sess.read_tls(&mut buf)
 
     }
@@ -125,18 +117,17 @@ pub fn send_stream_change_frame(stream_id: u32, offset: u64) -> Vec<u8> {
 }
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput, BenchmarkId, BatchSize};
-use pprof::criterion::{Output, PProfProfiler};
-use rustls::{Connection, ConnectionCommon, ContentType, IoState, ProtocolVersion, ServerConnection, SideData};
+
+use rustls::{ConnectionCommon, ContentType, ProtocolVersion, ServerConnection, SideData};
 
 use rustls::recvbuf::RecvBufMap;
-use rustls::tcpls::stream::SimpleIdHashSet;
-use rustls::tcpls::TcplsSession;
+
 use crate::bench_util::CPUTime;
-use rustls::crypto::{ring as provider, CryptoProvider};
+use rustls::crypto::ring as provider;
 use rustls::crypto::cipher::{OutboundChunks, OutboundPlainMessage};
 use rustls::server::ServerConnectionData;
 use rustls::tcpls::frame::{Frame, MAX_TCPLS_FRAGMENT_LEN};
-use crate::test_utils::{do_handshake, KeyType, make_pair, transfer};
+use crate::test_utils::{do_handshake, KeyType, make_pair};
 
 pub(crate) fn process_received(pipe: &mut OtherSession<ServerConnection,
     ServerConnectionData>, app_bufs: &mut RecvBufMap, data_len: u64) {
@@ -164,7 +155,7 @@ fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
     let mut group = c.benchmark_group("Data_recv");
     group.throughput(Throughput::Bytes((data_len * 2) as u64));
     group.bench_with_input(BenchmarkId::new("Data_recv_multi_stream_multi_connection", data_len+data_len), &sendbuf1,
-                           |b, sendbuf| {
+                           |b, _sendbuf| {
 
                                b.iter_batched_ref(|| {
                                    // Finish handshake
@@ -175,12 +166,11 @@ fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
                                    server.set_deframer_cap(1, capacity);
                                    server.set_deframer_cap(2, capacity);
 
-                                   let mut sent: usize = 0;
                                    let mut pipe = OtherSession::new(server);
                                    let mut conn_id: u32 = 0;
                                    client.write_to = 1;
                                    let mut last_stream: Vec<Option<u32>> = Vec::default();
-                                   let mut buf: Vec<u8> = Vec::default();
+                                   let mut buf: Vec<u8>;
 
 
                                    // Write each chunk in a different deframer buffer to simulate multipath. Here we simulate sending
@@ -202,7 +192,7 @@ fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
                                            last_stream.insert(conn_id as usize, Some(1));
                                        }
                                        client.writer().write(chunk.as_slice()).expect("Could not encrypt data");
-                                       sent += pipe.write_all(client.get_encrypted_chunk_as_slice());
+                                       pipe.write_all(client.get_encrypted_chunk_as_slice());
                                        conn_id += 1;
                                        if conn_id == 3 {
                                            conn_id = 0;
@@ -228,7 +218,7 @@ fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
                                            last_stream.insert(conn_id as usize, Some(1));
                                        }
                                        client.writer().write(chunk.as_slice()).expect("Could not encrypt data");
-                                       sent += pipe.write_all(client.get_encrypted_chunk_as_slice());
+                                       pipe.write_all(client.get_encrypted_chunk_as_slice());
                                        conn_id += 1;
                                        if conn_id == 3{
                                            conn_id = 0;

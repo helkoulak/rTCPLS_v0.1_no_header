@@ -1245,7 +1245,7 @@ mod tests {
     use std::vec;
 
     use crate::crypto::cipher::PlainMessage;
-    use crate::msgs::message::{Message, MAX_WIRE_SIZE};
+    use crate::msgs::message::Message;
 
     use super::*;
 
