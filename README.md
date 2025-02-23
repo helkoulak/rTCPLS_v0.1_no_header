@@ -17,7 +17,7 @@ the draft [TCPLS IETF draft](https://datatracker.ietf.org/doc/draft-piraux-tcpls
 # Building the code
 To build the code, simply execute the following commands:
 ```
-git clone https://gitlab.unamur.be/phd-elkoulak/rtcpls_v0.1_no_header.git
+git clone https://forge.infosec.unamur.be/phd-elkoulak/r-tcpls-v-0-1-no-header.git
 cd r-tcpls-v-0-1-no-header
 git checkout master
 $ cargo build --release
