@@ -131,8 +131,8 @@ use crate::test_utils::{do_handshake, KeyType, make_pair};
 
 pub(crate) fn process_received(pipe: &mut OtherSession<ServerConnection,
     ServerConnectionData>, app_bufs: &mut RecvBufMap, data_len: u64) {
-    let conn_ids: Vec<u32> = vec![0,1,2];
-    let stream_ids: Vec<u32> = vec![1,2];
+    let conn_ids: Vec<u32> = vec![0,1];
+    let stream_ids: Vec<u32> = vec![1];
     for str_id in stream_ids {
         loop {
             for id in &conn_ids {
@@ -148,13 +148,12 @@ pub(crate) fn process_received(pipe: &mut OtherSession<ServerConnection,
 
 mod bench_util;
 fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
-    let data_len= 300 * MAX_TCPLS_FRAGMENT_LEN;
-    let capacity = 400 * MAX_TCPLS_FRAGMENT_LEN;
+    let data_len= 600 * MAX_TCPLS_FRAGMENT_LEN;
+    let capacity = 700 * MAX_TCPLS_FRAGMENT_LEN;
     let sendbuf1 = vec![1u8; data_len];
-    let sendbuf2 = vec![2u8; data_len];
     let mut group = c.benchmark_group("Data_recv");
-    group.throughput(Throughput::Bytes((data_len * 2) as u64));
-    group.bench_with_input(BenchmarkId::new("Data_recv_multi_stream_multi_connection", data_len+data_len), &sendbuf1,
+    group.throughput(Throughput::Bytes((data_len) as u64));
+    group.bench_with_input(BenchmarkId::new("Data_recv_single_stream_two_connection", data_len), &sendbuf1,
                            |b, _sendbuf| {
 
                                b.iter_batched_ref(|| {
@@ -164,7 +163,6 @@ fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
                                    do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
                                    server.set_deframer_cap(0, capacity);
                                    server.set_deframer_cap(1, capacity);
-                                   server.set_deframer_cap(2, capacity);
 
                                    let mut pipe = OtherSession::new(server);
                                    let mut conn_id: u32 = 0;
@@ -174,7 +172,7 @@ fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
 
 
                                    // Write each chunk in a different deframer buffer to simulate multipath. Here we simulate sending
-                                   // a single stream over three connections
+                                   // a single stream over two connections
                                    for chunk in sendbuf1.chunks(MAX_TCPLS_FRAGMENT_LEN).map(|chunk| chunk.to_vec()) {
                                        client.set_connection_in_use(conn_id);
                                        pipe.sess.set_connection_in_use(conn_id);
@@ -194,39 +192,13 @@ fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
                                        client.writer().write(chunk.as_slice()).expect("Could not encrypt data");
                                        pipe.write_all(client.get_encrypted_chunk_as_slice());
                                        conn_id += 1;
-                                       if conn_id == 3 {
+                                       if conn_id == 2 {
                                            conn_id = 0;
                                        }
 
                                    }
-                                   client.write_to = 2;
-                                   conn_id = 0;
-                                   for chunk in sendbuf2.chunks(MAX_TCPLS_FRAGMENT_LEN).map(|chunk| chunk.to_vec()) {
-                                       client.set_connection_in_use(conn_id);
-                                       pipe.sess.set_connection_in_use(conn_id);
-                                       if last_stream.get(conn_id as usize).is_none() || last_stream.get(conn_id as usize).unwrap().unwrap() != 1 {
-                                           buf = send_stream_change_frame(1, 0);
-                                           let msg = OutboundPlainMessage {
-                                               typ: ContentType::TcplsControl,
-                                               version: ProtocolVersion::TLSv1_2,
-                                               payload: OutboundChunks::from(
-                                                  buf.as_slice()
-                                               ),
-                                           };
-                                           client.send_msg_enc_benchmark(msg);
-                                           pipe.write_all(client.get_encrypted_chunk_as_slice());
-                                           last_stream.insert(conn_id as usize, Some(1));
-                                       }
-                                       client.writer().write(chunk.as_slice()).expect("Could not encrypt data");
-                                       pipe.write_all(client.get_encrypted_chunk_as_slice());
-                                       conn_id += 1;
-                                       if conn_id == 3{
-                                           conn_id = 0;
-                                       }
-                                   }
                                    // Create app receive buffer
                                    recv_svr.get_or_create(1, Some(capacity));
-                                   recv_svr.get_or_create(2, Some(capacity));
                                    (pipe, recv_svr)
                                },
 
