@@ -108,18 +108,27 @@ impl<C, S> io::Write for OtherSession<C, S>
     }
 }
 
+pub(crate) fn process_received(pipe: &mut OtherSession<ServerConnection,
+    ServerConnectionData>, app_bufs: &mut RecvBufMap) {
+    let data_len= 50 * MAX_TCPLS_FRAGMENT_LEN;
+    pipe.sess.process_new_packets(app_bufs).unwrap();
+    if app_bufs.get(1).unwrap().data_length() >= data_len as u64 { return;} else { panic!("Stream was not fully received")}
+}
+
 use criterion::{criterion_group, criterion_main, Criterion, Throughput, BenchmarkId, BatchSize};
-use rustls::{ ConnectionCommon, SideData};
+use rustls::{ConnectionCommon, ServerConnection, SideData};
 
 
 use crate::bench_util::CPUTime;
 use rustls::crypto::ring as provider;
+use rustls::recvbuf::RecvBufMap;
+use rustls::server::ServerConnectionData;
 use rustls::tcpls::frame::MAX_TCPLS_FRAGMENT_LEN;
 use crate::test_utils::{do_handshake, KeyType, make_pair};
 
 mod bench_util;
 fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
-    let data_len= 600 * MAX_TCPLS_FRAGMENT_LEN;
+    let data_len= 50 * MAX_TCPLS_FRAGMENT_LEN;
     let sendbuf = vec![1u8; data_len];
     let mut group = c.benchmark_group("Data_recv");
     group.throughput(Throughput::Bytes(data_len as u64));
@@ -131,7 +140,7 @@ fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
                                    let (mut client, mut server, mut recv_svr, mut recv_clnt) =
                                        make_pair(KeyType::Rsa);
                                    do_handshake(&mut client, &mut server, &mut recv_svr, &mut recv_clnt);
-                                   server.set_deframer_cap(0, 700 * MAX_TCPLS_FRAGMENT_LEN);
+                                   server.set_deframer_cap(0, 70 * MAX_TCPLS_FRAGMENT_LEN);
 
                                    let mut pipe = OtherSession::new(server);
 
@@ -143,11 +152,11 @@ fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
                                    }
 
                                    // Create app receive buffer
-                                   recv_svr.get_or_create(1, Some(700 * MAX_TCPLS_FRAGMENT_LEN));
+                                   recv_svr.get_or_create(1, Some(70 * MAX_TCPLS_FRAGMENT_LEN));
                                    (pipe, recv_svr)
                                },
 
-                                                  |(ref mut pipe, recv_svr)| pipe.sess.process_new_packets(recv_svr).unwrap(),
+                                                  |(ref mut pipe, recv_svr)| process_received(pipe, recv_svr),
                                                   BatchSize::SmallInput)
                            });
     group.finish();
@@ -167,9 +176,9 @@ criterion_main!(benches);*/
 criterion_group! {
     name = benches;
     config = Criterion::default()
-        .measurement_time(std::time::Duration::from_secs(200))
+        .measurement_time(std::time::Duration::from_secs(1))
         .with_measurement(CPUTime)
-        .sample_size(10);
+        .sample_size(5000);
     targets = criterion_benchmark
 }
 criterion_main!(benches);

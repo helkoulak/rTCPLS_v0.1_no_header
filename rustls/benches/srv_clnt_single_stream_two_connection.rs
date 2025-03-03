@@ -148,8 +148,8 @@ pub(crate) fn process_received(pipe: &mut OtherSession<ServerConnection,
 
 mod bench_util;
 fn criterion_benchmark(c: &mut Criterion<CPUTime>) {
-    let data_len= 600 * MAX_TCPLS_FRAGMENT_LEN;
-    let capacity = 700 * MAX_TCPLS_FRAGMENT_LEN;
+    let data_len= 50 * MAX_TCPLS_FRAGMENT_LEN;
+    let capacity = 70 * MAX_TCPLS_FRAGMENT_LEN;
     let sendbuf1 = vec![1u8; data_len];
     let mut group = c.benchmark_group("Data_recv");
     group.throughput(Throughput::Bytes((data_len) as u64));
